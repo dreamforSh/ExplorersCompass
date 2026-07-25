@@ -1,9 +1,10 @@
 package com.chaosthedude.explorerscompass.util;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -15,8 +16,10 @@ import org.apache.commons.lang3.text.WordUtils;
 
 import com.chaosthedude.explorerscompass.ExplorersCompass;
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
+import com.chaosthedude.explorerscompass.config.StructureGroupsConfig;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ListMultimap;
+import com.google.common.collect.Multimaps;
 
 import net.minecraft.Util;
 import net.minecraft.client.resources.language.I18n;
@@ -25,6 +28,7 @@ import net.minecraft.core.Holder;
 import net.minecraft.core.Registry;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.biome.Biome;
@@ -52,16 +56,43 @@ public class StructureUtils {
 	private static List<String> cachedBlacklist;
 	private static List<Pattern> cachedBlacklistPatterns;
 
+	// The structure data the compass syncs and searches is derived from the worldgen registries,
+	// which are fixed for the lifetime of a server, so it is computed once and reused: rebuilding
+	// it walks every structure set and matches every structure against the blacklist and the custom
+	// groups, which is far too much to repeat on every use of the compass. The blacklist is part of
+	// the key because its config file can be edited while the server runs. Only ever touched from
+	// the server thread.
+	private static MinecraftServer cachedServer;
+	private static List<String> cachedSyncBlacklist;
+	private static List<ResourceLocation> cachedAllowedStructureKeys;
+	private static ListMultimap<ResourceLocation, ResourceLocation> cachedDimensionKeys;
+	private static Map<ResourceLocation, ResourceLocation> cachedStructureKeysToTypeKeys;
+	private static int cachedDataVersion;
+
 	/**
-	 * Maps the key of every structure in the level to the key of the structure set it belongs to, or
-	 * to {@link #NO_TYPE_KEY} when it belongs to none. Walks the structure sets once and inverts
-	 * them, rather than scanning all of them again for every structure the way
-	 * {@link #getTypeForStructure} has to.
+	 * Maps the key of every structure in the level to the key of the group it belongs to: the group
+	 * configured for it in {@code groups.json} when there is one, otherwise the structure set it
+	 * belongs to, or {@link #NO_TYPE_KEY} when it belongs to neither. The returned map is shared
+	 * and must not be modified.
 	 */
 	public static Map<ResourceLocation, ResourceLocation> getStructureKeysToTypeKeys(ServerLevel level) {
+		refreshCachedStructureData(level);
+		return cachedStructureKeysToTypeKeys;
+	}
+
+	private static Map<ResourceLocation, ResourceLocation> computeStructureKeysToTypeKeys(ServerLevel level) {
 		final Registry<Structure> structureRegistry = getStructureRegistry(level);
 		final Registry<StructureSet> setRegistry = getStructureSetRegistry(level);
 		final Map<ResourceLocation, ResourceLocation> structureKeysToTypeKeys = new HashMap<ResourceLocation, ResourceLocation>();
+
+		// Groups configured in groups.json take priority over the structure sets
+		for (Structure structure : structureRegistry) {
+			final ResourceLocation structureKey = structureRegistry.getKey(structure);
+			final ResourceLocation customGroupKey = StructureGroupsConfig.getGroupForStructure(structureKey);
+			if (structureKey != null && customGroupKey != null) {
+				structureKeysToTypeKeys.put(structureKey, customGroupKey);
+			}
+		}
 
 		for (StructureSet set : setRegistry) {
 			final ResourceLocation setKey = setRegistry.getKey(set);
@@ -74,7 +105,7 @@ public class StructureUtils {
 
 				final ResourceLocation structureKey = structureRegistry.getKey(entry.structure().value());
 				if (structureKey != null && setKey != null) {
-					// The first set that lists a structure wins, matching getTypeForStructure
+					// The first set that lists a structure wins
 					structureKeysToTypeKeys.putIfAbsent(structureKey, setKey);
 				}
 			}
@@ -101,25 +132,6 @@ public class StructureUtils {
 		return structureKeys;
 	}
 
-	/**
-	 * Returns the key of the structure set the given structure belongs to, or {@link #NO_TYPE_KEY}
-	 * when it belongs to none. Prefer {@link #getStructureKeysToTypeKeys} when resolving more than a
-	 * few structures.
-	 */
-	public static ResourceLocation getTypeForStructure(ServerLevel level, Structure structure) {
-		Registry<StructureSet> registry = getStructureSetRegistry(level);
-		for (StructureSet set : registry) {
-			for (StructureSelectionEntry entry : set.structures()) {
-				// A structure set from a data pack can reference a structure that failed to load, and reading
-				// the value of such a holder throws instead of returning null
-				if (entry.structure().isBound() && entry.structure().value().equals(structure)) {
-					return registry.getKey(set);
-				}
-			}
-		}
-		return NO_TYPE_KEY;
-	}
-
 	public static ResourceLocation getKeyForStructure(ServerLevel level, Structure structure) {
 		return getStructureRegistry(level).getKey(structure);
 	}
@@ -136,7 +148,13 @@ public class StructureUtils {
 		return null;
 	}
 
+	/** The keys of every structure the compass may search for. The returned list is shared and must not be modified. */
 	public static List<ResourceLocation> getAllowedStructureKeys(ServerLevel level) {
+		refreshCachedStructureData(level);
+		return cachedAllowedStructureKeys;
+	}
+
+	private static List<ResourceLocation> computeAllowedStructureKeys(ServerLevel level) {
 		final List<ResourceLocation> structures = new ArrayList<ResourceLocation>();
 		for (Structure structure : getStructureRegistry(level)) {
 			final ResourceLocation structureKey = getKeyForStructure(level, structure);
@@ -145,6 +163,35 @@ public class StructureUtils {
 			}
 		}
 		return structures;
+	}
+
+	/**
+	 * Recomputes the cached structure data when the server, or the blacklist it was built under,
+	 * has changed since the last time.
+	 */
+	private static void refreshCachedStructureData(ServerLevel level) {
+		final MinecraftServer server = level.getServer();
+		final List<String> blacklist = ConfigHandler.GENERAL.structureBlacklist.get();
+		if (server == cachedServer && blacklist.equals(cachedSyncBlacklist)) {
+			return;
+		}
+
+		final List<ResourceLocation> allowedKeys = computeAllowedStructureKeys(level);
+		cachedAllowedStructureKeys = Collections.unmodifiableList(allowedKeys);
+		cachedDimensionKeys = Multimaps.unmodifiableListMultimap(computeGeneratingDimensionsForAllowedStructures(level, allowedKeys));
+		cachedStructureKeysToTypeKeys = Collections.unmodifiableMap(computeStructureKeysToTypeKeys(level));
+		cachedServer = server;
+		cachedSyncBlacklist = new ArrayList<String>(blacklist);
+		cachedDataVersion++;
+	}
+
+	/**
+	 * Identifies the current contents of the cached structure data. A client that was already sent
+	 * data of this version has the current list and does not need it re-sent.
+	 */
+	public static int getStructureDataVersion(ServerLevel level) {
+		refreshCachedStructureData(level);
+		return cachedDataVersion;
 	}
 
 	public static boolean structureIsBlacklisted(ServerLevel level, Structure structure) {
@@ -162,15 +209,20 @@ public class StructureUtils {
 		return false;
 	}
 
-	public static List<ResourceLocation> getGeneratingDimensionKeys(ServerLevel serverLevel, Structure structure) {
-		return getGeneratingDimensionKeys(serverLevel, structure, getBiomesPerDimension(serverLevel));
+	/**
+	 * The dimensions each allowed structure can generate in. The returned multimap is shared and
+	 * must not be modified.
+	 */
+	public static ListMultimap<ResourceLocation, ResourceLocation> getGeneratingDimensionsForAllowedStructures(ServerLevel serverLevel) {
+		refreshCachedStructureData(serverLevel);
+		return cachedDimensionKeys;
 	}
 
-	public static ListMultimap<ResourceLocation, ResourceLocation> getGeneratingDimensionsForAllowedStructures(ServerLevel serverLevel) {
+	private static ListMultimap<ResourceLocation, ResourceLocation> computeGeneratingDimensionsForAllowedStructures(ServerLevel serverLevel, List<ResourceLocation> allowedStructureKeys) {
 		// Collect the biomes of each dimension once, instead of once per structure
 		final Map<ResourceLocation, Set<Holder<Biome>>> biomesPerDimension = getBiomesPerDimension(serverLevel);
 		final ListMultimap<ResourceLocation, ResourceLocation> dimensionsForAllowedStructures = ArrayListMultimap.create();
-		for (ResourceLocation structureKey : getAllowedStructureKeys(serverLevel)) {
+		for (ResourceLocation structureKey : allowedStructureKeys) {
 			final Structure structure = getStructureForKey(serverLevel, structureKey);
 			if (structure != null) {
 				dimensionsForAllowedStructures.putAll(structureKey, getGeneratingDimensionKeys(serverLevel, structure, biomesPerDimension));
@@ -231,18 +283,38 @@ public class StructureUtils {
 		if (key == null) {
 			return "";
 		}
-		String name = key.toString();
 		if (ConfigHandler.CLIENT.translateStructureNames.get()) {
-			name = I18n.get(Util.makeDescriptionId("structure", key));
-		}
-		if (name.equals(Util.makeDescriptionId("structure", key)) || !ConfigHandler.CLIENT.translateStructureNames.get()) {
-			name = key.toString();
-			if (name.contains(":")) {
-				name = name.substring(name.indexOf(":") + 1);
+			final String translationKey = Util.makeDescriptionId("structure", key);
+			final String name = I18n.get(translationKey);
+			if (!name.equals(translationKey)) {
+				return name;
 			}
-			name = WordUtils.capitalize(name.replace('_', ' '));
 		}
-		return name;
+		return getBasicStructureName(key);
+	}
+
+	/**
+	 * Display name derived from the key alone. Unlike {@link #getPrettyStructureName} this does not
+	 * consult translations, so it is also safe to use on the server.
+	 */
+	public static String getBasicStructureName(ResourceLocation key) {
+		if (key == null) {
+			return "";
+		}
+		return WordUtils.capitalize(key.getPath().replace('_', ' '));
+	}
+
+	/**
+	 * Display name of a group: the name its {@code groups.json} entry configured, when there is
+	 * one, and whatever the group key displays as otherwise.
+	 */
+	@OnlyIn(Dist.CLIENT)
+	public static String getPrettyGroupName(ResourceLocation typeKey) {
+		final String customName = ExplorersCompass.groupNames.get(typeKey);
+		if (customName != null) {
+			return customName;
+		}
+		return getPrettyStructureName(typeKey);
 	}
 
 	@OnlyIn(Dist.CLIENT)
@@ -264,13 +336,14 @@ public class StructureUtils {
 
 	@OnlyIn(Dist.CLIENT)
 	public static String dimensionKeysToString(List<ResourceLocation> dimensions) {
-		Set<String> dimensionNames = new HashSet<String>();
+		// Linked, so that the dimensions always display in the order the server sent them in
+		Set<String> dimensionNames = new LinkedHashSet<String>();
 		dimensions.forEach((key) -> dimensionNames.add(getDimensionName(key)));
 		return String.join(", ", dimensionNames);
 	}
 
 	@OnlyIn(Dist.CLIENT)
-	private static String getDimensionName(ResourceLocation dimensionKey) {
+	public static String getDimensionName(ResourceLocation dimensionKey) {
 		String name = I18n.get(Util.makeDescriptionId("dimension", dimensionKey));
 		if (name.equals(Util.makeDescriptionId("dimension", dimensionKey))) {
 			name = dimensionKey.toString();
@@ -317,7 +390,7 @@ public class StructureUtils {
 	 * exactly one, into an equivalent regular expression. Every other character is matched
 	 * literally.
 	 */
-	private static String convertToRegex(String glob) {
+	public static String convertToRegex(String glob) {
 		final StringBuilder regex = new StringBuilder(glob.length() + 2).append('^');
 		for (int i = 0; i < glob.length(); i++) {
 			final char c = glob.charAt(i);

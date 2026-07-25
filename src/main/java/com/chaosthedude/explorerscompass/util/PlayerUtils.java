@@ -10,7 +10,7 @@ import net.minecraft.world.level.storage.ServerLevelData;
 public class PlayerUtils {
 
 	public static boolean canTeleport(MinecraftServer server, Player player) {
-		return cheatModeEnabled(server, player) || isOp(player);
+		return player.isCreative() || cheatModeEnabled(server, player) || isOp(player);
 	}
 
 	public static boolean cheatModeEnabled(MinecraftServer server, Player player) {

@@ -2,7 +2,6 @@ package com.chaosthedude.explorerscompass.worker;
 
 import java.util.List;
 
-import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.mojang.datafixers.util.Pair;
 
 import net.minecraft.core.BlockPos;
@@ -116,7 +115,7 @@ public class RandomSpreadSearchWorker extends StructureSearchWorker<RandomSpread
 		// configured radius keeps the reported value from overshooting it, and still ends the search on
 		// the ring that reaches it.
 		final int covered = Math.max(0, SectionPos.sectionToBlockCoord((length - 1) * spacing));
-		return Math.min(covered, ConfigHandler.GENERAL.maxRadius.get());
+		return Math.min(covered, maxRadius);
 	}
 
 	@Override

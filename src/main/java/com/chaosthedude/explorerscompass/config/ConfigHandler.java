@@ -26,6 +26,7 @@ public class ConfigHandler {
 		public final ForgeConfigSpec.ConfigValue<List<String>> structureBlacklist;
 		public final ForgeConfigSpec.IntValue maxSamples;
 		public final ForgeConfigSpec.IntValue maxSearchTimePerTick;
+		public final ForgeConfigSpec.IntValue searchRequestCooldownMillis;
 
 		General(ForgeConfigSpec.Builder builder) {
 			String desc;
@@ -51,6 +52,9 @@ public class ConfigHandler {
 
 			desc = "The maximum amount of time in milliseconds that a search may spend on the server thread during a single tick. Sampling a location can be expensive, so this caps how much of each tick a search is allowed to consume. Lower values keep the game responsive while a search is running, higher values complete searches sooner.";
 			maxSearchTimePerTick = builder.comment(desc).defineInRange("maxSearchTimePerTick", 10, 1, 50);
+
+			desc = "The minimum time in milliseconds between searches started by the same player. Search requests arriving faster than this are ignored. This guards against modified clients restarting expensive searches as fast as they can send packets. Set to 0 to disable.";
+			searchRequestCooldownMillis = builder.comment(desc).defineInRange("searchRequestCooldownMillis", 500, 0, 10000);
 
 			builder.pop();
 		}

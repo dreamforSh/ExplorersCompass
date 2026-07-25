@@ -7,7 +7,9 @@
 
     "_comment": "STRINGS - BUTTONS",
     "string.explorerscompass.back": "Zurück",
+    "string.explorerscompass.clearCache": "Cache leeren",
     "string.explorerscompass.searchForGroup": "Suche nach Gruppe",
+    "string.explorerscompass.searchForNext": "Nächste suchen",
     "string.explorerscompass.selectStructure": "Bauwerk auswählen",
     "string.explorerscompass.teleport": "Teleportieren",
 
@@ -21,6 +23,7 @@
     "string.explorerscompass.group": "Gruppe",
     "string.explorerscompass.name": "Name",
     "string.explorerscompass.notFound": "Nicht Gefunden",
+    "string.explorerscompass.previousLocations": "Zuvor gefunden",
     "string.explorerscompass.radius": "Radius",
     "string.explorerscompass.samples": "Stichproben",
     "string.explorerscompass.search": "Suchen",
@@ -28,6 +31,11 @@
     "string.explorerscompass.sortBy": "Sortiere nach",
     "string.explorerscompass.source": "Quelle",
     "string.explorerscompass.status": "Status",
+    "string.explorerscompass.allDimensions": "Alle Dimensionen",
+    "string.explorerscompass.currentDimension": "Aktuelle Dimension",
+    "string.explorerscompass.inactive": "Inaktiv",
+    "string.explorerscompass.searchHint": "Suchen (@Mod)",
+    "string.explorerscompass.wrongDimension": "Das gefundene Bauwerk liegt in einer anderen Dimension",
 
     "_comment": "STRINGS - CATEGORIES",
     "string.explorerscompass.raw_generation": "Roh-Generierung",

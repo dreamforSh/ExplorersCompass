@@ -1,10 +1,14 @@
 package com.chaosthedude.explorerscompass.items;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
+
+import javax.annotation.Nullable;
 
 import com.chaosthedude.explorerscompass.ExplorersCompass;
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
@@ -17,10 +21,12 @@ import com.chaosthedude.explorerscompass.util.PlayerUtils;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
 import com.chaosthedude.explorerscompass.worker.SearchWorkerManager;
 
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -31,6 +37,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.CreativeModeTab;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraftforge.network.NetworkDirection;
@@ -38,12 +45,17 @@ import net.minecraftforge.network.NetworkDirection;
 public class ExplorersCompassItem extends Item {
 
 	public static final String NAME = "explorerscompass";
-	
-	private SearchWorkerManager workerManager;
+
+	// One worker manager per player, so that one player starting, finishing, or cancelling a search
+	// cannot stop another's: this item is a singleton, and a single manager here would be shared by
+	// every player on the server. Only ever touched on the server thread.
+	private final Map<UUID, SearchWorkerManager> workerManagers = new HashMap<UUID, SearchWorkerManager>();
+
+	// When each player last started a search, for rate limiting. Only ever touched on the server thread.
+	private final Map<UUID, Long> lastSearchStartTimes = new HashMap<UUID, Long>();
 
 	public ExplorersCompassItem() {
 		super(new Properties().stacksTo(1).tab(CreativeModeTab.TAB_TOOLS));
-		workerManager = new SearchWorkerManager();
 	}
 
 	@Override
@@ -62,8 +74,12 @@ public class ExplorersCompassItem extends Item {
 				}
 			}
 		} else {
-			workerManager.stop();
-			workerManager.clear();
+			// Only the server runs searches; the client-side use of this item has no workers
+			if (!level.isClientSide()) {
+				final SearchWorkerManager workerManager = getWorkerManager(player);
+				workerManager.stop();
+				workerManager.clear();
+			}
 			setState(player.getItemInHand(hand), null, CompassState.INACTIVE, player);
 			clearPrevPos(player.getItemInHand(hand));
 		}
@@ -78,12 +94,38 @@ public class ExplorersCompassItem extends Item {
  		return super.shouldCauseReequipAnimation(oldStack, newStack, slotChanged);
  	}
 
+	@Override
+	public void appendHoverText(ItemStack stack, @Nullable Level level, List<Component> tooltip, TooltipFlag flag) {
+		final CompassState state = getState(stack);
+		if (state == null || state == CompassState.INACTIVE) {
+			return;
+		}
+
+		// The basic name works on both sides; the translated one is only available on the client
+		final String structureName = StructureUtils.getBasicStructureName(getStructureKey(stack));
+		if (state == CompassState.SEARCHING) {
+			tooltip.add(Component.translatable("string.explorerscompass.searching").append(Component.literal(": " + structureName)).withStyle(ChatFormatting.GRAY));
+		} else if (state == CompassState.FOUND) {
+			tooltip.add(Component.translatable("string.explorerscompass.found").append(Component.literal(": " + structureName)).withStyle(ChatFormatting.GRAY));
+			if (shouldDisplayCoordinates(stack)) {
+				tooltip.add(Component.translatable("string.explorerscompass.coordinates").append(Component.literal(": " + getFoundStructureX(stack) + ", " + getFoundStructureZ(stack))).withStyle(ChatFormatting.DARK_GRAY));
+			}
+			// The location being pointed at is part of the cached list, but is not a previous one
+			final int previousLocations = getPrevPos(stack).size() - 1;
+			if (previousLocations > 0) {
+				tooltip.add(Component.translatable("string.explorerscompass.previousLocations").append(Component.literal(": " + previousLocations)).withStyle(ChatFormatting.DARK_GRAY));
+			}
+		} else if (state == CompassState.NOT_FOUND) {
+			tooltip.add(Component.translatable("string.explorerscompass.notFound").append(Component.literal(": " + structureName)).withStyle(ChatFormatting.GRAY));
+		}
+	}
+
 	/**
 	 * Starts a fresh search for a structure, or for any structure of a group, forgetting the
 	 * locations any earlier search had collected.
 	 */
 	public void searchForStructure(Level level, Player player, ResourceLocation structureOrGroupKey, boolean isGroup, BlockPos pos, ItemStack stack) {
-		if (!(level instanceof ServerLevel)) {
+		if (!(level instanceof ServerLevel) || !tryAcquireSearchSlot(player)) {
 			return;
 		}
 
@@ -98,7 +140,7 @@ public class ExplorersCompassItem extends Item {
 	 * list is dropped and the search starts over from the closest one again.
 	 */
 	public void searchForNextStructure(Level level, Player player, BlockPos pos, ItemStack stack) {
-		if (!(level instanceof ServerLevel) || ConfigHandler.GENERAL.maxNextSearches.get() <= 0) {
+		if (!(level instanceof ServerLevel) || ConfigHandler.GENERAL.maxNextSearches.get() <= 0 || !tryAcquireSearchSlot(player)) {
 			return;
 		}
 
@@ -153,6 +195,7 @@ public class ExplorersCompassItem extends Item {
 		setSearching(stack, structureOrGroupKey, player);
 		setSearchRadius(stack, 0, player);
 
+		final SearchWorkerManager workerManager = getWorkerManager(player);
 		workerManager.stop();
 		if (structures.isEmpty()) {
 			setNotFound(stack, 0, 0);
@@ -166,19 +209,59 @@ public class ExplorersCompassItem extends Item {
 		}
 	}
 
-	public void succeed(ItemStack stack, ResourceLocation structureKey, boolean isGroup, int x, int z, List<BlockPos> prevPos, int samples, boolean displayCoordinates) {
-		setFound(stack, structureKey, x, z, samples);
+	/** The worker manager running the given player's searches. */
+	private SearchWorkerManager getWorkerManager(Player player) {
+		return workerManagers.computeIfAbsent(player.getUUID(), (uuid) -> new SearchWorkerManager());
+	}
+
+	/**
+	 * Whether the given player may start a search now, and records the attempt when they may.
+	 * Search packets cost a client nothing to send, so without this a modified client could restart
+	 * expensive searches as fast as it can spam them.
+	 */
+	private boolean tryAcquireSearchSlot(Player player) {
+		final int cooldown = ConfigHandler.GENERAL.searchRequestCooldownMillis.get();
+		if (cooldown <= 0) {
+			return true;
+		}
+
+		final long now = System.currentTimeMillis();
+		final Long lastStart = lastSearchStartTimes.get(player.getUUID());
+		if (lastStart != null && now - lastStart < cooldown) {
+			return false;
+		}
+		lastSearchStartTimes.put(player.getUUID(), now);
+		return true;
+	}
+
+	public void succeed(Player player, ItemStack stack, ResourceLocation structureKey, boolean isGroup, int x, int z, ResourceLocation dimensionKey, List<BlockPos> prevPos, int samples, boolean displayCoordinates) {
+		setFound(stack, structureKey, x, z, dimensionKey, samples);
 		setIsGroup(stack, isGroup);
 		setPrevPos(stack, prevPos);
 		setDisplayCoordinates(stack, displayCoordinates);
-		workerManager.clear();
+		getWorkerManager(player).clear();
+
+		final String structureName = StructureUtils.getBasicStructureName(structureKey);
+		notifySearchResult(player, Component.translatable("string.explorerscompass.found").append(Component.literal(displayCoordinates ? ": " + structureName + " (" + x + ", " + z + ")" : ": " + structureName)));
 	}
-	
-	public void fail(ItemStack stack, int radius, int samples) {
+
+	public void fail(Player player, ItemStack stack, int radius, int samples) {
+		final SearchWorkerManager workerManager = getWorkerManager(player);
 		workerManager.pop();
 		boolean started = workerManager.start();
 		if (!started) {
 			setNotFound(stack, radius, samples);
+			notifySearchResult(player, Component.translatable("string.explorerscompass.notFound").append(Component.literal(": " + StructureUtils.getBasicStructureName(getStructureKey(stack)))));
+		}
+	}
+
+	/**
+	 * A one-off message about the outcome of a search, so that a search finishing is noticed even
+	 * when the compass has been put away and the HUD is not showing.
+	 */
+	private void notifySearchResult(Player player, Component message) {
+		if (player instanceof ServerPlayer && !((ServerPlayer) player).hasDisconnected()) {
+			player.displayClientMessage(message, true);
 		}
 	}
 
@@ -198,12 +281,15 @@ public class ExplorersCompassItem extends Item {
 		}
 	}
 
-	public void setFound(ItemStack stack, ResourceLocation structureKey, int x, int z, int samples) {
+	public void setFound(ItemStack stack, ResourceLocation structureKey, int x, int z, ResourceLocation dimensionKey, int samples) {
 		if (ItemUtils.verifyNBT(stack)) {
 			stack.getTag().putInt("State", CompassState.FOUND.getID());
 			stack.getTag().putString("StructureKey", structureKey.toString());
 			stack.getTag().putInt("FoundX", x);
 			stack.getTag().putInt("FoundZ", z);
+			if (dimensionKey != null) {
+				stack.getTag().putString("FoundDimension", dimensionKey.toString());
+			}
 			stack.getTag().putInt("Samples", samples);
 			CustomModelDataConfig.apply(stack, structureKey);
 		}
@@ -334,6 +420,15 @@ public class ExplorersCompassItem extends Item {
 		return 0;
 	}
 
+	/** The dimension the located structure is in, or null when an older compass never recorded it. */
+	public ResourceLocation getFoundDimension(ItemStack stack) {
+		if (ItemUtils.verifyNBT(stack) && stack.getTag().contains("FoundDimension", Tag.TAG_STRING)) {
+			return ResourceLocation.tryParse(stack.getTag().getString("FoundDimension"));
+		}
+
+		return null;
+	}
+
 	public ResourceLocation getStructureKey(ItemStack stack) {
 		if (ItemUtils.verifyNBT(stack)) {
 			return new ResourceLocation(stack.getTag().getString("StructureKey"));
@@ -358,10 +453,6 @@ public class ExplorersCompassItem extends Item {
 		return -1;
 	}
 
-	public int getDistanceToBiome(Player player, ItemStack stack) {
-		return StructureUtils.getHorizontalDistanceToLocation(player, getFoundStructureX(stack), getFoundStructureZ(stack));
-	}
-	
 	public boolean shouldDisplayCoordinates(ItemStack stack) {
 		if (ItemUtils.verifyNBT(stack) && stack.getTag().contains("DisplayCoordinates")) {
 			return stack.getTag().getBoolean("DisplayCoordinates");

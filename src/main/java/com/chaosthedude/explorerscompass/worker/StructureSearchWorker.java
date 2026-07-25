@@ -50,6 +50,13 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> implem
 	protected boolean finished;
 	protected int lastRadiusThreshold;
 
+	// Snapshots of the limits this search runs under. The sampling loop reads them for every
+	// location, and a config lookup walks the config tree on every call, which is far too slow for
+	// that; a search also ought to finish under the limits it was started with.
+	protected final int maxRadius;
+	protected final int maxSamples;
+	private final int maxSearchTimePerTick;
+
 	// When this worker started working during the current tick, or -1 if it is not currently working
 	private long sliceStartTime;
 
@@ -70,13 +77,17 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> implem
 		samples = 0;
 		sliceStartTime = -1L;
 
+		maxRadius = ConfigHandler.GENERAL.maxRadius.get();
+		maxSamples = ConfigHandler.GENERAL.maxSamples.get();
+		maxSearchTimePerTick = ConfigHandler.GENERAL.maxSearchTimePerTick.get();
+
 		finished = !level.getServer().getWorldData().worldGenSettings().generateStructures();
 	}
 
 	public void start() {
 		if (!stack.isEmpty() && stack.getItem() == ExplorersCompass.explorersCompass) {
-			if (ConfigHandler.GENERAL.maxRadius.get() > 0) {
-				ExplorersCompass.LOGGER.info("SearchWorkerManager " + managerId + ": " + getName() + " starting with " + (shouldLogRadius() ? ConfigHandler.GENERAL.maxRadius.get() + " max radius, " : "") + ConfigHandler.GENERAL.maxSamples.get() + " max samples");
+			if (maxRadius > 0) {
+				ExplorersCompass.LOGGER.info("SearchWorkerManager " + managerId + ": " + getName() + " starting with " + (shouldLogRadius() ? maxRadius + " max radius, " : "") + maxSamples + " max samples");
 				WorldWorkerManager.addWorker(this);
 			} else {
 				fail();
@@ -86,13 +97,13 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> implem
 
 	@Override
 	public boolean hasWork() {
-		return !finished && getRadius() < ConfigHandler.GENERAL.maxRadius.get() && samples < ConfigHandler.GENERAL.maxSamples.get();
+		return !finished && getRadius() < maxRadius && samples < maxSamples;
 	}
 
 	@Override
 	public final boolean doWork() {
 		final long now = System.currentTimeMillis();
-		if (sliceStartTime < 0L || now - sliceStartTime >= ConfigHandler.GENERAL.maxSearchTimePerTick.get()) {
+		if (sliceStartTime < 0L || now - sliceStartTime >= maxSearchTimePerTick) {
 			// Either this is the first call of a new tick, or the previous slice ran over because a single
 			// sample took longer than the whole budget. Start a fresh slice either way.
 			sliceStartTime = now;
@@ -113,7 +124,7 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> implem
 		// Forge hands a worker the remainder of the tick and only checks the clock between calls, so a
 		// search that samples expensive locations can stall the server for as long as it likes. Give up
 		// the rest of the tick once this worker has used its slice.
-		if (!callAgain || System.currentTimeMillis() - sliceStartTime >= ConfigHandler.GENERAL.maxSearchTimePerTick.get()) {
+		if (!callAgain || System.currentTimeMillis() - sliceStartTime >= maxSearchTimePerTick) {
 			sliceStartTime = -1L;
 			return false;
 		}
@@ -203,9 +214,8 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> implem
 	 * reported.
 	 */
 	protected boolean isWithinMaxRadius(ChunkPos chunkPos) {
-		final long maxRadius = ConfigHandler.GENERAL.maxRadius.get();
 		final long distanceSqr = StructureUtils.getHorizontalDistanceSqrToLocation(startPos, chunkPos.getMiddleBlockX(), chunkPos.getMiddleBlockZ());
-		return distanceSqr <= maxRadius * maxRadius;
+		return distanceSqr <= (long) maxRadius * maxRadius;
 	}
 
 	/**
@@ -233,7 +243,7 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> implem
 		// Remember this location, so that searching again looks for a different instance
 		prevPos.add(pos);
 		if (!stack.isEmpty() && stack.getItem() == ExplorersCompass.explorersCompass) {
-			((ExplorersCompassItem) stack.getItem()).succeed(stack, structureKey, isGroup, pos.getX(), pos.getZ(), prevPos, samples, ConfigHandler.GENERAL.displayCoordinates.get());
+			((ExplorersCompassItem) stack.getItem()).succeed(player, stack, structureKey, isGroup, pos.getX(), pos.getZ(), level.dimension().location(), prevPos, samples, ConfigHandler.GENERAL.displayCoordinates.get());
 		} else {
 			ExplorersCompass.LOGGER.error("SearchWorkerManager " + managerId + ": " + getName() + " found invalid compass after successful search");
 		}
@@ -246,7 +256,7 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> implem
 		// goes wrong.
 		finished = true;
 		if (!stack.isEmpty() && stack.getItem() == ExplorersCompass.explorersCompass) {
-			((ExplorersCompassItem) stack.getItem()).fail(stack, roundRadius(getRadius(), RADIUS_REPORT_INTERVAL), samples);
+			((ExplorersCompassItem) stack.getItem()).fail(player, stack, roundRadius(getRadius(), RADIUS_REPORT_INTERVAL), samples);
 		} else {
 			ExplorersCompass.LOGGER.error("SearchWorkerManager " + managerId + ": " + getName() + " found invalid compass after failed search");
 		}

@@ -7,7 +7,9 @@
 
     "_comment": "STRINGS - BUTTONS",
     "string.explorerscompass.back": "Volver",
+    "string.explorerscompass.clearCache": "Borrar caché",
     "string.explorerscompass.searchForGroup": "Busqueda de grupo",
+    "string.explorerscompass.searchForNext": "Buscar siguiente",
     "string.explorerscompass.selectStructure": "Seleccionar estructura",
     "string.explorerscompass.teleport": "Teletransportarse",
 
@@ -21,6 +23,7 @@
     "string.explorerscompass.group": "Grupo",
     "string.explorerscompass.name": "Nombre",
     "string.explorerscompass.notFound": "No Encontrado",
+    "string.explorerscompass.previousLocations": "Encontrados anteriormente",
     "string.explorerscompass.radius": "Radio",
     "string.explorerscompass.samples": "Muestras",
     "string.explorerscompass.search": "Buscar",
@@ -28,6 +31,11 @@
     "string.explorerscompass.sortBy": "Ordenar por",
     "string.explorerscompass.source": "Fuente",
     "string.explorerscompass.status": "Estado",
+    "string.explorerscompass.allDimensions": "Todas las dimensiones",
+    "string.explorerscompass.currentDimension": "Dimensión actual",
+    "string.explorerscompass.inactive": "Inactivo",
+    "string.explorerscompass.searchHint": "Buscar (@mod)",
+    "string.explorerscompass.wrongDimension": "La estructura localizada está en otra dimensión",
 
     "_comment": "STRINGS - CATEGORIES",
     "string.explorerscompass.raw_generation": "Estructuras generadas",

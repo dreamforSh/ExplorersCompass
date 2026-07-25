@@ -7,7 +7,9 @@
 
     "_comment": "STRINGS - BUTTONS",
     "string.explorerscompass.back": "Назад",
+    "string.explorerscompass.clearCache": "Очистить кэш",
     "string.explorerscompass.searchForGroup": "Поиск группы",
+    "string.explorerscompass.searchForNext": "Искать следующую",
     "string.explorerscompass.selectStructure": "Выбрать структуру",
     "string.explorerscompass.teleport": "Телепортироваться",
 
@@ -21,6 +23,7 @@
     "string.explorerscompass.group": "Группа",
     "string.explorerscompass.name": "Название",
     "string.explorerscompass.notFound": "Не найдено",
+    "string.explorerscompass.previousLocations": "Найденные ранее",
     "string.explorerscompass.radius": "Радиус",
     "string.explorerscompass.samples": "Образцы",
     "string.explorerscompass.search": "Поиск",
@@ -28,6 +31,11 @@
     "string.explorerscompass.sortBy": "Сортировать по:",
     "string.explorerscompass.source": "Источник",
     "string.explorerscompass.status": "Статус",
+    "string.explorerscompass.allDimensions": "Все измерения",
+    "string.explorerscompass.currentDimension": "Текущее измерение",
+    "string.explorerscompass.inactive": "Неактивен",
+    "string.explorerscompass.searchHint": "Поиск (@мод)",
+    "string.explorerscompass.wrongDimension": "Найденная структура находится в другом измерении",
 
     "_comment": "STRINGS - CATEGORIES",
     "string.explorerscompass.raw_generation": "Первичная генерация",

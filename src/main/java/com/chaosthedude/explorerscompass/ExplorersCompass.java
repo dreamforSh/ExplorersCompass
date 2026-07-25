@@ -11,6 +11,7 @@ import org.apache.logging.log4j.Logger;
 import com.chaosthedude.explorerscompass.client.ClientEventHandler;
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.config.CustomModelDataConfig;
+import com.chaosthedude.explorerscompass.config.StructureGroupsConfig;
 import com.chaosthedude.explorerscompass.items.ExplorersCompassItem;
 import com.chaosthedude.explorerscompass.network.ClearCachePacket;
 import com.chaosthedude.explorerscompass.network.CompassSearchForNextPacket;
@@ -53,7 +54,7 @@ public class ExplorersCompass {
 	// Bump this whenever the packets change. Both sides have to declare the same version: a mismatch
 	// is then refused during the handshake with a clear message, instead of connecting and failing
 	// to decode later.
-	public static final String PROTOCOL_VERSION = "3.0";
+	public static final String PROTOCOL_VERSION = "4.0";
 
 	public static final Logger LOGGER = LogManager.getLogger(MODID);
 
@@ -64,6 +65,7 @@ public class ExplorersCompass {
 	public static List<ResourceLocation> allowedStructureKeys;
 	public static ListMultimap<ResourceLocation, ResourceLocation> dimensionKeysForAllowedStructureKeys;
 	public static Map<ResourceLocation, ResourceLocation> structureKeysToTypeKeys;
+	public static Map<ResourceLocation, String> groupNames;
 	
 	public ExplorersCompass() {
 		FMLJavaModLoadingContext.get().getModEventBus().addListener(this::commonSetup);
@@ -90,6 +92,7 @@ public class ExplorersCompass {
 		network.registerMessage(2, SyncPacket.class, SyncPacket::toBytes, SyncPacket::new, SyncPacket::handle);
 
 		CustomModelDataConfig.load();
+		StructureGroupsConfig.load();
 
 		allowedStructureKeys = new ArrayList<ResourceLocation>();
 		dimensionKeysForAllowedStructureKeys = ArrayListMultimap.create();

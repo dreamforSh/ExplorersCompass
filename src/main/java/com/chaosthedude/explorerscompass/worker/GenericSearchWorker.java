@@ -2,7 +2,6 @@ package com.chaosthedude.explorerscompass.worker;
 
 import java.util.List;
 
-import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.mojang.datafixers.util.Pair;
 
 import net.minecraft.core.BlockPos;
@@ -57,11 +56,10 @@ public class GenericSearchWorker extends StructureSearchWorker<StructurePlacemen
 				currentPos = chunkPos.getMiddleBlockPosition(0);
 
 				Pair<BlockPos, Structure> pair = getStructureGeneratingAt(chunkPos);
+				samples++;
 				if (pair != null) {
 					succeed(pair.getFirst(), pair.getSecond());
 				}
-
-				samples++;
 			}
 
 			length++;
@@ -74,8 +72,6 @@ public class GenericSearchWorker extends StructureSearchWorker<StructurePlacemen
 				}
 				length = 0;
 			}
-
-			updateSearchRadius();
 		}
 
 		if (hasWork()) {
@@ -100,7 +96,7 @@ public class GenericSearchWorker extends StructureSearchWorker<StructurePlacemen
 	protected int getRadius() {
 		final int ring = Math.max(Math.abs(chunkX - startChunkX), Math.abs(chunkZ - startChunkZ));
 		final int covered = Math.max(0, SectionPos.sectionToBlockCoord(ring - 1));
-		return Math.min(covered, ConfigHandler.GENERAL.maxRadius.get());
+		return Math.min(covered, maxRadius);
 	}
 
 	@Override

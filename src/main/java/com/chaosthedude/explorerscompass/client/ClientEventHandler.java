@@ -15,6 +15,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
@@ -57,7 +58,14 @@ public class ClientEventHandler {
 					RenderUtils.drawConfiguredStringOnHUD(poseStack, I18n.get("string.explorerscompass.structure"), 5, 5, 0xFFFFFF, 3);
 					RenderUtils.drawConfiguredStringOnHUD(poseStack, StructureUtils.getPrettyStructureName(compass.getStructureKey(stack)), 5, 5, 0xAAAAAA, 4);
 
-					if (compass.shouldDisplayCoordinates(stack)) {
+					final ResourceLocation foundDimension = compass.getFoundDimension(stack);
+					final boolean inFoundDimension = foundDimension == null || foundDimension.equals(player.level.dimension().location());
+					if (!inFoundDimension) {
+						// The coordinates belong to another dimension, where the distance to them means
+						// nothing, so show which dimension they are in instead
+						RenderUtils.drawConfiguredStringOnHUD(poseStack, I18n.get("string.explorerscompass.dimension"), 5, 5, 0xFFFFFF, 6);
+						RenderUtils.drawConfiguredStringOnHUD(poseStack, StructureUtils.getDimensionName(foundDimension), 5, 5, 0xFF5555, 7);
+					} else if (compass.shouldDisplayCoordinates(stack)) {
 						RenderUtils.drawConfiguredStringOnHUD(poseStack, I18n.get("string.explorerscompass.coordinates"), 5, 5, 0xFFFFFF, 6);
 						RenderUtils.drawConfiguredStringOnHUD(poseStack, compass.getFoundStructureX(stack) + ", " + compass.getFoundStructureZ(stack), 5, 5, 0xAAAAAA, 7);
 
@@ -66,7 +74,10 @@ public class ClientEventHandler {
 
 						drawPreviousLocations(poseStack, compass, stack, 12);
 					}
-					XaeroMinimapIntegration.createWaypointForLocatedStructure(player, compass, stack);
+					// A waypoint in another dimension's coordinates would point at the wrong place
+					if (inFoundDimension) {
+						XaeroMinimapIntegration.createWaypointForLocatedStructure(player, compass, stack);
+					}
 				} else if (compass.getState(stack) == CompassState.NOT_FOUND) {
 					RenderUtils.drawConfiguredStringOnHUD(poseStack, I18n.get("string.explorerscompass.status"), 5, 5, 0xFFFFFF, 0);
 					RenderUtils.drawConfiguredStringOnHUD(poseStack, I18n.get("string.explorerscompass.notFound"), 5, 5, 0xAAAAAA, 1);
@@ -76,6 +87,11 @@ public class ClientEventHandler {
 
 					RenderUtils.drawConfiguredStringOnHUD(poseStack, I18n.get("string.explorerscompass.radius"), 5, 5, 0xFFFFFF, 6);
 					RenderUtils.drawConfiguredStringOnHUD(poseStack, String.valueOf(compass.getSearchRadius(stack)), 5, 5, 0xAAAAAA, 7);
+
+					// A search can also end because it ran out of samples, in which case the radius alone
+					// is far below the configured maximum and looks like a premature stop
+					RenderUtils.drawConfiguredStringOnHUD(poseStack, I18n.get("string.explorerscompass.samples"), 5, 5, 0xFFFFFF, 9);
+					RenderUtils.drawConfiguredStringOnHUD(poseStack, String.valueOf(compass.getSamples(stack)), 5, 5, 0xAAAAAA, 10);
 				}
 			}
 		}

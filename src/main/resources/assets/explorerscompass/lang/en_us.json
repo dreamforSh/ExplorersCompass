@@ -31,6 +31,11 @@
     "string.explorerscompass.sortBy": "Sort By",
     "string.explorerscompass.source": "Source",
     "string.explorerscompass.status": "Status",
+    "string.explorerscompass.allDimensions": "All Dimensions",
+    "string.explorerscompass.currentDimension": "Current Dimension",
+    "string.explorerscompass.inactive": "Inactive",
+    "string.explorerscompass.searchHint": "Search (@mod)",
+    "string.explorerscompass.wrongDimension": "The located structure is in a different dimension",
 
     "_comment": "STRINGS - CATEGORIES",
     "string.explorerscompass.raw_generation": "Raw Generation",
@@ -45,6 +50,7 @@
     "string.explorerscompass.top_layer_modification": "Top Layer",
 
     "_comment": "STRINGS - STRUCTURES",
+    "structure.minecraft.ancient_city": "Ancient City",
     "structure.minecraft.bastion_remnant": "Bastion Remnant",
     "structure.minecraft.buried_treasure": "Buried Treasure",
     "structure.minecraft.desert_pyramid": "Desert Pyramid",

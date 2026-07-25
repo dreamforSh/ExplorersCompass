@@ -97,6 +97,17 @@ public class StructureSearchList extends ObjectSelectionList<StructureSearchEntr
 		parentScreen.selectStructure(entry);
 	}
 
+	/** Selects the entry for the given key, if the list holds one, and scrolls it into view. */
+	public void selectByKey(ResourceLocation key) {
+		for (StructureSearchEntry entry : children()) {
+			if (entry.getStructureKey().equals(key)) {
+				selectStructure(entry);
+				centerScrollOn(entry);
+				return;
+			}
+		}
+	}
+
 	public boolean hasSelection() {
 		return getSelected() != null;
 	}

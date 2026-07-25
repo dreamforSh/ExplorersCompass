@@ -7,7 +7,9 @@
 
     "_comment": "STRINGS - BUTTONS",
     "string.explorerscompass.back": "戻る",
+    "string.explorerscompass.clearCache": "キャッシュを消去",
     "string.explorerscompass.searchForGroup": "グループを検索",
+    "string.explorerscompass.searchForNext": "次を検索",
     "string.explorerscompass.selectStructure": "構造物を選ぶ",
     "string.explorerscompass.teleport": "テレポート",
 
@@ -21,6 +23,7 @@
     "string.explorerscompass.group": "グループ",
     "string.explorerscompass.name": "名前",
     "string.explorerscompass.notFound": "未発見",
+    "string.explorerscompass.previousLocations": "以前の発見場所",
     "string.explorerscompass.radius": "半径",
     "string.explorerscompass.samples": "サンプル",
     "string.explorerscompass.search": "検索",
@@ -28,6 +31,11 @@
     "string.explorerscompass.sortBy": "並び替え",
     "string.explorerscompass.source": "ソース",
     "string.explorerscompass.status": "ステータス",
+    "string.explorerscompass.allDimensions": "全ディメンション",
+    "string.explorerscompass.currentDimension": "現在のディメンション",
+    "string.explorerscompass.inactive": "未使用",
+    "string.explorerscompass.searchHint": "検索（@Mod）",
+    "string.explorerscompass.wrongDimension": "発見した構造物は別のディメンションにあります",
 
     "_comment": "STRINGS - CATEGORIES",
     "string.explorerscompass.raw_generation": "生の生成",

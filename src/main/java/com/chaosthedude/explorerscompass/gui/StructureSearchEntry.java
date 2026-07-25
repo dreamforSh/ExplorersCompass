@@ -1,5 +1,7 @@
 package com.chaosthedude.explorerscompass.gui;
 
+import java.util.List;
+
 import com.chaosthedude.explorerscompass.ExplorersCompass;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -31,12 +33,22 @@ public class StructureSearchEntry extends ObjectSelectionList.Entry<StructureSea
 		mc = Minecraft.getInstance();
 	}
 
+	public ResourceLocation getStructureKey() {
+		return structureKey;
+	}
+
 	@Override
 	public void render(PoseStack poseStack, int par1, int par2, int par3, int par4, int par5, int par6, int par7, boolean par8, float par9) {
 		mc.font.draw(poseStack, Component.literal(StructureUtils.getPrettyStructureName(structureKey)), par3 + 1, par2 + 1, 0xffffff);
 		mc.font.draw(poseStack, Component.translatable(("string.explorerscompass.source")).append(Component.literal(": " + StructureUtils.getPrettyStructureSource(structureKey))), par3 + 1, par2 + mc.font.lineHeight + 3, 0x808080);
-		mc.font.draw(poseStack, Component.translatable(("string.explorerscompass.group")).append(Component.literal(": ")).append(Component.translatable(StructureUtils.getPrettyStructureName(ExplorersCompass.structureKeysToTypeKeys.get(structureKey)))), par3 + 1, par2 + mc.font.lineHeight + 14, 0x808080);
-		mc.font.draw(poseStack, Component.translatable(("string.explorerscompass.dimension")).append(Component.literal(": " + StructureUtils.dimensionKeysToString(ExplorersCompass.dimensionKeysForAllowedStructureKeys.get(structureKey)))), par3 + 1, par2 + mc.font.lineHeight + 25, 0x808080);
+		// The group name is a display name, not a translation key, so it must not go through translatable
+		mc.font.draw(poseStack, Component.translatable(("string.explorerscompass.group")).append(Component.literal(": " + StructureUtils.getPrettyStructureName(ExplorersCompass.structureKeysToTypeKeys.get(structureKey)))), par3 + 1, par2 + mc.font.lineHeight + 14, 0x808080);
+		// Flag structures that cannot generate in the dimension the player is in, since searching for
+		// one of them here can only fail. An empty list means the dimensions could not be determined,
+		// so nothing is flagged.
+		final List<ResourceLocation> dimensionKeys = ExplorersCompass.dimensionKeysForAllowedStructureKeys.get(structureKey);
+		final boolean inCurrentDimension = dimensionKeys.isEmpty() || mc.level == null || dimensionKeys.contains(mc.level.dimension().location());
+		mc.font.draw(poseStack, Component.translatable(("string.explorerscompass.dimension")).append(Component.literal(": " + StructureUtils.dimensionKeysToString(dimensionKeys))), par3 + 1, par2 + mc.font.lineHeight + 25, inCurrentDimension ? 0x808080 : 0xCC6666);
 		RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
 	}
 
