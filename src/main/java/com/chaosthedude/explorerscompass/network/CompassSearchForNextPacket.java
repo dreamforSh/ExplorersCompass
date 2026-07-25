@@ -8,41 +8,30 @@ import com.chaosthedude.explorerscompass.util.ItemUtils;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.network.NetworkEvent;
 
-public class CompassSearchPacket {
+/** Asks for another instance of the structure the compass has already located. */
+public class CompassSearchForNextPacket {
 
-	private ResourceLocation structureOrGroupKey;
-	private boolean isGroup;
 	private int x;
 	private int y;
 	private int z;
 
-	public CompassSearchPacket(ResourceLocation structureOrGroupKey, boolean isGroup, BlockPos pos) {
-		this.structureOrGroupKey = structureOrGroupKey;
-		this.isGroup = isGroup;
-
+	public CompassSearchForNextPacket(BlockPos pos) {
 		this.x = pos.getX();
 		this.y = pos.getY();
 		this.z = pos.getZ();
 	}
 
-	public CompassSearchPacket(FriendlyByteBuf buf) {
-		structureOrGroupKey = buf.readResourceLocation();
-		isGroup = buf.readBoolean();
-
+	public CompassSearchForNextPacket(FriendlyByteBuf buf) {
 		x = buf.readInt();
 		y = buf.readInt();
 		z = buf.readInt();
 	}
 
 	public void toBytes(FriendlyByteBuf buf) {
-		buf.writeResourceLocation(structureOrGroupKey);
-		buf.writeBoolean(isGroup);
-
 		buf.writeInt(x);
 		buf.writeInt(y);
 		buf.writeInt(z);
@@ -59,10 +48,10 @@ public class CompassSearchPacket {
 			if (!stack.isEmpty()) {
 				final ExplorersCompassItem explorersCompass = (ExplorersCompassItem) stack.getItem();
 				try {
-					explorersCompass.searchForStructure(player.getLevel(), player, structureOrGroupKey, isGroup, new BlockPos(x, y, z), stack);
+					explorersCompass.searchForNextStructure(player.getLevel(), player, new BlockPos(x, y, z), stack);
 				} catch (Throwable t) {
 					// This runs on the server thread, so an exception here would take down the server
-					ExplorersCompass.LOGGER.error("Failed to start a search for " + structureOrGroupKey, t);
+					ExplorersCompass.LOGGER.error("Failed to start a search for a further structure", t);
 					explorersCompass.setNotFound(stack, 0, 0);
 				}
 			}

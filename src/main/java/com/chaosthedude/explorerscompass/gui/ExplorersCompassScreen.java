@@ -5,7 +5,10 @@ import java.util.Collections;
 import java.util.List;
 
 import com.chaosthedude.explorerscompass.ExplorersCompass;
+import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.items.ExplorersCompassItem;
+import com.chaosthedude.explorerscompass.network.ClearCachePacket;
+import com.chaosthedude.explorerscompass.network.CompassSearchForNextPacket;
 import com.chaosthedude.explorerscompass.network.CompassSearchPacket;
 import com.chaosthedude.explorerscompass.network.TeleportPacket;
 import com.chaosthedude.explorerscompass.sorting.ISorting;
@@ -35,12 +38,15 @@ public class ExplorersCompassScreen extends Screen {
 	private ExplorersCompassItem explorersCompass;
 	private Button searchButton;
 	private Button searchGroupButton;
+	private Button searchNextButton;
+	private Button clearCacheButton;
 	private Button sortByButton;
 	private Button teleportButton;
 	private Button cancelButton;
 	private TransparentTextField searchTextField;
 	private StructureSearchList selectionList;
 	private ISorting sortingCategory;
+	private int cachedLocations;
 
 	public ExplorersCompassScreen(Level level, Player player, ItemStack stack, ExplorersCompassItem explorersCompass, List<ResourceLocation> allowedStructureKeys) {
 		super(Component.translatable("string.explorerscompass.selectStructure"));
@@ -48,10 +54,11 @@ public class ExplorersCompassScreen extends Screen {
 		this.player = player;
 		this.stack = stack;
 		this.explorersCompass = explorersCompass;
-		
+
 		this.allowedStructureKeys = new ArrayList<ResourceLocation>(allowedStructureKeys);
 		structureKeysMatchingSearch = new ArrayList<ResourceLocation>(this.allowedStructureKeys);
 		sortingCategory = new NameSorting();
+		cachedLocations = explorersCompass.getPrevPos(stack).size();
 	}
 
 	@Override
@@ -68,8 +75,9 @@ public class ExplorersCompassScreen extends Screen {
 	@Override
 	public void tick() {
 		searchTextField.tick();
-		teleportButton.active = explorersCompass.getState(stack) == CompassState.FOUND;
-		
+		cachedLocations = explorersCompass.getPrevPos(stack).size();
+		updateButtons();
+
 		// Check if the allowed structure list has synced. Comparing contents rather than sizes matters
 		// when opening the compass in a world whose structure list differs from the one synced last:
 		// searching for a structure that does not exist here would be rejected by the server.
@@ -85,7 +93,8 @@ public class ExplorersCompassScreen extends Screen {
 	@Override
 	public void render(PoseStack poseStack, int mouseX, int mouseY, float partialTicks) {
 		renderBackground(poseStack);
-		drawCenteredString(poseStack, font, title, 65, 15, 0xffffff);
+		// Showing how many entries the list holds makes a filtered-down search term obvious
+		drawCenteredString(poseStack, font, title.copy().append(Component.literal(" (" + structureKeysMatchingSearch.size() + ")")), 65, 15, 0xffffff);
 		super.render(poseStack, mouseX, mouseY, partialTicks);
 	}
 
@@ -116,22 +125,31 @@ public class ExplorersCompassScreen extends Screen {
 	}
 
 	public void selectStructure(StructureSearchEntry entry) {
-		boolean enable = entry != null;
-		searchButton.active = enable;
-		searchGroupButton.active = enable;
+		updateButtons();
 	}
 
 	public void searchForStructure(ResourceLocation key) {
-		ExplorersCompass.network.sendToServer(new CompassSearchPacket(key, List.of(key), player.blockPosition()));
+		ExplorersCompass.network.sendToServer(new CompassSearchPacket(key, false, player.blockPosition()));
 		minecraft.setScreen(null);
 	}
-	
+
 	public void searchForGroup(ResourceLocation key) {
 		if (key == null) {
 			return;
 		}
-		ExplorersCompass.network.sendToServer(new CompassSearchPacket(key, ExplorersCompass.typeKeysToStructureKeys.get(key), player.blockPosition()));
+		ExplorersCompass.network.sendToServer(new CompassSearchPacket(key, true, player.blockPosition()));
 		minecraft.setScreen(null);
+	}
+
+	public void searchForNextStructure() {
+		ExplorersCompass.network.sendToServer(new CompassSearchForNextPacket(player.blockPosition()));
+		minecraft.setScreen(null);
+	}
+
+	public void clearCache() {
+		ExplorersCompass.network.sendToServer(new ClearCachePacket());
+		cachedLocations = 0;
+		updateButtons();
 	}
 
 	public void teleport() {
@@ -168,7 +186,13 @@ public class ExplorersCompassScreen extends Screen {
 				selectionList.getSelected().searchForGroup();
 			}
 		}));
-		sortByButton = addRenderableWidget(new TransparentButton(10, 90, 110, 20, Component.translatable("string.explorerscompass.sortBy").append(Component.literal(": " + sortingCategory.getLocalizedName())), (onPress) -> {
+		searchNextButton = addRenderableWidget(new TransparentButton(10, 90, 110, 20, Component.translatable("string.explorerscompass.searchForNext"), (onPress) -> {
+			searchForNextStructure();
+		}));
+		clearCacheButton = addRenderableWidget(new TransparentButton(10, 115, 110, 20, Component.translatable("string.explorerscompass.clearCache"), (onPress) -> {
+			clearCache();
+		}));
+		sortByButton = addRenderableWidget(new TransparentButton(10, 140, 110, 20, Component.translatable("string.explorerscompass.sortBy").append(Component.literal(": " + sortingCategory.getLocalizedName())), (onPress) -> {
 			sortingCategory = sortingCategory.next();
 			sortByButton.setMessage(Component.translatable("string.explorerscompass.sortBy").append(Component.literal(": " + sortingCategory.getLocalizedName())));
 			selectionList.refreshList();
@@ -180,18 +204,33 @@ public class ExplorersCompassScreen extends Screen {
 			teleport();
 		}));
 
-		searchButton.active = false;
-		searchGroupButton.active = false;
-
 		teleportButton.visible = ExplorersCompass.canTeleport;
-		
+		updateButtons();
+
 		searchTextField = new TransparentTextField(font, width / 2 - 82, 10, 140, 20, Component.translatable("string.explorerscompass.search"));
 		addRenderableWidget(searchTextField);
-		
+
 		if (selectionList == null) {
 			selectionList = new StructureSearchList(this, minecraft, width + 110, height, 40, height, 45);
 		}
 		addRenderableWidget(selectionList);
+	}
+
+	/** Keeps the buttons in step with what the compass is currently able to do. */
+	private void updateButtons() {
+		final boolean hasSelection = selectionList != null && selectionList.hasSelection();
+		final boolean located = explorersCompass.getState(stack) == CompassState.FOUND;
+
+		searchButton.active = hasSelection;
+		searchGroupButton.active = hasSelection;
+		teleportButton.active = located;
+
+		// Searching for a further instance needs something to have been located to look past
+		searchNextButton.visible = ConfigHandler.GENERAL.maxNextSearches.get() > 0;
+		searchNextButton.active = located;
+		clearCacheButton.visible = searchNextButton.visible;
+		clearCacheButton.active = cachedLocations > 0;
+		clearCacheButton.setMessage(Component.translatable("string.explorerscompass.clearCache").append(Component.literal(cachedLocations > 0 ? " (" + cachedLocations + ")" : "")));
 	}
 
 }

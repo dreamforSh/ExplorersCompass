@@ -6,6 +6,7 @@ import java.util.List;
 
 import com.chaosthedude.explorerscompass.ExplorersCompass;
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
+import com.chaosthedude.explorerscompass.util.StructureUtils;
 import com.mojang.datafixers.util.Pair;
 
 import net.minecraft.core.BlockPos;
@@ -22,15 +23,16 @@ public class ConcentricRingsSearchWorker extends StructureSearchWorker<Concentri
 	private List<ChunkPos> potentialChunks;
 	private int chunkIndex;
 
-	public ConcentricRingsSearchWorker(ServerLevel level, Player player, ItemStack stack, BlockPos startPos, ConcentricRingsStructurePlacement placement, List<Structure> structureSet, String managerId) {
-		super(level, player, stack, startPos, placement, structureSet, managerId);
+	public ConcentricRingsSearchWorker(ServerLevel level, Player player, ItemStack stack, BlockPos startPos, ConcentricRingsStructurePlacement placement, List<Structure> structureSet, List<BlockPos> prevPos, boolean isGroup, boolean ignoreNearStart, String managerId) {
+		super(level, player, stack, startPos, placement, structureSet, prevPos, isGroup, ignoreNearStart, managerId);
 
 		chunkIndex = 0;
 	}
 
 	@Override
 	public boolean hasWork() {
-		// Every potential location is known up front, so the radius is not a useful bound here
+		// Every location is known up front and the list is already limited to the configured radius, so
+		// there is nothing for a radius bound to do here
 		return !finished && samples < ConfigHandler.GENERAL.maxSamples.get() && (potentialChunks == null || chunkIndex < potentialChunks.size());
 	}
 
@@ -61,8 +63,8 @@ public class ConcentricRingsSearchWorker extends StructureSearchWorker<Concentri
 	}
 
 	/**
-	 * Looks up the locations this placement can generate at, sorted by distance from the start
-	 * position.
+	 * Looks up the locations this placement can generate at, keeping the ones inside the configured
+	 * radius and sorting them by distance from the start position.
 	 *
 	 * <p>The chunk generator calculates these asynchronously, and asking for them blocks the server
 	 * thread until that calculation has finished. Doing it here rather than when the search is
@@ -81,7 +83,12 @@ public class ConcentricRingsSearchWorker extends StructureSearchWorker<Concentri
 				ExplorersCompass.LOGGER.warn("SearchWorkerManager " + managerId + ": " + getName() + " waited " + elapsed + "ms for the chunk generator to calculate the positions for this placement");
 			}
 
-			potentialChunks = new ArrayList<ChunkPos>(ringPositions == null ? List.of() : ringPositions);
+			potentialChunks = new ArrayList<ChunkPos>();
+			for (ChunkPos chunkPos : ringPositions == null ? List.<ChunkPos>of() : ringPositions) {
+				if (isWithinMaxRadius(chunkPos)) {
+					potentialChunks.add(chunkPos);
+				}
+			}
 			potentialChunks.sort(Comparator.comparingLong(this::horizontalDistanceSqr));
 		}
 
@@ -95,9 +102,7 @@ public class ConcentricRingsSearchWorker extends StructureSearchWorker<Concentri
 	}
 
 	private long horizontalDistanceSqr(ChunkPos chunkPos) {
-		final long distanceX = chunkPos.getMiddleBlockX() - startPos.getX();
-		final long distanceZ = chunkPos.getMiddleBlockZ() - startPos.getZ();
-		return distanceX * distanceX + distanceZ * distanceZ;
+		return StructureUtils.getHorizontalDistanceSqrToLocation(startPos, chunkPos.getMiddleBlockX(), chunkPos.getMiddleBlockZ());
 	}
 
 	@Override

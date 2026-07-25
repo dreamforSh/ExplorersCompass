@@ -7,7 +7,9 @@
 
     "_comment": "STRINGS - BUTTONS",
     "string.explorerscompass.back": "返回",
+    "string.explorerscompass.clearCache": "清空快取",
     "string.explorerscompass.searchForGroup": "搜索組",
+    "string.explorerscompass.searchForNext": "搜尋下一個",
     "string.explorerscompass.selectStructure": "選擇結構",
     "string.explorerscompass.teleport": "傳送",
 
@@ -21,6 +23,7 @@
     "string.explorerscompass.group": "團體",
     "string.explorerscompass.name": "名稱",
     "string.explorerscompass.notFound": "未發現",
+    "string.explorerscompass.previousLocations": "先前發現",
     "string.explorerscompass.radius": "半徑",
     "string.explorerscompass.samples": "樣本",
     "string.explorerscompass.search": "搜尋",

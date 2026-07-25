@@ -15,6 +15,9 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 @OnlyIn(Dist.CLIENT)
 public class StructureSearchList extends ObjectSelectionList<StructureSearchEntry> {
 
+	private static final int SELECTION_COLOR = 0x60000000;
+	private static final int SELECTION_MARKER_COLOR = 0xC0FFFFFF;
+
 	private final ExplorersCompassScreen parentScreen;
 
 	public StructureSearchList(ExplorersCompassScreen parentScreen, Minecraft mc, int width, int height, int top, int bottom, int slotHeight) {
@@ -51,9 +54,11 @@ public class StructureSearchList extends ObjectSelectionList<StructureSearchEntr
 			if (rowBottom >= y0 && rowTop <= y1) {
 				int j1 = itemHeight - 4;
 				StructureSearchEntry entry = getEntry(j);
-				if (/*renderSelection*/ true && isSelectedItem(j)) {
+				if (isSelectedItem(j)) {
+					// Fill the row and mark its left edge, so which entry the buttons will act on is obvious
 					final int insideLeft = x0 + width / 2 - getRowWidth() / 2 + 2;
-					RenderUtils.drawRect(insideLeft - 4, rowTop - 4, insideLeft + getRowWidth() + 4, rowTop + itemHeight, 255 / 2 << 24);
+					RenderUtils.drawRect(insideLeft - 4, rowTop - 4, insideLeft + getRowWidth() + 4, rowTop + itemHeight, SELECTION_COLOR);
+					RenderUtils.drawRect(insideLeft - 4, rowTop - 4, insideLeft - 2, rowTop + itemHeight, SELECTION_MARKER_COLOR);
 				}
 				entry.render(poseStack, j, rowTop, getRowLeft(), getRowWidth(), j1, mouseX, mouseY, isMouseOver((double) mouseX, (double) mouseY) && Objects.equals(getEntryAtPosition((double) mouseX, (double) mouseY), entry), partialTicks);
 			}

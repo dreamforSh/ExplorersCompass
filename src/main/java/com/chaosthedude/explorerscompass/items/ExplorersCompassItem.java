@@ -8,6 +8,7 @@ import java.util.Set;
 
 import com.chaosthedude.explorerscompass.ExplorersCompass;
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
+import com.chaosthedude.explorerscompass.config.CustomModelDataConfig;
 import com.chaosthedude.explorerscompass.gui.GuiWrapper;
 import com.chaosthedude.explorerscompass.network.SyncPacket;
 import com.chaosthedude.explorerscompass.util.CompassState;
@@ -17,6 +18,9 @@ import com.chaosthedude.explorerscompass.util.StructureUtils;
 import com.chaosthedude.explorerscompass.worker.SearchWorkerManager;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -61,6 +65,7 @@ public class ExplorersCompassItem extends Item {
 			workerManager.stop();
 			workerManager.clear();
 			setState(player.getItemInHand(hand), null, CompassState.INACTIVE, player);
+			clearPrevPos(player.getItemInHand(hand));
 		}
 		return new InteractionResultHolder<ItemStack>(InteractionResult.PASS, player.getItemInHand(hand));
 	}
@@ -73,16 +78,61 @@ public class ExplorersCompassItem extends Item {
  		return super.shouldCauseReequipAnimation(oldStack, newStack, slotChanged);
  	}
 
-	public void searchForStructure(Level level, Player player, ResourceLocation categoryKey, List<ResourceLocation> structureKeys, BlockPos pos, ItemStack stack) {
+	/**
+	 * Starts a fresh search for a structure, or for any structure of a group, forgetting the
+	 * locations any earlier search had collected.
+	 */
+	public void searchForStructure(Level level, Player player, ResourceLocation structureOrGroupKey, boolean isGroup, BlockPos pos, ItemStack stack) {
 		if (!(level instanceof ServerLevel)) {
 			return;
 		}
 
-		ServerLevel serverLevel = (ServerLevel) level;
+		setIsGroup(stack, isGroup);
+		clearPrevPos(stack);
+		search((ServerLevel) level, player, structureOrGroupKey, isGroup, pos, stack, new ArrayList<BlockPos>(), false);
+	}
 
+	/**
+	 * Searches for another instance of the structure the compass has already located, skipping the
+	 * ones it has collected so far. Once the configured number of instances has been collected the
+	 * list is dropped and the search starts over from the closest one again.
+	 */
+	public void searchForNextStructure(Level level, Player player, BlockPos pos, ItemStack stack) {
+		if (!(level instanceof ServerLevel) || ConfigHandler.GENERAL.maxNextSearches.get() <= 0) {
+			return;
+		}
+
+		ServerLevel serverLevel = (ServerLevel) level;
+		ResourceLocation structureKey = getStructureKey(stack);
+		if (structureKey == null || getState(stack) != CompassState.FOUND) {
+			return;
+		}
+
+		List<BlockPos> prevPos = getPrevPos(stack);
+		if (prevPos.size() >= ConfigHandler.GENERAL.maxNextSearches.get()) {
+			prevPos.clear();
+		}
+
+		// The compass stores the key of the structure that was found, so a group search has to be
+		// widened back out to the group it belongs to
+		boolean isGroup = getIsGroup(stack);
+		ResourceLocation searchKey = structureKey;
+		if (isGroup) {
+			searchKey = StructureUtils.getStructureKeysToTypeKeys(serverLevel).get(structureKey);
+			if (searchKey == null) {
+				searchKey = structureKey;
+				isGroup = false;
+			}
+		}
+
+		search(serverLevel, player, searchKey, isGroup, pos, stack, prevPos, true);
+	}
+
+	private void search(ServerLevel level, Player player, ResourceLocation structureOrGroupKey, boolean isGroup, BlockPos pos, ItemStack stack, List<BlockPos> prevPos, boolean ignoreNearStart) {
 		// The keys arrive over the network, so they may be stale (the client keeps the structure list
 		// from the last world it synced with), duplicated, or simply made up. Resolve them against this
 		// world and drop anything that does not belong, rather than handing nulls to world generation.
+		List<ResourceLocation> structureKeys = isGroup ? StructureUtils.getStructureKeysForTypeKey(level, structureOrGroupKey) : List.of(structureOrGroupKey);
 		List<Structure> structures = new ArrayList<Structure>();
 		Set<ResourceLocation> seenKeys = new HashSet<ResourceLocation>();
 		for (ResourceLocation key : structureKeys) {
@@ -90,17 +140,17 @@ public class ExplorersCompassItem extends Item {
 				continue;
 			}
 
-			Structure structure = StructureUtils.getStructureForKey(serverLevel, key);
+			Structure structure = StructureUtils.getStructureForKey(level, key);
 			if (structure == null) {
 				ExplorersCompass.LOGGER.warn("Ignoring search for " + key + ": no such structure in this world");
-			} else if (StructureUtils.structureIsBlacklisted(serverLevel, structure)) {
+			} else if (StructureUtils.structureIsBlacklisted(level, structure)) {
 				ExplorersCompass.LOGGER.warn("Ignoring search for " + key + ": structure is blacklisted");
 			} else {
 				structures.add(structure);
 			}
 		}
 
-		setSearching(stack, categoryKey, player);
+		setSearching(stack, structureOrGroupKey, player);
 		setSearchRadius(stack, 0, player);
 
 		workerManager.stop();
@@ -109,15 +159,17 @@ public class ExplorersCompassItem extends Item {
 			return;
 		}
 
-		workerManager.createWorkers(serverLevel, player, stack, structures, pos);
+		workerManager.createWorkers(level, player, stack, structures, pos, prevPos, isGroup, ignoreNearStart);
 		boolean started = workerManager.start();
 		if (!started) {
 			setNotFound(stack, 0, 0);
 		}
 	}
-	
-	public void succeed(ItemStack stack, ResourceLocation structureKey, int x, int z, int samples, boolean displayCoordinates) {
+
+	public void succeed(ItemStack stack, ResourceLocation structureKey, boolean isGroup, int x, int z, List<BlockPos> prevPos, int samples, boolean displayCoordinates) {
 		setFound(stack, structureKey, x, z, samples);
+		setIsGroup(stack, isGroup);
+		setPrevPos(stack, prevPos);
 		setDisplayCoordinates(stack, displayCoordinates);
 		workerManager.clear();
 	}
@@ -142,6 +194,7 @@ public class ExplorersCompassItem extends Item {
 		if (ItemUtils.verifyNBT(stack)) {
 			stack.getTag().putString("StructureKey", structureKey.toString());
 			stack.getTag().putInt("State", CompassState.SEARCHING.getID());
+			CustomModelDataConfig.apply(stack, structureKey);
 		}
 	}
 
@@ -152,6 +205,7 @@ public class ExplorersCompassItem extends Item {
 			stack.getTag().putInt("FoundX", x);
 			stack.getTag().putInt("FoundZ", z);
 			stack.getTag().putInt("Samples", samples);
+			CustomModelDataConfig.apply(stack, structureKey);
 		}
 	}
 
@@ -172,6 +226,51 @@ public class ExplorersCompassItem extends Item {
 	public void setState(ItemStack stack, BlockPos pos, CompassState state, Player player) {
 		if (ItemUtils.verifyNBT(stack)) {
 			stack.getTag().putInt("State", state.getID());
+			if (state == CompassState.INACTIVE) {
+				CustomModelDataConfig.remove(stack);
+			}
+		}
+	}
+
+	public void setIsGroup(ItemStack stack, boolean isGroup) {
+		if (ItemUtils.verifyNBT(stack)) {
+			stack.getTag().putBoolean("IsGroup", isGroup);
+		}
+	}
+
+	public boolean getIsGroup(ItemStack stack) {
+		return ItemUtils.verifyNBT(stack) && stack.getTag().getBoolean("IsGroup");
+	}
+
+	/** The locations this compass has already located, which further searches pass over. */
+	public List<BlockPos> getPrevPos(ItemStack stack) {
+		final List<BlockPos> prevPos = new ArrayList<BlockPos>();
+		if (ItemUtils.verifyNBT(stack) && stack.getTag().contains("PrevPos", Tag.TAG_LIST)) {
+			for (Tag tag : stack.getTag().getList("PrevPos", Tag.TAG_COMPOUND)) {
+				CompoundTag posTag = (CompoundTag) tag;
+				prevPos.add(new BlockPos(posTag.getInt("X"), posTag.getInt("Y"), posTag.getInt("Z")));
+			}
+		}
+		return prevPos;
+	}
+
+	public void setPrevPos(ItemStack stack, List<BlockPos> prevPos) {
+		if (ItemUtils.verifyNBT(stack)) {
+			final ListTag listTag = new ListTag();
+			for (BlockPos pos : prevPos) {
+				CompoundTag posTag = new CompoundTag();
+				posTag.putInt("X", pos.getX());
+				posTag.putInt("Y", pos.getY());
+				posTag.putInt("Z", pos.getZ());
+				listTag.add(posTag);
+			}
+			stack.getTag().put("PrevPos", listTag);
+		}
+	}
+
+	public void clearPrevPos(ItemStack stack) {
+		if (ItemUtils.verifyNBT(stack)) {
+			stack.getTag().remove("PrevPos");
 		}
 	}
 

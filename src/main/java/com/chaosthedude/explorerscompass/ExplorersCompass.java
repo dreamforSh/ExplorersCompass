@@ -10,7 +10,10 @@ import org.apache.logging.log4j.Logger;
 
 import com.chaosthedude.explorerscompass.client.ClientEventHandler;
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
+import com.chaosthedude.explorerscompass.config.CustomModelDataConfig;
 import com.chaosthedude.explorerscompass.items.ExplorersCompassItem;
+import com.chaosthedude.explorerscompass.network.ClearCachePacket;
+import com.chaosthedude.explorerscompass.network.CompassSearchForNextPacket;
 import com.chaosthedude.explorerscompass.network.CompassSearchPacket;
 import com.chaosthedude.explorerscompass.network.SyncPacket;
 import com.chaosthedude.explorerscompass.network.TeleportPacket;
@@ -50,7 +53,7 @@ public class ExplorersCompass {
 	// Bump this whenever the packets change. Both sides have to declare the same version: a mismatch
 	// is then refused during the handshake with a clear message, instead of connecting and failing
 	// to decode later.
-	public static final String PROTOCOL_VERSION = "2.0";
+	public static final String PROTOCOL_VERSION = "3.0";
 
 	public static final Logger LOGGER = LogManager.getLogger(MODID);
 
@@ -61,7 +64,6 @@ public class ExplorersCompass {
 	public static List<ResourceLocation> allowedStructureKeys;
 	public static ListMultimap<ResourceLocation, ResourceLocation> dimensionKeysForAllowedStructureKeys;
 	public static Map<ResourceLocation, ResourceLocation> structureKeysToTypeKeys;
-	public static ListMultimap<ResourceLocation, ResourceLocation> typeKeysToStructureKeys;
 	
 	public ExplorersCompass() {
 		FMLJavaModLoadingContext.get().getModEventBus().addListener(this::commonSetup);
@@ -81,14 +83,17 @@ public class ExplorersCompass {
 		// Server packets
 		network.registerMessage(0, CompassSearchPacket.class, CompassSearchPacket::toBytes, CompassSearchPacket::new, CompassSearchPacket::handle);
 		network.registerMessage(1, TeleportPacket.class, TeleportPacket::toBytes, TeleportPacket::new, TeleportPacket::handle);
+		network.registerMessage(3, CompassSearchForNextPacket.class, CompassSearchForNextPacket::toBytes, CompassSearchForNextPacket::new, CompassSearchForNextPacket::handle);
+		network.registerMessage(4, ClearCachePacket.class, ClearCachePacket::toBytes, ClearCachePacket::new, ClearCachePacket::handle);
 
 		// Client packet
 		network.registerMessage(2, SyncPacket.class, SyncPacket::toBytes, SyncPacket::new, SyncPacket::handle);
 
+		CustomModelDataConfig.load();
+
 		allowedStructureKeys = new ArrayList<ResourceLocation>();
 		dimensionKeysForAllowedStructureKeys = ArrayListMultimap.create();
 		structureKeysToTypeKeys = new HashMap<ResourceLocation, ResourceLocation>();
-		typeKeysToStructureKeys = ArrayListMultimap.create();
 	}
 	
 	@OnlyIn(Dist.CLIENT)

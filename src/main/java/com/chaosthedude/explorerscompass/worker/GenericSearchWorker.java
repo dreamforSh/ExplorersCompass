@@ -2,10 +2,12 @@ package com.chaosthedude.explorerscompass.worker;
 
 import java.util.List;
 
+import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.mojang.datafixers.util.Pair;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.SectionPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -21,10 +23,15 @@ public class GenericSearchWorker extends StructureSearchWorker<StructurePlacemen
 	public double nextLength;
 	public Direction direction;
 
-	public GenericSearchWorker(ServerLevel level, Player player, ItemStack stack, BlockPos startPos, StructurePlacement placement, List<Structure> structureSet, String managerId) {
-		super(level, player, stack, startPos, placement, structureSet, managerId);
-		chunkX = startPos.getX() >> 4;
-		chunkZ = startPos.getZ() >> 4;
+	private int startChunkX;
+	private int startChunkZ;
+
+	public GenericSearchWorker(ServerLevel level, Player player, ItemStack stack, BlockPos startPos, StructurePlacement placement, List<Structure> structureSet, List<BlockPos> prevPos, boolean isGroup, boolean ignoreNearStart, String managerId) {
+		super(level, player, stack, startPos, placement, structureSet, prevPos, isGroup, ignoreNearStart, managerId);
+		startChunkX = SectionPos.blockToSectionCoord(startPos.getX());
+		startChunkZ = SectionPos.blockToSectionCoord(startPos.getZ());
+		chunkX = startChunkX;
+		chunkZ = startChunkZ;
 		nextLength = 1;
 		length = 0;
 		direction = Direction.UP;
@@ -44,14 +51,19 @@ public class GenericSearchWorker extends StructureSearchWorker<StructurePlacemen
 			}
 
 			ChunkPos chunkPos = new ChunkPos(chunkX, chunkZ);
-			currentPos = chunkPos.getMiddleBlockPosition(0);
+			// The corners of the spiral reach past its edges, so part of the outer rings lies beyond
+			// the configured radius
+			if (isWithinMaxRadius(chunkPos)) {
+				currentPos = chunkPos.getMiddleBlockPosition(0);
 
-			Pair<BlockPos, Structure> pair = getStructureGeneratingAt(chunkPos);
-			if (pair != null) {
-				succeed(pair.getFirst(), pair.getSecond());
+				Pair<BlockPos, Structure> pair = getStructureGeneratingAt(chunkPos);
+				if (pair != null) {
+					succeed(pair.getFirst(), pair.getSecond());
+				}
+
+				samples++;
 			}
 
-			samples++;
 			length++;
 			if (length >= (int)nextLength) {
 				if (direction != Direction.UP) {
@@ -75,6 +87,20 @@ public class GenericSearchWorker extends StructureSearchWorker<StructurePlacemen
 		}
 
 		return false;
+	}
+
+	/**
+	 * The radius this worker has finished searching, which is what bounds the search and what the
+	 * compass reports. The spiral walks a full ring of chunks before starting the next, and a chunk
+	 * on the ring it is on is at least one ring closer than the ring itself, so everything nearer
+	 * than that has already been sampled. See the note on the same method in
+	 * {@link RandomSpreadSearchWorker} for why the location sampled last cannot be used instead.
+	 */
+	@Override
+	protected int getRadius() {
+		final int ring = Math.max(Math.abs(chunkX - startChunkX), Math.abs(chunkZ - startChunkZ));
+		final int covered = Math.max(0, SectionPos.sectionToBlockCoord(ring - 1));
+		return Math.min(covered, ConfigHandler.GENERAL.maxRadius.get());
 	}
 
 	@Override

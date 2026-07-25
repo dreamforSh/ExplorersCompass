@@ -7,7 +7,9 @@
 
     "_comment": "STRINGS - BUTTONS",
     "string.explorerscompass.back": "Back",
+    "string.explorerscompass.clearCache": "Clear Cache",
     "string.explorerscompass.searchForGroup": "Search for Group",
+    "string.explorerscompass.searchForNext": "Search for Next",
     "string.explorerscompass.selectStructure": "Select Structure",
     "string.explorerscompass.teleport": "Teleport",
 
@@ -21,6 +23,7 @@
     "string.explorerscompass.group": "Group",
     "string.explorerscompass.name": "Name",
     "string.explorerscompass.notFound": "Not Found",
+    "string.explorerscompass.previousLocations": "Previously Found",
     "string.explorerscompass.radius": "Radius",
     "string.explorerscompass.samples": "Samples",
     "string.explorerscompass.search": "Search",

@@ -31,7 +31,7 @@ public class SearchWorkerManager {
 		workers = new ArrayList<StructureSearchWorker<?>>();
 	}
 	
-	public void createWorkers(ServerLevel level, Player player, ItemStack stack, List<Structure> structures, BlockPos startPos) {
+	public void createWorkers(ServerLevel level, Player player, ItemStack stack, List<Structure> structures, BlockPos startPos, List<BlockPos> prevPos, boolean isGroup, boolean ignoreNearStart) {
 		workers.clear();
 		
 		// Linked so that placements stay in the order the structures were requested in, since the
@@ -55,11 +55,11 @@ public class SearchWorkerManager {
 		for (Map.Entry<StructurePlacement, List<Structure>> entry : placementToStructuresMap.entrySet()) {
 			StructurePlacement placement = entry.getKey();
 			if (placement instanceof ConcentricRingsStructurePlacement) {
-				workers.add(new ConcentricRingsSearchWorker(level, player, stack, startPos, (ConcentricRingsStructurePlacement) placement, entry.getValue(), id));
+				workers.add(new ConcentricRingsSearchWorker(level, player, stack, startPos, (ConcentricRingsStructurePlacement) placement, entry.getValue(), prevPos, isGroup, ignoreNearStart, id));
 			} else if (placement instanceof RandomSpreadStructurePlacement) {
-				workers.add(new RandomSpreadSearchWorker(level, player, stack, startPos, (RandomSpreadStructurePlacement) placement, entry.getValue(), id));
+				workers.add(new RandomSpreadSearchWorker(level, player, stack, startPos, (RandomSpreadStructurePlacement) placement, entry.getValue(), prevPos, isGroup, ignoreNearStart, id));
 			} else {
-				workers.add(new GenericSearchWorker(level, player, stack, startPos, placement, entry.getValue(), id));
+				workers.add(new GenericSearchWorker(level, player, stack, startPos, placement, entry.getValue(), prevPos, isGroup, ignoreNearStart, id));
 			}
 		}
 	}

@@ -29,6 +29,11 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> implem
 	// Granularity in blocks of the search radius reported to the compass while a search is running
 	private static final int RADIUS_REPORT_INTERVAL = 250;
 
+	// How close a location has to be to an already located one, or to where a search for a further
+	// instance started, to count as the same find. Two chunks, so that walking around inside a
+	// structure and searching again does not just point at the one being stood in.
+	private static final int SAME_LOCATION_DISTANCE = 32;
+
 	protected String managerId;
 	protected ServerLevel level;
 	protected Player player;
@@ -37,6 +42,9 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> implem
 	protected BlockPos currentPos;
 	protected T placement;
 	protected List<Structure> structureSet;
+	protected List<BlockPos> prevPos;
+	protected boolean isGroup;
+	protected boolean ignoreNearStart;
 	protected long seed;
 	protected int samples;
 	protected boolean finished;
@@ -45,12 +53,15 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> implem
 	// When this worker started working during the current tick, or -1 if it is not currently working
 	private long sliceStartTime;
 
-	public StructureSearchWorker(ServerLevel level, Player player, ItemStack stack, BlockPos startPos, T placement, List<Structure> structureSet, String managerId) {
+	public StructureSearchWorker(ServerLevel level, Player player, ItemStack stack, BlockPos startPos, T placement, List<Structure> structureSet, List<BlockPos> prevPos, boolean isGroup, boolean ignoreNearStart, String managerId) {
 		this.level = level;
 		this.player = player;
 		this.stack = stack;
 		this.startPos = startPos;
 		this.structureSet = structureSet;
+		this.prevPos = prevPos;
+		this.isGroup = isGroup;
+		this.ignoreNearStart = ignoreNearStart;
 		this.placement = placement;
 		this.managerId = managerId;
 
@@ -118,28 +129,83 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> implem
 
 	/**
 	 * Returns the position and structure generating in the given chunk, or null if there is none.
+	 *
+	 * <p>Asking whether a structure is present reads the chunk from storage, and answering it may
+	 * run structure generation, so the chunk is loaded at most once here: its structure starts are
+	 * the authoritative answer for every remaining structure, and reading them is a lookup. This is
+	 * what makes searching for a whole group cost about as much as searching for one of its
+	 * structures.
 	 */
 	protected Pair<BlockPos, Structure> getStructureGeneratingAt(ChunkPos chunkPos) {
 		if (!canPlaceAt(chunkPos)) {
 			return null;
 		}
 
+		ChunkAccess chunkAccess = null;
+		SectionPos sectionPos = null;
 		for (Structure structure : structureSet) {
-			StructureCheckResult result = level.structureManager().checkStructurePresence(chunkPos, structure, false);
-			if (result != StructureCheckResult.START_NOT_PRESENT) {
+			if (chunkAccess == null) {
+				StructureCheckResult result = level.structureManager().checkStructurePresence(chunkPos, structure, false);
+				if (result == StructureCheckResult.START_NOT_PRESENT) {
+					continue;
+				}
 				if (result == StructureCheckResult.START_PRESENT) {
-					return Pair.of(placement.getLocatePos(chunkPos), structure);
+					BlockPos pos = placement.getLocatePos(chunkPos);
+					if (!shouldIgnore(pos)) {
+						return Pair.of(pos, structure);
+					}
+					continue;
 				}
 
-				ChunkAccess chunkAccess = level.getChunk(chunkPos.x, chunkPos.z, ChunkStatus.STRUCTURE_STARTS);
-				StructureStart structureStart = level.structureManager().getStartForStructure(SectionPos.bottomOf(chunkAccess), structure, chunkAccess);
-				if (structureStart != null && structureStart.isValid()) {
-					return Pair.of(placement.getLocatePos(structureStart.getChunkPos()), structure);
+				chunkAccess = level.getChunk(chunkPos.x, chunkPos.z, ChunkStatus.STRUCTURE_STARTS);
+				sectionPos = SectionPos.bottomOf(chunkAccess);
+			}
+
+			StructureStart structureStart = level.structureManager().getStartForStructure(sectionPos, structure, chunkAccess);
+			if (structureStart != null && structureStart.isValid()) {
+				BlockPos pos = placement.getLocatePos(structureStart.getChunkPos());
+				if (!shouldIgnore(pos)) {
+					return Pair.of(pos, structure);
 				}
 			}
 		}
 
 		return null;
+	}
+
+	/**
+	 * Whether a location has already been located by an earlier search, and should be passed over so
+	 * that searching again finds a different instance. Locations right where this search started
+	 * count as well, so that a search for a further instance does not answer with the structure
+	 * being stood in.
+	 */
+	protected boolean shouldIgnore(BlockPos pos) {
+		if (ignoreNearStart && isSameLocation(pos, startPos)) {
+			return true;
+		}
+
+		for (BlockPos prev : prevPos) {
+			if (isSameLocation(pos, prev)) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static boolean isSameLocation(BlockPos pos, BlockPos other) {
+		return StructureUtils.getHorizontalDistanceSqrToLocation(other, pos.getX(), pos.getZ()) <= (long) SAME_LOCATION_DISTANCE * SAME_LOCATION_DISTANCE;
+	}
+
+	/**
+	 * Whether a location is inside the configured search radius. Locations outside it are not
+	 * sampled: the search is not meant to reach that far, and a structure found there could not be
+	 * reported.
+	 */
+	protected boolean isWithinMaxRadius(ChunkPos chunkPos) {
+		final long maxRadius = ConfigHandler.GENERAL.maxRadius.get();
+		final long distanceSqr = StructureUtils.getHorizontalDistanceSqrToLocation(startPos, chunkPos.getMiddleBlockX(), chunkPos.getMiddleBlockZ());
+		return distanceSqr <= maxRadius * maxRadius;
 	}
 
 	/**
@@ -162,10 +228,12 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> implem
 			return;
 		}
 
-		ExplorersCompass.LOGGER.info("SearchWorkerManager " + managerId + ": " + getName() + " succeeded with " + (shouldLogRadius() ? getRadius() + " radius, " : "") + samples + " samples");
+		ExplorersCompass.LOGGER.info("SearchWorkerManager " + managerId + ": " + getName() + " succeeded with " + (shouldLogRadius() ? getRadius() + " radius, " : "") + samples + " samples, " + prevPos.size() + " previously located");
 		finished = true;
+		// Remember this location, so that searching again looks for a different instance
+		prevPos.add(pos);
 		if (!stack.isEmpty() && stack.getItem() == ExplorersCompass.explorersCompass) {
-			((ExplorersCompassItem) stack.getItem()).succeed(stack, structureKey, pos.getX(), pos.getZ(), samples, ConfigHandler.GENERAL.displayCoordinates.get());
+			((ExplorersCompassItem) stack.getItem()).succeed(stack, structureKey, isGroup, pos.getX(), pos.getZ(), prevPos, samples, ConfigHandler.GENERAL.displayCoordinates.get());
 		} else {
 			ExplorersCompass.LOGGER.error("SearchWorkerManager " + managerId + ": " + getName() + " found invalid compass after successful search");
 		}

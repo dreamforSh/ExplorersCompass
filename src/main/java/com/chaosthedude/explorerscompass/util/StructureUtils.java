@@ -26,7 +26,6 @@ import net.minecraft.core.Registry;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.chunk.ChunkGenerator;
@@ -54,21 +53,9 @@ public class StructureUtils {
 	private static List<Pattern> cachedBlacklistPatterns;
 
 	/**
-	 * Determining the group of a structure means scanning every structure set, so build this from an
-	 * existing structure to group mapping instead of resolving every structure a second time.
-	 */
-	public static ListMultimap<ResourceLocation, ResourceLocation> getTypeKeysToStructureKeys(Map<ResourceLocation, ResourceLocation> structureKeysToTypeKeys) {
-		ListMultimap<ResourceLocation, ResourceLocation> typeKeysToStructureKeys = ArrayListMultimap.create();
-		for (Map.Entry<ResourceLocation, ResourceLocation> entry : structureKeysToTypeKeys.entrySet()) {
-			typeKeysToStructureKeys.put(entry.getValue(), entry.getKey());
-		}
-		return typeKeysToStructureKeys;
-	}
-
-	/**
 	 * Maps the key of every structure in the level to the key of the structure set it belongs to, or
-	 * to {@link #NO_TYPE_KEY} when it belongs to none. Walks the structure sets once and inverts them,
-	 * rather than scanning all of them again for every structure the way
+	 * to {@link #NO_TYPE_KEY} when it belongs to none. Walks the structure sets once and inverts
+	 * them, rather than scanning all of them again for every structure the way
 	 * {@link #getTypeForStructure} has to.
 	 */
 	public static Map<ResourceLocation, ResourceLocation> getStructureKeysToTypeKeys(ServerLevel level) {
@@ -101,6 +88,17 @@ public class StructureUtils {
 		}
 
 		return structureKeysToTypeKeys;
+	}
+
+	/** Keys of every structure that belongs to the given structure set. */
+	public static List<ResourceLocation> getStructureKeysForTypeKey(ServerLevel level, ResourceLocation typeKey) {
+		final List<ResourceLocation> structureKeys = new ArrayList<ResourceLocation>();
+		for (Map.Entry<ResourceLocation, ResourceLocation> entry : getStructureKeysToTypeKeys(level).entrySet()) {
+			if (entry.getValue().equals(typeKey)) {
+				structureKeys.add(entry.getKey());
+			}
+		}
+		return structureKeys;
 	}
 
 	/**
@@ -211,8 +209,21 @@ public class StructureUtils {
 		return getHorizontalDistanceToLocation(player.blockPosition(), x, z);
 	}
 
+	/**
+	 * Horizontal distance in blocks between a position and a location. Called several times for
+	 * every location a search samples, so it avoids allocating a position for the location, and
+	 * works in doubles: at the radii this can be configured for, the squared distance no longer fits
+	 * in a float without losing thousands of blocks of precision.
+	 */
 	public static int getHorizontalDistanceToLocation(BlockPos startPos, int x, int z) {
-		return (int) Mth.sqrt((float) startPos.distSqr(new BlockPos(x, startPos.getY(), z)));
+		return (int) Math.sqrt(getHorizontalDistanceSqrToLocation(startPos, x, z));
+	}
+
+	/** Squared horizontal distance in blocks, for comparing distances without taking a square root. */
+	public static long getHorizontalDistanceSqrToLocation(BlockPos startPos, int x, int z) {
+		final long distanceX = x - startPos.getX();
+		final long distanceZ = z - startPos.getZ();
+		return distanceX * distanceX + distanceZ * distanceZ;
 	}
 
 	@OnlyIn(Dist.CLIENT)

@@ -127,7 +127,6 @@ public class SyncPacket {
 			ExplorersCompass.allowedStructureKeys = new ArrayList<ResourceLocation>(receivedStructureKeys);
 			ExplorersCompass.dimensionKeysForAllowedStructureKeys = ArrayListMultimap.create(receivedDimensionKeys);
 			ExplorersCompass.structureKeysToTypeKeys = new HashMap<ResourceLocation, ResourceLocation>(receivedTypeKeys);
-			ExplorersCompass.typeKeysToStructureKeys = StructureUtils.getTypeKeysToStructureKeys(ExplorersCompass.structureKeysToTypeKeys);
 			clearReceived();
 		}
 	}

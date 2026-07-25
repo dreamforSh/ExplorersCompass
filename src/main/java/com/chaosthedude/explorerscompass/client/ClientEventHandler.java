@@ -9,9 +9,12 @@ import com.chaosthedude.explorerscompass.util.RenderUtils;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
 import com.mojang.blaze3d.vertex.PoseStack;
 
+import java.util.List;
+
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.resources.language.I18n;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
@@ -22,6 +25,8 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 
 @OnlyIn(Dist.CLIENT)
 public class ClientEventHandler {
+
+	private static final int MAX_PREVIOUS_LOCATIONS_SHOWN = 2;
 
 	private static final Minecraft mc = Minecraft.getInstance();
 
@@ -42,6 +47,9 @@ public class ClientEventHandler {
 					
 					RenderUtils.drawConfiguredStringOnHUD(poseStack, I18n.get("string.explorerscompass.radius"), 5, 5, 0xFFFFFF, 6);
  					RenderUtils.drawConfiguredStringOnHUD(poseStack, String.valueOf(compass.getSearchRadius(stack)), 5, 5, 0xAAAAAA, 7);
+
+					// Let the next result create a waypoint, even if it is the same location as the last one
+					XaeroMinimapIntegration.reset();
 				} else if (compass.getState(stack) == CompassState.FOUND) {
 					RenderUtils.drawConfiguredStringOnHUD(poseStack, I18n.get("string.explorerscompass.status"), 5, 5, 0xFFFFFF, 0);
 					RenderUtils.drawConfiguredStringOnHUD(poseStack, I18n.get("string.explorerscompass.found"), 5, 5, 0xAAAAAA, 1);
@@ -55,7 +63,10 @@ public class ClientEventHandler {
 
 						RenderUtils.drawConfiguredStringOnHUD(poseStack, I18n.get("string.explorerscompass.distance"), 5, 5, 0xFFFFFF, 9);
 						RenderUtils.drawConfiguredStringOnHUD(poseStack, String.valueOf(StructureUtils.getHorizontalDistanceToLocation(player, compass.getFoundStructureX(stack), compass.getFoundStructureZ(stack))), 5, 5, 0xAAAAAA, 10);
+
+						drawPreviousLocations(poseStack, compass, stack, 12);
 					}
+					XaeroMinimapIntegration.createWaypointForLocatedStructure(player, compass, stack);
 				} else if (compass.getState(stack) == CompassState.NOT_FOUND) {
 					RenderUtils.drawConfiguredStringOnHUD(poseStack, I18n.get("string.explorerscompass.status"), 5, 5, 0xFFFFFF, 0);
 					RenderUtils.drawConfiguredStringOnHUD(poseStack, I18n.get("string.explorerscompass.notFound"), 5, 5, 0xAAAAAA, 1);
@@ -67,6 +78,25 @@ public class ClientEventHandler {
 					RenderUtils.drawConfiguredStringOnHUD(poseStack, String.valueOf(compass.getSearchRadius(stack)), 5, 5, 0xAAAAAA, 7);
 				}
 			}
+		}
+	}
+
+	/**
+	 * Lists the locations found before the current one, most recent first, so that a player
+	 * searching for further instances can still see where the last ones were.
+	 */
+	private void drawPreviousLocations(PoseStack poseStack, ExplorersCompassItem compass, ItemStack stack, int relLineOffset) {
+		final List<BlockPos> prevPos = compass.getPrevPos(stack);
+		// The last entry is the location the compass currently points at, already shown above
+		final int newest = prevPos.size() - 2;
+		if (newest < 0) {
+			return;
+		}
+
+		RenderUtils.drawConfiguredStringOnHUD(poseStack, I18n.get("string.explorerscompass.previousLocations"), 5, 5, 0xFFFFFF, relLineOffset);
+		for (int i = 0; i < MAX_PREVIOUS_LOCATIONS_SHOWN && newest - i >= 0; i++) {
+			final BlockPos pos = prevPos.get(newest - i);
+			RenderUtils.drawConfiguredStringOnHUD(poseStack, pos.getX() + ", " + pos.getZ(), 5, 5, 0xAAAAAA, relLineOffset + 1 + i);
 		}
 	}
 
