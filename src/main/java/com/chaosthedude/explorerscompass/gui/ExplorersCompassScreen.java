@@ -18,6 +18,7 @@ import com.chaosthedude.explorerscompass.items.ExplorersCompassItem;
 import com.chaosthedude.explorerscompass.network.ClearCachePacket;
 import com.chaosthedude.explorerscompass.network.CompassSearchForNextPacket;
 import com.chaosthedude.explorerscompass.network.CompassSearchPacket;
+import com.chaosthedude.explorerscompass.network.ShareLocationPacket;
 import com.chaosthedude.explorerscompass.network.TeleportPacket;
 import com.chaosthedude.explorerscompass.sorting.ISorting;
 import com.chaosthedude.explorerscompass.sorting.NameSorting;
@@ -52,7 +53,9 @@ public class ExplorersCompassScreen extends Screen {
 	private Button clearCacheButton;
 	private Button sortByButton;
 	private Button dimensionFilterButton;
+	private Button bookmarksButton;
 	private Button teleportButton;
+	private Button shareButton;
 	private Button cancelButton;
 	private TransparentTextField searchTextField;
 	private StructureSearchList selectionList;
@@ -131,7 +134,7 @@ public class ExplorersCompassScreen extends Screen {
 	 * to close this screen to read it off the HUD.
 	 */
 	private void renderCompassStatePanel(PoseStack poseStack) {
-		panelLineY = 195;
+		panelLineY = 215;
 		final CompassState state = explorersCompass.getState(stack);
 		if (state == null) {
 			return;
@@ -280,6 +283,11 @@ public class ExplorersCompassScreen extends Screen {
 		minecraft.setScreen(null);
 	}
 
+	/** Announces the located structure to the other players, leaving this screen open. */
+	public void share() {
+		ExplorersCompass.network.sendToServer(new ShareLocationPacket(ShareLocationPacket.CURRENT_TARGET));
+	}
+
 	public void processSearchTerm() {
 		lastSearchTerm = searchTextField.getValue();
 		final String[] tokens = lastSearchTerm.toLowerCase().split("\\s+");
@@ -422,11 +430,17 @@ public class ExplorersCompassScreen extends Screen {
 			dimensionFilterButton.setMessage(dimensionFilterButtonLabel());
 			processSearchTerm();
 		}));
+		bookmarksButton = addRenderableWidget(new TransparentButton(10, 190, 110, 20, Component.translatable("string.explorerscompass.bookmarks"), (onPress) -> {
+			minecraft.setScreen(new BookmarksScreen(this, player, stack, explorersCompass));
+		}));
 		cancelButton = addRenderableWidget(new TransparentButton(10, height - 30, 110, 20, Component.translatable("gui.cancel"), (onPress) -> {
 			minecraft.setScreen(null);
 		}));
 		teleportButton = addRenderableWidget(new TransparentButton(width - 120, 10, 110, 20, Component.translatable("string.explorerscompass.teleport"), (onPress) -> {
 			teleport();
+		}));
+		shareButton = addRenderableWidget(new TransparentButton(width - 120, 35, 110, 20, Component.translatable("string.explorerscompass.share"), (onPress) -> {
+			share();
 		}));
 
 		// Carry the filter and the selection over, so that resizing the window does not lose them
@@ -472,6 +486,9 @@ public class ExplorersCompassScreen extends Screen {
 		final boolean inFoundDimension = foundDimension == null || foundDimension.equals(player.level.dimension().location());
 		teleportButton.visible = ExplorersCompass.canTeleport;
 		teleportButton.active = located && inFoundDimension;
+		shareButton.visible = ConfigHandler.GENERAL.allowSharing.get();
+		shareButton.active = located;
+		bookmarksButton.visible = ConfigHandler.GENERAL.maxBookmarks.get() > 0;
 
 		// Searching for a further instance needs something to have been located to look past
 		searchNextButton.visible = ConfigHandler.GENERAL.maxNextSearches.get() > 0;

@@ -14,7 +14,9 @@ import com.chaosthedude.explorerscompass.ExplorersCompass;
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.config.CustomModelDataConfig;
 import com.chaosthedude.explorerscompass.gui.GuiWrapper;
+import com.chaosthedude.explorerscompass.network.ShareLocationPacket;
 import com.chaosthedude.explorerscompass.network.SyncPacket;
+import com.chaosthedude.explorerscompass.util.BookmarkEntry;
 import com.chaosthedude.explorerscompass.util.CompassState;
 import com.chaosthedude.explorerscompass.util.ItemUtils;
 import com.chaosthedude.explorerscompass.util.PlayerUtils;
@@ -27,7 +29,9 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -57,6 +61,10 @@ public class ExplorersCompassItem extends Item {
 
 	// When each player last started a search, for rate limiting. Only ever touched on the server thread.
 	private final Map<UUID, Long> lastSearchStartTimes = new HashMap<UUID, Long>();
+
+	// When each player last shared a location, so that sharing cannot be used to flood chat. Only
+	// ever touched on the server thread.
+	private final Map<UUID, Long> lastShareTimes = new HashMap<UUID, Long>();
 
 	public ExplorersCompassItem() {
 		super(new Properties().stacksTo(1).tab(CreativeModeTab.TAB_TOOLS));
@@ -249,6 +257,23 @@ public class ExplorersCompassItem extends Item {
 	}
 
 	/**
+	 * Drops everything remembered about a player who has left the server, so that none of it is kept
+	 * for the rest of the server's life.
+	 */
+	public void forgetPlayer(UUID playerId) {
+		final SearchWorkerManager workerManager = workerManagers.remove(playerId);
+		if (workerManager != null) {
+			// Stop before dropping the manager: its workers are registered with the world worker
+			// manager, and would otherwise keep sampling for a player who is no longer here, with
+			// nothing left that could stop them
+			workerManager.stop();
+			workerManager.clear();
+		}
+		lastSearchStartTimes.remove(playerId);
+		lastShareTimes.remove(playerId);
+	}
+
+	/**
 	 * Whether the given player may start a search now, and records the attempt when they may.
 	 * Search packets cost a client nothing to send, so without this a modified client could restart
 	 * expensive searches as fast as it can spam them.
@@ -273,6 +298,7 @@ public class ExplorersCompassItem extends Item {
 		setIsGroup(stack, isGroup);
 		setPrevPos(stack, prevPos);
 		setDisplayCoordinates(stack, displayCoordinates);
+		addBookmark(stack, new BookmarkEntry(structureKey, x, y, z, dimensionKey));
 		getWorkerManager(player).clear();
 
 		final String structureName = StructureUtils.getBasicStructureName(structureKey);
@@ -413,6 +439,175 @@ public class ExplorersCompassItem extends Item {
 			}
 			stack.getTag().put("TargetKeys", listTag);
 		}
+	}
+
+	/** The locations this compass has located and remembered, oldest first. */
+	public List<BookmarkEntry> getBookmarks(ItemStack stack) {
+		final List<BookmarkEntry> bookmarks = new ArrayList<BookmarkEntry>();
+		if (ItemUtils.verifyNBT(stack) && stack.getTag().contains("Bookmarks", Tag.TAG_LIST)) {
+			for (Tag tag : stack.getTag().getList("Bookmarks", Tag.TAG_COMPOUND)) {
+				final BookmarkEntry entry = BookmarkEntry.fromNBT((CompoundTag) tag);
+				if (entry != null) {
+					bookmarks.add(entry);
+				}
+			}
+		}
+		return bookmarks;
+	}
+
+	private void setBookmarks(ItemStack stack, List<BookmarkEntry> bookmarks) {
+		if (ItemUtils.verifyNBT(stack)) {
+			if (bookmarks.isEmpty()) {
+				stack.getTag().remove("Bookmarks");
+				return;
+			}
+
+			final ListTag listTag = new ListTag();
+			for (BookmarkEntry entry : bookmarks) {
+				listTag.add(entry.toNBT());
+			}
+			stack.getTag().put("Bookmarks", listTag);
+		}
+	}
+
+	/**
+	 * Remembers a location the compass has located, dropping the oldest one when the list is full.
+	 * A location that is already remembered is not added again, so that finding the same place twice
+	 * does not fill the list with copies of it.
+	 */
+	private void addBookmark(ItemStack stack, BookmarkEntry entry) {
+		final int maxBookmarks = ConfigHandler.GENERAL.maxBookmarks.get();
+		if (maxBookmarks <= 0) {
+			return;
+		}
+
+		final List<BookmarkEntry> bookmarks = getBookmarks(stack);
+		for (BookmarkEntry existing : bookmarks) {
+			if (existing.isSamePlace(entry)) {
+				return;
+			}
+		}
+
+		bookmarks.add(entry);
+		while (bookmarks.size() > maxBookmarks) {
+			bookmarks.remove(0);
+		}
+		setBookmarks(stack, bookmarks);
+	}
+
+	/**
+	 * Points the compass back at a remembered location. The location itself is put back on the list
+	 * of places already located, so that searching for a further instance looks past it rather than
+	 * answering with the one being pointed at.
+	 */
+	public void selectBookmark(ItemStack stack, int index) {
+		final List<BookmarkEntry> bookmarks = getBookmarks(stack);
+		if (index < 0 || index >= bookmarks.size()) {
+			return;
+		}
+
+		final BookmarkEntry entry = bookmarks.get(index);
+		setFound(stack, entry.getStructureKey(), entry.getX(), entry.getZ(), entry.getY(), entry.getDimensionKey(), 0);
+		setIsGroup(stack, false);
+		setTargetCount(stack, 1);
+		setTargetKeys(stack, List.<ResourceLocation>of());
+		// Only the horizontal coordinates of these are ever compared
+		setPrevPos(stack, List.of(new BlockPos(entry.getX(), 0, entry.getZ())));
+	}
+
+	public void removeBookmark(ItemStack stack, int index) {
+		final List<BookmarkEntry> bookmarks = getBookmarks(stack);
+		if (index < 0 || index >= bookmarks.size()) {
+			return;
+		}
+
+		bookmarks.remove(index);
+		setBookmarks(stack, bookmarks);
+	}
+
+	public void clearBookmarks(ItemStack stack) {
+		if (ItemUtils.verifyNBT(stack)) {
+			stack.getTag().remove("Bookmarks");
+		}
+	}
+
+	/**
+	 * Announces a located structure to everyone on the server, either one of the remembered
+	 * locations or the one the compass is pointing at.
+	 */
+	public void shareLocation(ServerPlayer player, ItemStack stack, int bookmarkIndex) {
+		if (!ConfigHandler.GENERAL.allowSharing.get()) {
+			return;
+		}
+
+		final ResourceLocation structureKey;
+		final int x;
+		final int y;
+		final int z;
+		final ResourceLocation dimensionKey;
+		if (bookmarkIndex == ShareLocationPacket.CURRENT_TARGET) {
+			if (getState(stack) != CompassState.FOUND) {
+				return;
+			}
+			structureKey = getStructureKey(stack);
+			x = getFoundStructureX(stack);
+			y = getFoundStructureY(stack);
+			z = getFoundStructureZ(stack);
+			dimensionKey = getFoundDimension(stack);
+		} else {
+			final List<BookmarkEntry> bookmarks = getBookmarks(stack);
+			if (bookmarkIndex < 0 || bookmarkIndex >= bookmarks.size()) {
+				return;
+			}
+			final BookmarkEntry entry = bookmarks.get(bookmarkIndex);
+			structureKey = entry.getStructureKey();
+			x = entry.getX();
+			y = entry.getY();
+			z = entry.getZ();
+			dimensionKey = entry.getDimensionKey();
+		}
+
+		if (!tryAcquireShareSlot(player)) {
+			return;
+		}
+
+		// A compass from before the dimension was recorded reports where its holder is instead
+		final ResourceLocation dimension = dimensionKey != null ? dimensionKey : player.getLevel().dimension().location();
+		player.getServer().getPlayerList().broadcastSystemMessage(sharedLocationMessage(player, structureKey, x, y, z, dimension), false);
+	}
+
+	/**
+	 * The chat message a shared location produces. The coordinates can be clicked to copy them,
+	 * which needs no permission, unlike suggesting a teleport command.
+	 */
+	private static Component sharedLocationMessage(ServerPlayer player, ResourceLocation structureKey, int x, int y, int z, ResourceLocation dimensionKey) {
+		final String coordinates = y != UNKNOWN_Y ? x + ", " + y + ", " + z : x + ", " + z;
+		final Component coordinatesComponent = Component.literal(coordinates).withStyle((style) -> style
+				.withColor(ChatFormatting.GREEN)
+				.withClickEvent(new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD, coordinates))
+				.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.translatable("string.explorerscompass.copyCoordinates"))));
+		// Names are resolved here rather than sent as translation keys, since most structures have no
+		// translation and every client would then see the raw key
+		return Component.translatable("string.explorerscompass.sharedLocation",
+				player.getDisplayName(),
+				Component.literal(StructureUtils.getBasicStructureName(structureKey)),
+				coordinatesComponent,
+				Component.literal(StructureUtils.getBasicStructureName(dimensionKey)));
+	}
+
+	private boolean tryAcquireShareSlot(ServerPlayer player) {
+		final int cooldown = ConfigHandler.GENERAL.shareCooldownMillis.get();
+		if (cooldown <= 0) {
+			return true;
+		}
+
+		final long now = System.currentTimeMillis();
+		final Long lastShare = lastShareTimes.get(player.getUUID());
+		if (lastShare != null && now - lastShare < cooldown) {
+			return false;
+		}
+		lastShareTimes.put(player.getUUID(), now);
+		return true;
 	}
 
 	/** The locations this compass has already located, which further searches pass over. */

@@ -7,6 +7,11 @@
 
     "_comment": "STRINGS - BUTTONS",
     "string.explorerscompass.back": "戻る",
+    "string.explorerscompass.bookmarks": "発見済み",
+    "string.explorerscompass.clearAll": "すべて消去",
+    "string.explorerscompass.pointAt": "ここを指す",
+    "string.explorerscompass.remove": "削除",
+    "string.explorerscompass.share": "共有",
     "string.explorerscompass.clearCache": "キャッシュを消去",
     "string.explorerscompass.searchForGroup": "グループを検索",
     "string.explorerscompass.searchForNext": "次を検索",
@@ -34,6 +39,9 @@
     "string.explorerscompass.allDimensions": "全ディメンション",
     "string.explorerscompass.currentDimension": "現在のディメンション",
     "string.explorerscompass.inactive": "未使用",
+    "string.explorerscompass.copyCoordinates": "クリックで座標をコピー",
+    "string.explorerscompass.noBookmarks": "まだ何も発見していません",
+    "string.explorerscompass.sharedLocation": "%1$s が %2$s を発見しました: %3$s (%4$s)",
     "string.explorerscompass.searchHint": "検索（@Mod）",
     "string.explorerscompass.wrongDimension": "発見した構造物は別のディメンションにあります",
 

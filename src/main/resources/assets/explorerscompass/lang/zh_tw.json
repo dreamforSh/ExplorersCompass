@@ -7,6 +7,11 @@
 
     "_comment": "STRINGS - BUTTONS",
     "string.explorerscompass.back": "返回",
+    "string.explorerscompass.bookmarks": "已定位地點",
+    "string.explorerscompass.clearAll": "全部清除",
+    "string.explorerscompass.pointAt": "指向此處",
+    "string.explorerscompass.remove": "刪除",
+    "string.explorerscompass.share": "分享",
     "string.explorerscompass.clearCache": "清空快取",
     "string.explorerscompass.searchForGroup": "搜尋同組結構",
     "string.explorerscompass.searchForNext": "搜尋下一個",
@@ -34,6 +39,9 @@
     "string.explorerscompass.allDimensions": "全部維度",
     "string.explorerscompass.currentDimension": "目前維度",
     "string.explorerscompass.inactive": "未啟用",
+    "string.explorerscompass.copyCoordinates": "點擊複製座標",
+    "string.explorerscompass.noBookmarks": "還沒有已定位的地點",
+    "string.explorerscompass.sharedLocation": "%1$s 找到了 %2$s：%3$s（%4$s）",
     "string.explorerscompass.searchHint": "搜尋（@模組）",
     "string.explorerscompass.wrongDimension": "發現的結構不在目前的維度",
 

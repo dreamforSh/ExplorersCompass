@@ -7,6 +7,11 @@
 
     "_comment": "STRINGS - BUTTONS",
     "string.explorerscompass.back": "Volver",
+    "string.explorerscompass.bookmarks": "Localizados",
+    "string.explorerscompass.clearAll": "Borrar todo",
+    "string.explorerscompass.pointAt": "Apuntar",
+    "string.explorerscompass.remove": "Eliminar",
+    "string.explorerscompass.share": "Compartir",
     "string.explorerscompass.clearCache": "Borrar caché",
     "string.explorerscompass.searchForGroup": "Busqueda de grupo",
     "string.explorerscompass.searchForNext": "Buscar siguiente",
@@ -34,6 +39,9 @@
     "string.explorerscompass.allDimensions": "Todas las dimensiones",
     "string.explorerscompass.currentDimension": "Dimensión actual",
     "string.explorerscompass.inactive": "Inactivo",
+    "string.explorerscompass.copyCoordinates": "Haz clic para copiar las coordenadas",
+    "string.explorerscompass.noBookmarks": "Aún no se ha localizado nada",
+    "string.explorerscompass.sharedLocation": "%1$s localizó %2$s en %3$s (%4$s)",
     "string.explorerscompass.searchHint": "Buscar (@mod)",
     "string.explorerscompass.wrongDimension": "La estructura localizada está en otra dimensión",
 

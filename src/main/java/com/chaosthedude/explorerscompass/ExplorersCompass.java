@@ -13,9 +13,11 @@ import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.config.CustomModelDataConfig;
 import com.chaosthedude.explorerscompass.config.StructureGroupsConfig;
 import com.chaosthedude.explorerscompass.items.ExplorersCompassItem;
+import com.chaosthedude.explorerscompass.network.BookmarkActionPacket;
 import com.chaosthedude.explorerscompass.network.ClearCachePacket;
 import com.chaosthedude.explorerscompass.network.CompassSearchForNextPacket;
 import com.chaosthedude.explorerscompass.network.CompassSearchPacket;
+import com.chaosthedude.explorerscompass.network.ShareLocationPacket;
 import com.chaosthedude.explorerscompass.network.SyncPacket;
 import com.chaosthedude.explorerscompass.network.TeleportPacket;
 import com.chaosthedude.explorerscompass.util.CompassState;
@@ -87,6 +89,8 @@ public class ExplorersCompass {
 		network.registerMessage(1, TeleportPacket.class, TeleportPacket::toBytes, TeleportPacket::new, TeleportPacket::handle);
 		network.registerMessage(3, CompassSearchForNextPacket.class, CompassSearchForNextPacket::toBytes, CompassSearchForNextPacket::new, CompassSearchForNextPacket::handle);
 		network.registerMessage(4, ClearCachePacket.class, ClearCachePacket::toBytes, ClearCachePacket::new, ClearCachePacket::handle);
+		network.registerMessage(5, BookmarkActionPacket.class, BookmarkActionPacket::toBytes, BookmarkActionPacket::new, BookmarkActionPacket::handle);
+		network.registerMessage(6, ShareLocationPacket.class, ShareLocationPacket::toBytes, ShareLocationPacket::new, ShareLocationPacket::handle);
 
 		// Client packet
 		network.registerMessage(2, SyncPacket.class, SyncPacket::toBytes, SyncPacket::new, SyncPacket::handle);

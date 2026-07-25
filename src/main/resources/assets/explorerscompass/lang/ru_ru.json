@@ -7,6 +7,11 @@
 
     "_comment": "STRINGS - BUTTONS",
     "string.explorerscompass.back": "Назад",
+    "string.explorerscompass.bookmarks": "Найденные",
+    "string.explorerscompass.clearAll": "Очистить всё",
+    "string.explorerscompass.pointAt": "Указать сюда",
+    "string.explorerscompass.remove": "Удалить",
+    "string.explorerscompass.share": "Поделиться",
     "string.explorerscompass.clearCache": "Очистить кэш",
     "string.explorerscompass.searchForGroup": "Поиск группы",
     "string.explorerscompass.searchForNext": "Искать следующую",
@@ -34,6 +39,9 @@
     "string.explorerscompass.allDimensions": "Все измерения",
     "string.explorerscompass.currentDimension": "Текущее измерение",
     "string.explorerscompass.inactive": "Неактивен",
+    "string.explorerscompass.copyCoordinates": "Нажмите, чтобы скопировать координаты",
+    "string.explorerscompass.noBookmarks": "Пока ничего не найдено",
+    "string.explorerscompass.sharedLocation": "%1$s: найдено %2$s — %3$s (%4$s)",
     "string.explorerscompass.searchHint": "Поиск (@мод)",
     "string.explorerscompass.wrongDimension": "Найденная структура находится в другом измерении",
 

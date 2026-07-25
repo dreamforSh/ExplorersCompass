@@ -7,6 +7,11 @@
 
     "_comment": "STRINGS - BUTTONS",
     "string.explorerscompass.back": "Back",
+    "string.explorerscompass.bookmarks": "Located",
+    "string.explorerscompass.clearAll": "Clear All",
+    "string.explorerscompass.pointAt": "Point At",
+    "string.explorerscompass.remove": "Remove",
+    "string.explorerscompass.share": "Share",
     "string.explorerscompass.clearCache": "Clear Cache",
     "string.explorerscompass.searchForGroup": "Search for Group",
     "string.explorerscompass.searchForNext": "Search for Next",
@@ -34,6 +39,9 @@
     "string.explorerscompass.allDimensions": "All Dimensions",
     "string.explorerscompass.currentDimension": "Current Dimension",
     "string.explorerscompass.inactive": "Inactive",
+    "string.explorerscompass.copyCoordinates": "Click to copy the coordinates",
+    "string.explorerscompass.noBookmarks": "Nothing located yet",
+    "string.explorerscompass.sharedLocation": "%1$s located %2$s at %3$s (%4$s)",
     "string.explorerscompass.searchHint": "Search (@mod)",
     "string.explorerscompass.wrongDimension": "The located structure is in a different dimension",
 

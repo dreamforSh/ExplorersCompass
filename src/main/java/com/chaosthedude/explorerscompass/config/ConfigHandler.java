@@ -27,6 +27,9 @@ public class ConfigHandler {
 		public final ForgeConfigSpec.IntValue maxSamples;
 		public final ForgeConfigSpec.IntValue maxSearchTimePerTick;
 		public final ForgeConfigSpec.IntValue searchRequestCooldownMillis;
+		public final ForgeConfigSpec.IntValue maxBookmarks;
+		public final ForgeConfigSpec.BooleanValue allowSharing;
+		public final ForgeConfigSpec.IntValue shareCooldownMillis;
 
 		General(ForgeConfigSpec.Builder builder) {
 			String desc;
@@ -56,6 +59,15 @@ public class ConfigHandler {
 			desc = "The minimum time in milliseconds between searches started by the same player. Search requests arriving faster than this are ignored. This guards against modified clients restarting expensive searches as fast as they can send packets. Set to 0 to disable.";
 			searchRequestCooldownMillis = builder.comment(desc).defineInRange("searchRequestCooldownMillis", 500, 0, 10000);
 
+			desc = "How many located structures a compass remembers, so that they can be pointed at again later. The oldest is dropped once this many have been collected. Set to 0 to disable remembering them.";
+			maxBookmarks = builder.comment(desc).defineInRange("maxBookmarks", 64, 0, 1024);
+
+			desc = "Allows players to announce a located structure to everyone else on the server.";
+			allowSharing = builder.comment(desc).define("allowSharing", true);
+
+			desc = "The minimum time in milliseconds between locations shared by the same player, so that sharing cannot be used to flood chat. Set to 0 to disable.";
+			shareCooldownMillis = builder.comment(desc).defineInRange("shareCooldownMillis", 3000, 0, 60000);
+
 			builder.pop();
 		}
 	}
@@ -67,6 +79,10 @@ public class ConfigHandler {
 		public final ForgeConfigSpec.IntValue xaeroWaypointColor;
 		public final ForgeConfigSpec.EnumValue<OverlaySide> overlaySide;
 		public final ForgeConfigSpec.IntValue overlayLineOffset;
+		public final ForgeConfigSpec.BooleanValue showDirectionBar;
+		public final ForgeConfigSpec.IntValue directionBarY;
+		public final ForgeConfigSpec.IntValue directionBarWidth;
+		public final ForgeConfigSpec.IntValue directionBarSpan;
 
 		Client(ForgeConfigSpec.Builder builder) {
 			String desc;
@@ -89,6 +105,18 @@ public class ConfigHandler {
 
 			desc = "The side for information rendered on the HUD. Ex: LEFT, RIGHT";
 			overlaySide = builder.comment(desc).defineEnum("overlaySide", OverlaySide.LEFT);
+
+			desc = "Displays a compass strip at the top of the screen marking the direction of the located structure.";
+			showDirectionBar = builder.comment(desc).define("showDirectionBar", true);
+
+			desc = "How far down from the top of the screen the direction strip is drawn.";
+			directionBarY = builder.comment(desc).defineInRange("directionBarY", 4, 0, 200);
+
+			desc = "How wide the direction strip is, in pixels of the scaled interface.";
+			directionBarWidth = builder.comment(desc).defineInRange("directionBarWidth", 240, 120, 480);
+
+			desc = "How much of the horizon the direction strip covers, in degrees. Lower values spread the marks further apart and make small changes in direction easier to see, higher values keep more of the horizon in view at once.";
+			directionBarSpan = builder.comment(desc).defineInRange("directionBarSpan", 120, 60, 360);
 
 			builder.pop();
 		}
