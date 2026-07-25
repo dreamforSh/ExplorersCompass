@@ -11,6 +11,7 @@ import com.mojang.datafixers.util.Pair;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -25,6 +26,9 @@ import net.minecraftforge.common.WorldWorkerManager;
 
 public abstract class StructureSearchWorker<T extends StructurePlacement> implements WorldWorkerManager.IWorker {
 
+	// Granularity in blocks of the search radius reported to the compass while a search is running
+	private static final int RADIUS_REPORT_INTERVAL = 250;
+
 	protected String managerId;
 	protected ServerLevel level;
 	protected Player player;
@@ -33,6 +37,7 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> implem
 	protected BlockPos currentPos;
 	protected T placement;
 	protected List<Structure> structureSet;
+	protected long seed;
 	protected int samples;
 	protected boolean finished;
 	protected int lastRadiusThreshold;
@@ -49,6 +54,7 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> implem
 		this.placement = placement;
 		this.managerId = managerId;
 
+		seed = level.getSeed();
 		currentPos = startPos;
 		samples = 0;
 		sliceStartTime = -1L;
@@ -93,9 +99,9 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> implem
 			return false;
 		}
 
-		// Forge hands a worker the remainder of the tick and only checks the clock between calls, so a search
-		// that samples expensive locations can stall the server for as long as it likes. Give up the rest of
-		// the tick once this worker has used its slice.
+		// Forge hands a worker the remainder of the tick and only checks the clock between calls, so a
+		// search that samples expensive locations can stall the server for as long as it likes. Give up
+		// the rest of the tick once this worker has used its slice.
 		if (!callAgain || System.currentTimeMillis() - sliceStartTime >= ConfigHandler.GENERAL.maxSearchTimePerTick.get()) {
 			sliceStartTime = -1L;
 			return false;
@@ -105,11 +111,19 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> implem
 	}
 
 	/**
-	 * Samples a single location. Returns true if this worker should be called again, false if it is done.
+	 * Samples a single location. Returns true if this worker should be called again, false if it is
+	 * done.
 	 */
 	protected abstract boolean doSample();
 
+	/**
+	 * Returns the position and structure generating in the given chunk, or null if there is none.
+	 */
 	protected Pair<BlockPos, Structure> getStructureGeneratingAt(ChunkPos chunkPos) {
+		if (!canPlaceAt(chunkPos)) {
+			return null;
+		}
+
 		for (Structure structure : structureSet) {
 			StructureCheckResult result = level.structureManager().checkStructurePresence(chunkPos, structure, false);
 			if (result != StructureCheckResult.START_NOT_PRESENT) {
@@ -126,6 +140,18 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> implem
 		}
 
 		return null;
+	}
+
+	/**
+	 * Whether this placement is allowed to put a structure in the given chunk. This is the same
+	 * condition the chunk generator applies when it generates structures, so a chunk it rejects
+	 * cannot hold one and the presence check, which reads from disk and may run structure
+	 * generation, can be skipped entirely.
+	 */
+	protected boolean canPlaceAt(ChunkPos chunkPos) {
+		final ServerChunkCache chunkSource = level.getChunkSource();
+		return placement.isStructureChunk(chunkSource.getGenerator(), chunkSource.randomState(), seed,
+				chunkPos.x, chunkPos.z);
 	}
 
 	protected void succeed(BlockPos pos, Structure structure) {
@@ -147,11 +173,12 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> implem
 
 	protected void fail() {
 		ExplorersCompass.LOGGER.info("SearchWorkerManager " + managerId + ": " + getName() + " failed with " + (shouldLogRadius() ? getRadius() + " radius, " : "") + samples + " samples");
-		// Mark this worker as finished before handing off to the compass: notifying it starts the next worker
-		// for this search, and this one must not be considered live anymore if anything there goes wrong.
+		// Mark this worker as finished before handing off to the compass: notifying it starts the next
+		// worker for this search, and this one must not be considered live anymore if anything there
+		// goes wrong.
 		finished = true;
 		if (!stack.isEmpty() && stack.getItem() == ExplorersCompass.explorersCompass) {
-			((ExplorersCompassItem) stack.getItem()).fail(stack, roundRadius(getRadius(), 250), samples);
+			((ExplorersCompassItem) stack.getItem()).fail(stack, roundRadius(getRadius(), RADIUS_REPORT_INTERVAL), samples);
 		} else {
 			ExplorersCompass.LOGGER.error("SearchWorkerManager " + managerId + ": " + getName() + " found invalid compass after failed search");
 		}
@@ -172,11 +199,11 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> implem
 
 	protected void updateSearchRadius() {
 		int radius = getRadius();
-		if (radius > 250 && radius / 250 > lastRadiusThreshold) {
+		if (radius > RADIUS_REPORT_INTERVAL && radius / RADIUS_REPORT_INTERVAL > lastRadiusThreshold) {
 			if (!stack.isEmpty() && stack.getItem() == ExplorersCompass.explorersCompass) {
-				((ExplorersCompassItem) stack.getItem()).setSearchRadius(stack, roundRadius(radius, 250), player);
+				((ExplorersCompassItem) stack.getItem()).setSearchRadius(stack, roundRadius(radius, RADIUS_REPORT_INTERVAL), player);
 			}
-			lastRadiusThreshold = radius / 250;
+			lastRadiusThreshold = radius / RADIUS_REPORT_INTERVAL;
 		}
 	}
 

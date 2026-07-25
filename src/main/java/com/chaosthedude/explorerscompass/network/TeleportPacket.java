@@ -65,8 +65,9 @@ public class TeleportPacket {
 		final int minY = level.getMinBuildHeight();
 		final int maxY = level.getMaxBuildHeight() - 1;
 
-		// Search outwards from sea level, but stop at the build limits: a column without a valid position
-		// anywhere in it (a structure over the void, for example) would otherwise loop forever.
+		// Search outwards from sea level, but stop at the build limits: a column without a valid
+		// position anywhere in it (a structure over the void, for example) would otherwise loop
+		// forever.
 		for (int offset = 0; seaLevel + offset <= maxY || seaLevel - offset >= minY; offset++) {
 			int upY = seaLevel + offset;
 			if (upY <= maxY && isValidTeleportPosition(level, new BlockPos(x, upY, z))) {

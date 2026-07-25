@@ -2,7 +2,6 @@ package com.chaosthedude.explorerscompass.sorting;
 
 import com.chaosthedude.explorerscompass.util.StructureUtils;
 
-import net.minecraft.client.Minecraft;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.api.distmarker.Dist;

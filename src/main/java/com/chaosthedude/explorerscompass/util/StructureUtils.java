@@ -3,10 +3,13 @@ package com.chaosthedude.explorerscompass.util;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 import org.apache.commons.lang3.text.WordUtils;
 
@@ -37,11 +40,22 @@ import net.minecraftforge.fml.ModList;
 
 public class StructureUtils {
 
+	/** Group of a structure that does not belong to any structure set. */
+	public static final ResourceLocation NO_TYPE_KEY = new ResourceLocation(ExplorersCompass.MODID, "none");
+
 	private static final ResourceLocation STRONGHOLD_KEY = new ResourceLocation("minecraft", "stronghold");
+	private static final ResourceLocation OVERWORLD_KEY = new ResourceLocation("minecraft", "overworld");
+
+	private static final String REGEX_METACHARACTERS = "\\.[]{}()+^$|";
+
+	// Compiled forms of the configured blacklist globs, rebuilt when the config changes. Only ever
+	// touched from the server thread.
+	private static List<String> cachedBlacklist;
+	private static List<Pattern> cachedBlacklistPatterns;
 
 	/**
-	 * Determining the group of a structure means scanning every structure set, so build this from an existing
-	 * structure to group mapping instead of resolving every structure a second time.
+	 * Determining the group of a structure means scanning every structure set, so build this from an
+	 * existing structure to group mapping instead of resolving every structure a second time.
 	 */
 	public static ListMultimap<ResourceLocation, ResourceLocation> getTypeKeysToStructureKeys(Map<ResourceLocation, ResourceLocation> structureKeysToTypeKeys) {
 		ListMultimap<ResourceLocation, ResourceLocation> typeKeysToStructureKeys = ArrayListMultimap.create();
@@ -51,14 +65,49 @@ public class StructureUtils {
 		return typeKeysToStructureKeys;
 	}
 
+	/**
+	 * Maps the key of every structure in the level to the key of the structure set it belongs to, or
+	 * to {@link #NO_TYPE_KEY} when it belongs to none. Walks the structure sets once and inverts them,
+	 * rather than scanning all of them again for every structure the way
+	 * {@link #getTypeForStructure} has to.
+	 */
 	public static Map<ResourceLocation, ResourceLocation> getStructureKeysToTypeKeys(ServerLevel level) {
-		Map<ResourceLocation, ResourceLocation> structureKeysToStructureKeys = new HashMap<ResourceLocation, ResourceLocation>();
-		for (Structure structure : getStructureRegistry(level)) {
-			structureKeysToStructureKeys.put(getKeyForStructure(level, structure), getTypeForStructure(level, structure));
+		final Registry<Structure> structureRegistry = getStructureRegistry(level);
+		final Registry<StructureSet> setRegistry = getStructureSetRegistry(level);
+		final Map<ResourceLocation, ResourceLocation> structureKeysToTypeKeys = new HashMap<ResourceLocation, ResourceLocation>();
+
+		for (StructureSet set : setRegistry) {
+			final ResourceLocation setKey = setRegistry.getKey(set);
+			for (StructureSelectionEntry entry : set.structures()) {
+				// A structure set from a data pack can reference a structure that failed to load, and reading
+				// the value of such a holder throws instead of returning null
+				if (!entry.structure().isBound()) {
+					continue;
+				}
+
+				final ResourceLocation structureKey = structureRegistry.getKey(entry.structure().value());
+				if (structureKey != null && setKey != null) {
+					// The first set that lists a structure wins, matching getTypeForStructure
+					structureKeysToTypeKeys.putIfAbsent(structureKey, setKey);
+				}
+			}
 		}
-		return structureKeysToStructureKeys;
+
+		for (Structure structure : structureRegistry) {
+			final ResourceLocation structureKey = structureRegistry.getKey(structure);
+			if (structureKey != null) {
+				structureKeysToTypeKeys.putIfAbsent(structureKey, NO_TYPE_KEY);
+			}
+		}
+
+		return structureKeysToTypeKeys;
 	}
 
+	/**
+	 * Returns the key of the structure set the given structure belongs to, or {@link #NO_TYPE_KEY}
+	 * when it belongs to none. Prefer {@link #getStructureKeysToTypeKeys} when resolving more than a
+	 * few structures.
+	 */
 	public static ResourceLocation getTypeForStructure(ServerLevel level, Structure structure) {
 		Registry<StructureSet> registry = getStructureSetRegistry(level);
 		for (StructureSet set : registry) {
@@ -70,7 +119,7 @@ public class StructureUtils {
 				}
 			}
 		}
-		return new ResourceLocation(ExplorersCompass.MODID, "none");
+		return NO_TYPE_KEY;
 	}
 
 	public static ResourceLocation getKeyForStructure(ServerLevel level, Structure structure) {
@@ -92,17 +141,23 @@ public class StructureUtils {
 	public static List<ResourceLocation> getAllowedStructureKeys(ServerLevel level) {
 		final List<ResourceLocation> structures = new ArrayList<ResourceLocation>();
 		for (Structure structure : getStructureRegistry(level)) {
-			if (structure != null && getKeyForStructure(level, structure) != null && !structureIsBlacklisted(level, structure)) {
-				structures.add(getKeyForStructure(level, structure));
+			final ResourceLocation structureKey = getKeyForStructure(level, structure);
+			if (structureKey != null && !structureIsBlacklisted(level, structure)) {
+				structures.add(structureKey);
 			}
 		}
 		return structures;
 	}
 
 	public static boolean structureIsBlacklisted(ServerLevel level, Structure structure) {
-		final List<String> structureBlacklist = ConfigHandler.GENERAL.structureBlacklist.get();
-		for (String structureKey : structureBlacklist) {
-			if (getKeyForStructure(level, structure).toString().matches(convertToRegex(structureKey))) {
+		final ResourceLocation structureKey = getKeyForStructure(level, structure);
+		if (structureKey == null) {
+			return false;
+		}
+
+		final String name = structureKey.toString();
+		for (Pattern pattern : getBlacklistPatterns()) {
+			if (pattern.matcher(name).matches()) {
 				return true;
 			}
 		}
@@ -110,28 +165,46 @@ public class StructureUtils {
 	}
 
 	public static List<ResourceLocation> getGeneratingDimensionKeys(ServerLevel serverLevel, Structure structure) {
-		final List<ResourceLocation> dimensions = new ArrayList<ResourceLocation>();
+		return getGeneratingDimensionKeys(serverLevel, structure, getBiomesPerDimension(serverLevel));
+	}
+
+	public static ListMultimap<ResourceLocation, ResourceLocation> getGeneratingDimensionsForAllowedStructures(ServerLevel serverLevel) {
+		// Collect the biomes of each dimension once, instead of once per structure
+		final Map<ResourceLocation, Set<Holder<Biome>>> biomesPerDimension = getBiomesPerDimension(serverLevel);
+		final ListMultimap<ResourceLocation, ResourceLocation> dimensionsForAllowedStructures = ArrayListMultimap.create();
+		for (ResourceLocation structureKey : getAllowedStructureKeys(serverLevel)) {
+			final Structure structure = getStructureForKey(serverLevel, structureKey);
+			if (structure != null) {
+				dimensionsForAllowedStructures.putAll(structureKey, getGeneratingDimensionKeys(serverLevel, structure, biomesPerDimension));
+			}
+		}
+		return dimensionsForAllowedStructures;
+	}
+
+	private static Map<ResourceLocation, Set<Holder<Biome>>> getBiomesPerDimension(ServerLevel serverLevel) {
+		final Map<ResourceLocation, Set<Holder<Biome>>> biomesPerDimension = new LinkedHashMap<ResourceLocation, Set<Holder<Biome>>>();
 		for (ServerLevel level : serverLevel.getServer().getAllLevels()) {
-			ChunkGenerator chunkGenerator = level.getChunkSource().getGenerator();
-			Set<Holder<Biome>> biomeSet = chunkGenerator.getBiomeSource().possibleBiomes();
-			if (!structure.biomes().stream().noneMatch(biomeSet::contains)) {
-				dimensions.add(level.dimension().location());
+			final ChunkGenerator chunkGenerator = level.getChunkSource().getGenerator();
+			biomesPerDimension.put(level.dimension().location(), chunkGenerator.getBiomeSource().possibleBiomes());
+		}
+		return biomesPerDimension;
+	}
+
+	private static List<ResourceLocation> getGeneratingDimensionKeys(ServerLevel serverLevel, Structure structure, Map<ResourceLocation, Set<Holder<Biome>>> biomesPerDimension) {
+		final List<ResourceLocation> dimensions = new ArrayList<ResourceLocation>();
+		for (Map.Entry<ResourceLocation, Set<Holder<Biome>>> entry : biomesPerDimension.entrySet()) {
+			for (Holder<Biome> biome : structure.biomes()) {
+				if (entry.getValue().contains(biome)) {
+					dimensions.add(entry.getKey());
+					break;
+				}
 			}
 		}
 		// Fix empty dimensions for stronghold
 		if (dimensions.isEmpty() && STRONGHOLD_KEY.equals(getKeyForStructure(serverLevel, structure))) {
-			dimensions.add(new ResourceLocation("minecraft:overworld"));
+			dimensions.add(OVERWORLD_KEY);
 		}
 		return dimensions;
-	}
-
-	public static ListMultimap<ResourceLocation, ResourceLocation> getGeneratingDimensionsForAllowedStructures(ServerLevel serverLevel) {
-		ListMultimap<ResourceLocation, ResourceLocation> dimensionsForAllowedStructures = ArrayListMultimap.create();
-		for (ResourceLocation structureKey : getAllowedStructureKeys(serverLevel)) {
-			Structure structure = getStructureForKey(serverLevel, structureKey);
-			dimensionsForAllowedStructures.putAll(structureKey, getGeneratingDimensionKeys(serverLevel, structure));
-		}
-		return dimensionsForAllowedStructures;
 	}
 
 	public static int getHorizontalDistanceToLocation(Player player, int x, int z) {
@@ -206,22 +279,49 @@ public class StructureUtils {
 		return level.registryAccess().ownedRegistryOrThrow(Registry.STRUCTURE_SET_REGISTRY);
 	}
 
+	/**
+	 * Compiles the configured blacklist globs, reusing the result until the config changes.
+	 * Compiling a pattern costs far more than matching one, and the blacklist is matched against
+	 * every structure in the level every time the structure list is built.
+	 */
+	private static List<Pattern> getBlacklistPatterns() {
+		final List<String> blacklist = ConfigHandler.GENERAL.structureBlacklist.get();
+		if (!blacklist.equals(cachedBlacklist)) {
+			final List<Pattern> patterns = new ArrayList<Pattern>(blacklist.size());
+			for (String glob : blacklist) {
+				try {
+					patterns.add(Pattern.compile(convertToRegex(glob)));
+				} catch (PatternSyntaxException e) {
+					ExplorersCompass.LOGGER.warn("Ignoring blacklist entry " + glob + ": " + e.getMessage());
+				}
+			}
+			cachedBlacklist = new ArrayList<String>(blacklist);
+			cachedBlacklistPatterns = patterns;
+		}
+		return cachedBlacklistPatterns;
+	}
+
+	/**
+	 * Translates a glob, in which {@code *} matches any number of characters and {@code ?} matches
+	 * exactly one, into an equivalent regular expression. Every other character is matched
+	 * literally.
+	 */
 	private static String convertToRegex(String glob) {
-		String regex = "^";
-		for (char i = 0; i < glob.length(); i++) {
-			char c = glob.charAt(i);
+		final StringBuilder regex = new StringBuilder(glob.length() + 2).append('^');
+		for (int i = 0; i < glob.length(); i++) {
+			final char c = glob.charAt(i);
 			if (c == '*') {
-				regex += ".*";
+				regex.append(".*");
 			} else if (c == '?') {
-				regex += ".";
-			} else if (c == '.') {
-				regex += "\\.";
+				regex.append('.');
 			} else {
-				regex += c;
+				if (REGEX_METACHARACTERS.indexOf(c) >= 0) {
+					regex.append('\\');
+				}
+				regex.append(c);
 			}
 		}
-		regex += "$";
-		return regex;
+		return regex.append('$').toString();
 	}
 
 }

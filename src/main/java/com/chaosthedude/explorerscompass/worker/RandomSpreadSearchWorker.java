@@ -43,8 +43,8 @@ public class RandomSpreadSearchWorker extends StructureSearchWorker<RandomSpread
 				int sampleX = startSectionPosX + (spacing * x);
 				int sampleZ = startSectionPosZ + (spacing * z);
 
-				ChunkPos chunkPos = placement.getPotentialStructureChunk(level.getSeed(), sampleX, sampleZ);
-				currentPos = new BlockPos(SectionPos.sectionToBlockCoord(chunkPos.x, 8), 0, SectionPos.sectionToBlockCoord(chunkPos.z, 8));
+				ChunkPos chunkPos = placement.getPotentialStructureChunk(seed, sampleX, sampleZ);
+				currentPos = chunkPos.getMiddleBlockPosition(0);
 
 				Pair<BlockPos, Structure> pair = getStructureGeneratingAt(chunkPos);
 				samples++;
@@ -88,27 +88,6 @@ public class RandomSpreadSearchWorker extends StructureSearchWorker<RandomSpread
 	@Override
 	public boolean shouldLogRadius() {
 		return true;
-	}
-
-	// Non-optimized method to get the closest structure, for testing purposes
-	private Pair<BlockPos, Structure> getClosest() {
-		for (int x = -length; x <= length; ++x) {
-			boolean shouldSampleX = x == -length || x == length;
-			for (int z = -length; z <= length; ++z) {
-				boolean shouldSampleZ = z == -length || z == length;
-				if (shouldSampleX || shouldSampleZ) {
-					int sampleX = startSectionPosX + (spacing * x);
-					int sampleZ = startSectionPosZ + (spacing * z);
-					ChunkPos chunkPos = placement.getPotentialStructureChunk(level.getSeed(), sampleX, sampleZ);
-					Pair<BlockPos, Structure> pair = getStructureGeneratingAt(chunkPos);
-					if (pair != null) {
-						return pair;
-					}
-				}
-			}
-		}
-
-		return null;
 	}
 
 }

@@ -80,9 +80,9 @@ public class ExplorersCompassItem extends Item {
 
 		ServerLevel serverLevel = (ServerLevel) level;
 
-		// The keys arrive over the network, so they may be stale (the client keeps the structure list from the
-		// last world it synced with), duplicated, or simply made up. Resolve them against this world and drop
-		// anything that does not belong, rather than handing null structures to world generation.
+		// The keys arrive over the network, so they may be stale (the client keeps the structure list
+		// from the last world it synced with), duplicated, or simply made up. Resolve them against this
+		// world and drop anything that does not belong, rather than handing nulls to world generation.
 		List<Structure> structures = new ArrayList<Structure>();
 		Set<ResourceLocation> seenKeys = new HashSet<ResourceLocation>();
 		for (ResourceLocation key : structureKeys) {

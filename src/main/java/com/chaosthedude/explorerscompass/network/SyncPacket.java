@@ -17,13 +17,11 @@ import net.minecraftforge.network.NetworkEvent;
 
 public class SyncPacket {
 
-	// A custom payload may not exceed 1048576 bytes, and a large modpack has more than enough structures to
-	// push a single packet past that, which disconnects the player as soon as they use the compass. Send the
-	// structure list in batches that stay well below the limit instead.
+	// A custom payload may not exceed 1048576 bytes, and a large modpack has more than enough
+	// structures to push a single packet past that, which disconnects the player as soon as they use
+	// the compass. Send the structure list in batches that stay well below the limit instead.
 	private static final int MAX_BATCH_BYTES = 32768;
 	private static final int MAX_BATCH_ENTRIES = 512;
-
-	private static final ResourceLocation NO_TYPE_KEY = new ResourceLocation(ExplorersCompass.MODID, "none");
 
 	// The batches received so far, applied all at once when the final batch arrives
 	private static final List<ResourceLocation> receivedStructureKeys = new ArrayList<ResourceLocation>();
@@ -78,10 +76,10 @@ public class SyncPacket {
 	}
 
 	/**
-	 * Splits the structure list into as many packets as it takes for each one to stay below the custom payload
-	 * size limit. Always returns at least one packet, so that a client is still updated when there is nothing
-	 * to send. The group to structure mapping is not sent: it is the inverse of the structure to group mapping
-	 * and is rebuilt by the client.
+	 * Splits the structure list into as many packets as it takes for each one to stay below the
+	 * custom payload size limit. Always returns at least one packet, so that a client is still
+	 * updated when there is nothing to send. The group to structure mapping is not sent: it is the
+	 * inverse of the structure to group mapping and is rebuilt by the client.
 	 */
 	public static List<SyncPacket> create(boolean canTeleport, List<ResourceLocation> allowedStructureKeys, ListMultimap<ResourceLocation, ResourceLocation> dimensionKeysForAllowedStructureKeys, Map<ResourceLocation, ResourceLocation> structureKeysToTypeKeys) {
 		final List<SyncPacket> packets = new ArrayList<SyncPacket>();
@@ -90,7 +88,7 @@ public class SyncPacket {
 
 		for (ResourceLocation structureKey : allowedStructureKeys) {
 			ResourceLocation typeKey = structureKeysToTypeKeys.get(structureKey);
-			StructureEntry entry = new StructureEntry(structureKey, typeKey != null ? typeKey : NO_TYPE_KEY, new ArrayList<ResourceLocation>(dimensionKeysForAllowedStructureKeys.get(structureKey)));
+			StructureEntry entry = new StructureEntry(structureKey, typeKey != null ? typeKey : StructureUtils.NO_TYPE_KEY, new ArrayList<ResourceLocation>(dimensionKeysForAllowedStructureKeys.get(structureKey)));
 			int entryBytes = entry.maxByteSize();
 
 			if (!batch.isEmpty() && (batch.size() >= MAX_BATCH_ENTRIES || batchBytes + entryBytes > MAX_BATCH_BYTES)) {
@@ -153,8 +151,8 @@ public class SyncPacket {
 		}
 
 		/**
-		 * An upper bound on the number of bytes this entry occupies on the wire. Resource locations are ASCII,
-		 * so their encoded length is their string length plus a length prefix of at most three bytes.
+		 * An upper bound on the number of bytes this entry occupies on the wire. Resource locations are
+		 * ASCII, so their encoded length is their string length plus a prefix of at most three bytes.
 		 */
 		private int maxByteSize() {
 			int size = structureKey.toString().length() + typeKey.toString().length() + 11;

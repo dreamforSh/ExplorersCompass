@@ -9,7 +9,7 @@ import org.apache.commons.lang3.RandomStringUtils;
 import com.chaosthedude.explorerscompass.ExplorersCompass;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
 
-import it.unimi.dsi.fastutil.objects.Object2ObjectArrayMap;
+import it.unimi.dsi.fastutil.objects.Object2ObjectLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
@@ -34,7 +34,9 @@ public class SearchWorkerManager {
 	public void createWorkers(ServerLevel level, Player player, ItemStack stack, List<Structure> structures, BlockPos startPos) {
 		workers.clear();
 		
-		Map<StructurePlacement, List<Structure>> placementToStructuresMap = new Object2ObjectArrayMap<>();
+		// Linked so that placements stay in the order the structures were requested in, since the
+		// workers are run one after another and the first one to find something wins
+		Map<StructurePlacement, List<Structure>> placementToStructuresMap = new Object2ObjectLinkedOpenHashMap<>();
 		
 		for (Structure structure : structures) {
 			Holder<Structure> holder = StructureUtils.getHolderForStructure(level, structure);

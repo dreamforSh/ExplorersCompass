@@ -70,8 +70,8 @@ public class ExplorersCompassScreen extends Screen {
 		searchTextField.tick();
 		teleportButton.active = explorersCompass.getState(stack) == CompassState.FOUND;
 		
-		// Check if the allowed structure list has synced. Comparing contents rather than sizes matters when
-		// opening the compass in a world whose structure list differs from the one that was synced last:
+		// Check if the allowed structure list has synced. Comparing contents rather than sizes matters
+		// when opening the compass in a world whose structure list differs from the one synced last:
 		// searching for a structure that does not exist here would be rejected by the server.
 		if (!allowedStructureKeys.equals(ExplorersCompass.allowedStructureKeys)) {
 			removeWidget(selectionList);

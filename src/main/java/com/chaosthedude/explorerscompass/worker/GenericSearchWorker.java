@@ -6,7 +6,6 @@ import com.mojang.datafixers.util.Pair;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.SectionPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -45,7 +44,7 @@ public class GenericSearchWorker extends StructureSearchWorker<StructurePlacemen
 			}
 
 			ChunkPos chunkPos = new ChunkPos(chunkX, chunkZ);
-			currentPos = new BlockPos(SectionPos.sectionToBlockCoord(chunkPos.x, 8), 0, SectionPos.sectionToBlockCoord(chunkPos.z, 8));
+			currentPos = chunkPos.getMiddleBlockPosition(0);
 
 			Pair<BlockPos, Structure> pair = getStructureGeneratingAt(chunkPos);
 			if (pair != null) {

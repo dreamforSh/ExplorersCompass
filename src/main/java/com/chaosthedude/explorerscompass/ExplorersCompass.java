@@ -47,8 +47,9 @@ public class ExplorersCompass {
 
 	public static final String MODID = "explorerscompass";
 
-	// Bump this whenever the packets change. Both sides have to declare the same version: a mismatch is then
-	// refused during the handshake with a clear message, instead of connecting and failing to decode later.
+	// Bump this whenever the packets change. Both sides have to declare the same version: a mismatch
+	// is then refused during the handshake with a clear message, instead of connecting and failing
+	// to decode later.
 	public static final String PROTOCOL_VERSION = "2.0";
 
 	public static final Logger LOGGER = LogManager.getLogger(MODID);
@@ -73,8 +74,8 @@ public class ExplorersCompass {
 	}
 
 	private void commonSetup(FMLCommonSetupEvent event) {
-		// Accept a matching version, or the absence of the channel altogether so that joining a server without
-		// the mod still works
+		// Accept a matching version, or the absence of the channel altogether so that joining a server
+		// without the mod still works
 		network = NetworkRegistry.newSimpleChannel(new ResourceLocation(MODID, MODID), () -> PROTOCOL_VERSION, NetworkRegistry.acceptMissingOr(PROTOCOL_VERSION), NetworkRegistry.acceptMissingOr(PROTOCOL_VERSION));
 
 		// Server packets
