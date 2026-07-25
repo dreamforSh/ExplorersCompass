@@ -3,6 +3,7 @@ package com.chaosthedude.explorerscompass.gui;
 import java.util.List;
 
 import com.chaosthedude.explorerscompass.ExplorersCompass;
+import com.chaosthedude.explorerscompass.client.SearchHistory;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -10,6 +11,7 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.ObjectSelectionList;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -39,10 +41,15 @@ public class StructureSearchEntry extends ObjectSelectionList.Entry<StructureSea
 
 	@Override
 	public void render(PoseStack poseStack, int par1, int par2, int par3, int par4, int par5, int par6, int par7, boolean par8, float par9) {
-		mc.font.draw(poseStack, Component.literal(StructureUtils.getPrettyStructureName(structureKey)), par3 + 1, par2 + 1, 0xffffff);
+		int nameX = par3 + 1;
+		if (SearchHistory.isFavorite(structureKey)) {
+			mc.font.draw(poseStack, "★", nameX, par2 + 1, 0xFFAA00);
+			nameX += 10;
+		}
+		mc.font.draw(poseStack, Component.literal(StructureUtils.getPrettyStructureName(structureKey)), nameX, par2 + 1, 0xffffff);
 		mc.font.draw(poseStack, Component.translatable(("string.explorerscompass.source")).append(Component.literal(": " + StructureUtils.getPrettyStructureSource(structureKey))), par3 + 1, par2 + mc.font.lineHeight + 3, 0x808080);
 		// The group name is a display name, not a translation key, so it must not go through translatable
-		mc.font.draw(poseStack, Component.translatable(("string.explorerscompass.group")).append(Component.literal(": " + StructureUtils.getPrettyStructureName(ExplorersCompass.structureKeysToTypeKeys.get(structureKey)))), par3 + 1, par2 + mc.font.lineHeight + 14, 0x808080);
+		mc.font.draw(poseStack, Component.translatable(("string.explorerscompass.group")).append(Component.literal(": " + StructureUtils.getPrettyGroupName(ExplorersCompass.structureKeysToTypeKeys.get(structureKey)))), par3 + 1, par2 + mc.font.lineHeight + 14, 0x808080);
 		// Flag structures that cannot generate in the dimension the player is in, since searching for
 		// one of them here can only fail. An empty list means the dimensions could not be determined,
 		// so nothing is flagged.
@@ -55,6 +62,14 @@ public class StructureSearchEntry extends ObjectSelectionList.Entry<StructureSea
 	@Override
 	public boolean mouseClicked(double mouseX, double mouseY, int button) {
 		if (button == 0) {
+			if (Screen.hasControlDown()) {
+				// Ctrl-click picks several structures, to search for the nearest of them all at once
+				parentScreen.toggleMultiSelect(structureKey);
+				structuresList.selectStructure(this);
+				lastClickTime = 0;
+				return true;
+			}
+			parentScreen.clearMultiSelect();
 			structuresList.selectStructure(this);
 			if (Util.getMillis() - lastClickTime < 250L) {
 				searchForStructure();
@@ -63,6 +78,10 @@ public class StructureSearchEntry extends ObjectSelectionList.Entry<StructureSea
 				lastClickTime = Util.getMillis();
 				return false;
 			}
+		} else if (button == 1) {
+			// Right click stars a structure, pinning it to the top of the list
+			parentScreen.toggleFavorite(structureKey);
+			return true;
 		}
 		return false;
 	}

@@ -17,6 +17,8 @@ public class StructureSearchList extends ObjectSelectionList<StructureSearchEntr
 
 	private static final int SELECTION_COLOR = 0x60000000;
 	private static final int SELECTION_MARKER_COLOR = 0xC0FFFFFF;
+	private static final int MULTI_SELECTION_COLOR = 0x30000000;
+	private static final int MULTI_SELECTION_MARKER_COLOR = 0xC0FFAA00;
 
 	private final ExplorersCompassScreen parentScreen;
 
@@ -54,11 +56,15 @@ public class StructureSearchList extends ObjectSelectionList<StructureSearchEntr
 			if (rowBottom >= y0 && rowTop <= y1) {
 				int j1 = itemHeight - 4;
 				StructureSearchEntry entry = getEntry(j);
+				final int insideLeft = x0 + width / 2 - getRowWidth() / 2 + 2;
 				if (isSelectedItem(j)) {
 					// Fill the row and mark its left edge, so which entry the buttons will act on is obvious
-					final int insideLeft = x0 + width / 2 - getRowWidth() / 2 + 2;
 					RenderUtils.drawRect(insideLeft - 4, rowTop - 4, insideLeft + getRowWidth() + 4, rowTop + itemHeight, SELECTION_COLOR);
 					RenderUtils.drawRect(insideLeft - 4, rowTop - 4, insideLeft - 2, rowTop + itemHeight, SELECTION_MARKER_COLOR);
+				} else if (parentScreen.isMultiSelected(entry.getStructureKey())) {
+					// Rows picked with Ctrl-click show fainter, with a gold edge
+					RenderUtils.drawRect(insideLeft - 4, rowTop - 4, insideLeft + getRowWidth() + 4, rowTop + itemHeight, MULTI_SELECTION_COLOR);
+					RenderUtils.drawRect(insideLeft - 4, rowTop - 4, insideLeft - 2, rowTop + itemHeight, MULTI_SELECTION_MARKER_COLOR);
 				}
 				entry.render(poseStack, j, rowTop, getRowLeft(), getRowWidth(), j1, mouseX, mouseY, isMouseOver((double) mouseX, (double) mouseY) && Objects.equals(getEntryAtPosition((double) mouseX, (double) mouseY), entry), partialTicks);
 			}

@@ -18,6 +18,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.FluidTags;
+import net.minecraft.util.Mth;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
@@ -57,7 +58,7 @@ public class TeleportPacket {
 							return;
 						}
 
-						teleportWhenChunkIsReady(player, explorersCompass.getFoundStructureX(stack), explorersCompass.getFoundStructureZ(stack));
+						teleportWhenChunkIsReady(player, explorersCompass.getFoundStructureX(stack), explorersCompass.getFoundStructureY(stack), explorersCompass.getFoundStructureZ(stack));
 					}
 				} else {
 					ExplorersCompass.LOGGER.warn("Player " + player.getDisplayName().getString() + " tried to teleport but does not have permission.");
@@ -74,7 +75,7 @@ public class TeleportPacket {
 	 * a future lets the generation run on the worker threads instead, and the teleport itself runs
 	 * back on the server thread once they are done.
 	 */
-	private void teleportWhenChunkIsReady(ServerPlayer player, int x, int z) {
+	private void teleportWhenChunkIsReady(ServerPlayer player, int x, int structureY, int z) {
 		final ServerLevel level = player.getLevel();
 		level.getChunkSource().getChunkFuture(SectionPos.blockToSectionCoord(x), SectionPos.blockToSectionCoord(z), ChunkStatus.FULL, true).thenAcceptAsync((either) -> {
 			if (either.left().isEmpty()) {
@@ -86,7 +87,7 @@ public class TeleportPacket {
 				return;
 			}
 
-			final int y = findValidTeleportHeight(level, x, z);
+			final int y = findValidTeleportHeight(level, x, structureY, z);
 			player.stopRiding();
 			player.connection.teleport(x, y, z, player.getYRot(), player.getXRot());
 
@@ -98,25 +99,26 @@ public class TeleportPacket {
 	}
 
 	/**
-	 * The Y level to land at: the safe position closest to sea level. The column was just loaded,
-	 * so every read is served from memory, and each block of it is read at most once.
+	 * The Y level to land at: the safe position closest to the structure's height when the compass
+	 * recorded one, and to sea level otherwise. The column was just loaded, so every read is served
+	 * from memory, and each block of it is read at most once.
 	 */
-	private int findValidTeleportHeight(Level level, int x, int z) {
-		final int seaLevel = level.getSeaLevel();
+	private int findValidTeleportHeight(Level level, int x, int structureY, int z) {
 		final int minY = level.getMinBuildHeight();
 		final int maxY = level.getMaxBuildHeight() - 1;
+		final int scanCenter = structureY != ExplorersCompassItem.UNKNOWN_Y ? Mth.clamp(structureY, minY, maxY) : level.getSeaLevel();
 		final BlockState[] states = new BlockState[maxY - minY + 1];
 
-		// Search outwards from sea level, but stop at the build limits: a column without a valid
+		// Search outwards from the center, but stop at the build limits: a column without a valid
 		// position anywhere in it (a structure over the void, for example) would otherwise loop
 		// forever.
-		for (int offset = 0; seaLevel + offset <= maxY || seaLevel - offset >= minY; offset++) {
-			int upY = seaLevel + offset;
+		for (int offset = 0; scanCenter + offset <= maxY || scanCenter - offset >= minY; offset++) {
+			int upY = scanCenter + offset;
 			if (upY <= maxY && isValidTeleportPosition(level, x, z, upY, states)) {
 				return upY;
 			}
 
-			int downY = seaLevel - offset;
+			int downY = scanCenter - offset;
 			if (downY >= minY && isValidTeleportPosition(level, x, z, downY, states)) {
 				return downY;
 			}

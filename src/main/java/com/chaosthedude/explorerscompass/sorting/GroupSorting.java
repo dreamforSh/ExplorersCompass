@@ -18,7 +18,9 @@ public class GroupSorting implements ISorting {
 
 	@Override
 	public Object getValue(ResourceLocation key) {
-		return ExplorersCompass.structureKeysToTypeKeys.get(key);
+		// Falls back like compare does, and never returns null: the sort caches these values and
+		// compares them directly
+		return getTypeKey(key);
 	}
 
 	@Override

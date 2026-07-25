@@ -4,15 +4,19 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.function.Supplier;
 
 import com.chaosthedude.explorerscompass.ExplorersCompass;
+import com.chaosthedude.explorerscompass.config.StructureGroupsConfig;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ListMultimap;
 
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.NetworkEvent;
 
 public class SyncPacket {
@@ -28,24 +32,39 @@ public class SyncPacket {
 	private static final ListMultimap<ResourceLocation, ResourceLocation> receivedDimensionKeys = ArrayListMultimap.create();
 	private static final Map<ResourceLocation, ResourceLocation> receivedTypeKeys = new HashMap<ResourceLocation, ResourceLocation>();
 
+	// The version of the structure data each connected player was last sent, so that using the
+	// compass again does not re-send an unchanged list. Entries are dropped when a player logs out:
+	// after a relog the client may have been on another server meanwhile.
+	private static final Map<UUID, Integer> lastSyncedVersions = new HashMap<UUID, Integer>();
+
 	private boolean canTeleport;
+	private boolean listUnchanged;
 	private boolean firstBatch;
 	private boolean lastBatch;
 	private List<StructureEntry> entries;
+	private Map<ResourceLocation, String> groupNames;
 
-	private SyncPacket(boolean canTeleport, boolean firstBatch, boolean lastBatch, List<StructureEntry> entries) {
+	private SyncPacket(boolean canTeleport, boolean listUnchanged, boolean firstBatch, boolean lastBatch, List<StructureEntry> entries) {
 		this.canTeleport = canTeleport;
+		this.listUnchanged = listUnchanged;
 		this.firstBatch = firstBatch;
 		this.lastBatch = lastBatch;
 		this.entries = entries;
+		groupNames = Map.of();
 	}
 
 	public SyncPacket(FriendlyByteBuf buf) {
 		canTeleport = buf.readBoolean();
+		listUnchanged = buf.readBoolean();
+		entries = new ArrayList<StructureEntry>();
+		groupNames = new HashMap<ResourceLocation, String>();
+		if (listUnchanged) {
+			return;
+		}
+
 		firstBatch = buf.readBoolean();
 		lastBatch = buf.readBoolean();
 
-		entries = new ArrayList<StructureEntry>();
 		int numEntries = buf.readVarInt();
 		for (int i = 0; i < numEntries; i++) {
 			ResourceLocation structureKey = buf.readResourceLocation();
@@ -57,10 +76,22 @@ public class SyncPacket {
 			}
 			entries.add(new StructureEntry(structureKey, typeKey, dimensionKeys));
 		}
+
+		if (lastBatch) {
+			int numGroupNames = buf.readVarInt();
+			for (int i = 0; i < numGroupNames; i++) {
+				groupNames.put(buf.readResourceLocation(), buf.readUtf());
+			}
+		}
 	}
 
 	public void toBytes(FriendlyByteBuf buf) {
 		buf.writeBoolean(canTeleport);
+		buf.writeBoolean(listUnchanged);
+		if (listUnchanged) {
+			return;
+		}
+
 		buf.writeBoolean(firstBatch);
 		buf.writeBoolean(lastBatch);
 
@@ -73,6 +104,36 @@ public class SyncPacket {
 				buf.writeResourceLocation(dimensionKey);
 			}
 		}
+
+		if (lastBatch) {
+			buf.writeVarInt(groupNames.size());
+			for (Map.Entry<ResourceLocation, String> entry : groupNames.entrySet()) {
+				buf.writeResourceLocation(entry.getKey());
+				buf.writeUtf(entry.getValue());
+			}
+		}
+	}
+
+	/**
+	 * The packets that bring the given player up to date. When this player was already sent the
+	 * current version of the structure data, that is a single small packet carrying only
+	 * {@code canTeleport}: the full list is only re-sent when it actually changed, since on a large
+	 * pack it spans many packets.
+	 */
+	public static List<SyncPacket> createForPlayer(ServerPlayer player, boolean canTeleport, ServerLevel level) {
+		final int version = StructureUtils.getStructureDataVersion(level);
+		final Integer lastSynced = lastSyncedVersions.get(player.getUUID());
+		if (lastSynced != null && lastSynced.intValue() == version) {
+			return List.of(new SyncPacket(canTeleport, true, false, false, List.of()));
+		}
+
+		lastSyncedVersions.put(player.getUUID(), version);
+		return create(canTeleport, StructureUtils.getAllowedStructureKeys(level), StructureUtils.getGeneratingDimensionsForAllowedStructures(level), StructureUtils.getStructureKeysToTypeKeys(level));
+	}
+
+	/** Forgets what was synced to the given player, so that their next use syncs from scratch. */
+	public static void forgetPlayer(UUID playerId) {
+		lastSyncedVersions.remove(playerId);
 	}
 
 	/**
@@ -81,7 +142,7 @@ public class SyncPacket {
 	 * updated when there is nothing to send. The group to structure mapping is not sent: it is the
 	 * inverse of the structure to group mapping and is rebuilt by the client.
 	 */
-	public static List<SyncPacket> create(boolean canTeleport, List<ResourceLocation> allowedStructureKeys, ListMultimap<ResourceLocation, ResourceLocation> dimensionKeysForAllowedStructureKeys, Map<ResourceLocation, ResourceLocation> structureKeysToTypeKeys) {
+	private static List<SyncPacket> create(boolean canTeleport, List<ResourceLocation> allowedStructureKeys, ListMultimap<ResourceLocation, ResourceLocation> dimensionKeysForAllowedStructureKeys, Map<ResourceLocation, ResourceLocation> structureKeysToTypeKeys) {
 		final List<SyncPacket> packets = new ArrayList<SyncPacket>();
 		List<StructureEntry> batch = new ArrayList<StructureEntry>();
 		int batchBytes = 0;
@@ -92,7 +153,7 @@ public class SyncPacket {
 			int entryBytes = entry.maxByteSize();
 
 			if (!batch.isEmpty() && (batch.size() >= MAX_BATCH_ENTRIES || batchBytes + entryBytes > MAX_BATCH_BYTES)) {
-				packets.add(new SyncPacket(canTeleport, packets.isEmpty(), false, batch));
+				packets.add(new SyncPacket(canTeleport, false, packets.isEmpty(), false, batch));
 				batch = new ArrayList<StructureEntry>();
 				batchBytes = 0;
 			}
@@ -101,7 +162,9 @@ public class SyncPacket {
 			batchBytes += entryBytes;
 		}
 
-		packets.add(new SyncPacket(canTeleport, packets.isEmpty(), true, batch));
+		final SyncPacket last = new SyncPacket(canTeleport, false, packets.isEmpty(), true, batch);
+		last.groupNames = StructureGroupsConfig.getGroupNames();
+		packets.add(last);
 		return packets;
 	}
 
@@ -111,6 +174,12 @@ public class SyncPacket {
 	}
 
 	void apply() {
+		if (listUnchanged) {
+			// The client already holds the current structure list; only this can have changed
+			ExplorersCompass.canTeleport = canTeleport;
+			return;
+		}
+
 		if (firstBatch) {
 			clearReceived();
 		}
@@ -127,6 +196,7 @@ public class SyncPacket {
 			ExplorersCompass.allowedStructureKeys = new ArrayList<ResourceLocation>(receivedStructureKeys);
 			ExplorersCompass.dimensionKeysForAllowedStructureKeys = ArrayListMultimap.create(receivedDimensionKeys);
 			ExplorersCompass.structureKeysToTypeKeys = new HashMap<ResourceLocation, ResourceLocation>(receivedTypeKeys);
+			ExplorersCompass.groupNames = new HashMap<ResourceLocation, String>(groupNames);
 			clearReceived();
 		}
 	}

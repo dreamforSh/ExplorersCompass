@@ -163,7 +163,8 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> implem
 				if (result == StructureCheckResult.START_PRESENT) {
 					BlockPos pos = placement.getLocatePos(chunkPos);
 					if (!shouldIgnore(pos)) {
-						return Pair.of(pos, structure);
+						// The start itself was not loaded on this path, so the height is unknown
+						return Pair.of(new BlockPos(pos.getX(), ExplorersCompassItem.UNKNOWN_Y, pos.getZ()), structure);
 					}
 					continue;
 				}
@@ -176,7 +177,8 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> implem
 			if (structureStart != null && structureStart.isValid()) {
 				BlockPos pos = placement.getLocatePos(structureStart.getChunkPos());
 				if (!shouldIgnore(pos)) {
-					return Pair.of(pos, structure);
+					// The loaded start knows where it generates, so record its height as well
+					return Pair.of(new BlockPos(pos.getX(), structureStart.getBoundingBox().getCenter().getY(), pos.getZ()), structure);
 				}
 			}
 		}
@@ -243,7 +245,7 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> implem
 		// Remember this location, so that searching again looks for a different instance
 		prevPos.add(pos);
 		if (!stack.isEmpty() && stack.getItem() == ExplorersCompass.explorersCompass) {
-			((ExplorersCompassItem) stack.getItem()).succeed(player, stack, structureKey, isGroup, pos.getX(), pos.getZ(), level.dimension().location(), prevPos, samples, ConfigHandler.GENERAL.displayCoordinates.get());
+			((ExplorersCompassItem) stack.getItem()).succeed(player, stack, structureKey, isGroup, pos.getX(), pos.getZ(), pos.getY(), level.dimension().location(), prevPos, samples, ConfigHandler.GENERAL.displayCoordinates.get());
 		} else {
 			ExplorersCompass.LOGGER.error("SearchWorkerManager " + managerId + ": " + getName() + " found invalid compass after successful search");
 		}

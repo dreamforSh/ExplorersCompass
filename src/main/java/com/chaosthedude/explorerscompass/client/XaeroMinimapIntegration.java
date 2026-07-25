@@ -87,7 +87,10 @@ public class XaeroMinimapIntegration {
 
 			final List<Object> waypoints = asWaypointList(getList.invoke(waypointSet));
 			if (!containsWaypointAt(waypoints, x, z)) {
-				waypoints.add(waypointConstructor.newInstance(x, player.getBlockY(), z, name, symbolFor(name), ConfigHandler.CLIENT.xaeroWaypointColor.get()));
+				// The structure's own height when the compass recorded one, the player's otherwise
+				final int structureY = compass.getFoundStructureY(stack);
+				final int waypointY = structureY != ExplorersCompassItem.UNKNOWN_Y ? structureY : player.getBlockY();
+				waypoints.add(waypointConstructor.newInstance(x, waypointY, z, name, symbolFor(name), ConfigHandler.CLIENT.xaeroWaypointColor.get()));
 				updateWaypoints.invoke(manager);
 				ExplorersCompass.LOGGER.info("Created a waypoint for " + name + " at " + x + ", " + z);
 			}

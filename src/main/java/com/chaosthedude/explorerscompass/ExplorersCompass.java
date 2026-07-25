@@ -54,7 +54,7 @@ public class ExplorersCompass {
 	// Bump this whenever the packets change. Both sides have to declare the same version: a mismatch
 	// is then refused during the handshake with a clear message, instead of connecting and failing
 	// to decode later.
-	public static final String PROTOCOL_VERSION = "4.0";
+	public static final String PROTOCOL_VERSION = "2.0";
 
 	public static final Logger LOGGER = LogManager.getLogger(MODID);
 
@@ -97,6 +97,7 @@ public class ExplorersCompass {
 		allowedStructureKeys = new ArrayList<ResourceLocation>();
 		dimensionKeysForAllowedStructureKeys = ArrayListMultimap.create();
 		structureKeysToTypeKeys = new HashMap<ResourceLocation, ResourceLocation>();
+		groupNames = new HashMap<ResourceLocation, String>();
 	}
 	
 	@OnlyIn(Dist.CLIENT)

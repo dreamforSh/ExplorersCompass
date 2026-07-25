@@ -2,9 +2,17 @@ package com.chaosthedude.explorerscompass.gui;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import com.chaosthedude.explorerscompass.ExplorersCompass;
+import com.chaosthedude.explorerscompass.client.ClientEventHandler;
+import com.chaosthedude.explorerscompass.client.SearchHistory;
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.items.ExplorersCompassItem;
 import com.chaosthedude.explorerscompass.network.ClearCachePacket;
@@ -54,6 +62,8 @@ public class ExplorersCompassScreen extends Screen {
 	private int cachedLocations;
 	private String lastSearchTerm = "";
 	private int panelLineY;
+	// The structures picked with Ctrl-click, to search for the nearest of them all at once
+	private final Set<ResourceLocation> multiSelectedKeys = new LinkedHashSet<ResourceLocation>();
 
 	public ExplorersCompassScreen(Level level, Player player, ItemStack stack, ExplorersCompassItem explorersCompass, List<ResourceLocation> allowedStructureKeys) {
 		super(Component.translatable("string.explorerscompass.selectStructure"));
@@ -98,6 +108,7 @@ public class ExplorersCompassScreen extends Screen {
 		if (!allowedStructureKeys.equals(ExplorersCompass.allowedStructureKeys)) {
 			removeWidget(selectionList);
 			allowedStructureKeys = new ArrayList<ResourceLocation>(ExplorersCompass.allowedStructureKeys);
+			multiSelectedKeys.retainAll(allowedStructureKeys);
 			// Re-apply whatever is already typed in the search field, rather than resetting the filter
 			selectionList = null;
 			processSearchTerm();
@@ -128,8 +139,8 @@ public class ExplorersCompassScreen extends Screen {
 
 		if (state == CompassState.SEARCHING) {
 			drawPanelLine(poseStack, I18n.get("string.explorerscompass.status") + ": " + I18n.get("string.explorerscompass.searching"), 0xFFFFFF);
-			drawPanelLine(poseStack, StructureUtils.getPrettyStructureName(explorersCompass.getStructureKey(stack)), 0xAAAAAA);
-			drawPanelLine(poseStack, I18n.get("string.explorerscompass.radius") + ": " + explorersCompass.getSearchRadius(stack), 0xAAAAAA);
+			drawPanelLine(poseStack, ClientEventHandler.searchTargetName(explorersCompass, stack), 0xAAAAAA);
+			drawPanelLine(poseStack, I18n.get("string.explorerscompass.radius") + ": " + String.format("%,d", explorersCompass.getSearchRadius(stack)), 0xAAAAAA);
 		} else if (state == CompassState.FOUND) {
 			drawPanelLine(poseStack, I18n.get("string.explorerscompass.status") + ": " + I18n.get("string.explorerscompass.found"), 0xFFFFFF);
 			drawPanelLine(poseStack, StructureUtils.getPrettyStructureName(explorersCompass.getStructureKey(stack)), 0xAAAAAA);
@@ -140,8 +151,9 @@ public class ExplorersCompassScreen extends Screen {
 			} else if (explorersCompass.shouldDisplayCoordinates(stack)) {
 				final int x = explorersCompass.getFoundStructureX(stack);
 				final int z = explorersCompass.getFoundStructureZ(stack);
-				drawPanelLine(poseStack, I18n.get("string.explorerscompass.coordinates") + ": " + x + ", " + z, 0xAAAAAA);
-				drawPanelLine(poseStack, I18n.get("string.explorerscompass.distance") + ": " + StructureUtils.getHorizontalDistanceToLocation(player, x, z), 0xAAAAAA);
+				final int y = explorersCompass.getFoundStructureY(stack);
+				drawPanelLine(poseStack, I18n.get("string.explorerscompass.coordinates") + ": " + (y != ExplorersCompassItem.UNKNOWN_Y ? x + ", " + y + ", " + z : x + ", " + z), 0xAAAAAA);
+				drawPanelLine(poseStack, I18n.get("string.explorerscompass.distance") + ": " + String.format("%,d", StructureUtils.getHorizontalDistanceToLocation(player, x, z)) + " (" + ClientEventHandler.compassDirection(player, x, z) + ")", 0xAAAAAA);
 			}
 			final int previousLocations = cachedLocations - 1;
 			if (previousLocations > 0) {
@@ -150,8 +162,8 @@ public class ExplorersCompassScreen extends Screen {
 		} else if (state == CompassState.NOT_FOUND) {
 			drawPanelLine(poseStack, I18n.get("string.explorerscompass.status") + ": " + I18n.get("string.explorerscompass.notFound"), 0xFFFFFF);
 			drawPanelLine(poseStack, StructureUtils.getPrettyStructureName(explorersCompass.getStructureKey(stack)), 0xAAAAAA);
-			drawPanelLine(poseStack, I18n.get("string.explorerscompass.radius") + ": " + explorersCompass.getSearchRadius(stack), 0xAAAAAA);
-			drawPanelLine(poseStack, I18n.get("string.explorerscompass.samples") + ": " + explorersCompass.getSamples(stack), 0xAAAAAA);
+			drawPanelLine(poseStack, I18n.get("string.explorerscompass.radius") + ": " + String.format("%,d", explorersCompass.getSearchRadius(stack)), 0xAAAAAA);
+			drawPanelLine(poseStack, I18n.get("string.explorerscompass.samples") + ": " + String.format("%,d", explorersCompass.getSamples(stack)), 0xAAAAAA);
 		} else {
 			drawPanelLine(poseStack, I18n.get("string.explorerscompass.status") + ": " + I18n.get("string.explorerscompass.inactive"), 0xFFFFFF);
 		}
@@ -202,8 +214,45 @@ public class ExplorersCompassScreen extends Screen {
 		updateButtons();
 	}
 
+	public boolean isMultiSelected(ResourceLocation key) {
+		return multiSelectedKeys.contains(key);
+	}
+
+	public void toggleMultiSelect(ResourceLocation key) {
+		if (!multiSelectedKeys.remove(key)) {
+			multiSelectedKeys.add(key);
+		}
+		updateButtons();
+	}
+
+	public void clearMultiSelect() {
+		multiSelectedKeys.clear();
+		updateButtons();
+	}
+
+	/** Stars or unstars a structure, keeping the selection where it was. */
+	public void toggleFavorite(ResourceLocation key) {
+		SearchHistory.toggleFavorite(key);
+		final ResourceLocation selectedKey = selectionList.hasSelection() ? selectionList.getSelected().getStructureKey() : null;
+		selectionList.refreshList();
+		if (selectedKey != null) {
+			selectionList.selectByKey(selectedKey);
+		}
+	}
+
 	public void searchForStructure(ResourceLocation key) {
-		ExplorersCompass.network.sendToServer(new CompassSearchPacket(key, false, player.blockPosition()));
+		SearchHistory.pushRecent(key);
+		ExplorersCompass.network.sendToServer(CompassSearchPacket.forStructures(List.of(key), player.blockPosition()));
+		minecraft.setScreen(null);
+	}
+
+	/** Searches for the nearest of all the structures picked with Ctrl-click. */
+	public void searchForMultiSelection() {
+		final List<ResourceLocation> keys = new ArrayList<ResourceLocation>(multiSelectedKeys);
+		for (ResourceLocation key : keys) {
+			SearchHistory.pushRecent(key);
+		}
+		ExplorersCompass.network.sendToServer(CompassSearchPacket.forStructures(keys, player.blockPosition()));
 		minecraft.setScreen(null);
 	}
 
@@ -211,7 +260,7 @@ public class ExplorersCompassScreen extends Screen {
 		if (key == null) {
 			return;
 		}
-		ExplorersCompass.network.sendToServer(new CompassSearchPacket(key, true, player.blockPosition()));
+		ExplorersCompass.network.sendToServer(CompassSearchPacket.forGroup(key, player.blockPosition()));
 		minecraft.setScreen(null);
 	}
 
@@ -278,18 +327,64 @@ public class ExplorersCompassScreen extends Screen {
 
 	public List<ResourceLocation> sortStructures() {
 		final List<ResourceLocation> structures = structureKeysMatchingSearch;
-		Collections.sort(structures, new NameSorting());
-		Collections.sort(structures, sortingCategory);
+		// Sort on values computed once per structure instead of once per comparison: the names and
+		// sources behind them do translation and mod list lookups, and O(n log n) comparisons would
+		// repeat them thousands of times on every refresh while typing in the filter
+		final Map<ResourceLocation, String> names = new HashMap<ResourceLocation, String>();
+		for (ResourceLocation key : structures) {
+			names.put(key, StructureUtils.getPrettyStructureName(key));
+		}
+		structures.sort(Comparator.comparing(names::get));
+		if (!(sortingCategory instanceof NameSorting)) {
+			final Map<ResourceLocation, Object> values = new HashMap<ResourceLocation, Object>();
+			for (ResourceLocation key : structures) {
+				values.put(key, sortingCategory.getValue(key));
+			}
+			structures.sort((key1, key2) -> compareSortValues(values.get(key1), values.get(key2)));
+		}
 		if (sortDescending) {
 			Collections.reverse(structures);
 		}
-		return structures;
+		return partitionByHistory(structures);
+	}
+
+	@SuppressWarnings({ "unchecked", "rawtypes" })
+	private static int compareSortValues(Object value1, Object value2) {
+		return ((Comparable) value1).compareTo(value2);
+	}
+
+	/** Puts favorites first and recent searches right after them, keeping everything else sorted. */
+	private List<ResourceLocation> partitionByHistory(List<ResourceLocation> structures) {
+		final List<ResourceLocation> favorites = new ArrayList<ResourceLocation>();
+		final List<ResourceLocation> rest = new ArrayList<ResourceLocation>();
+		final Set<ResourceLocation> recentSet = new HashSet<ResourceLocation>(SearchHistory.getRecents());
+		for (ResourceLocation key : structures) {
+			if (SearchHistory.isFavorite(key)) {
+				favorites.add(key);
+			} else if (!recentSet.contains(key)) {
+				rest.add(key);
+			}
+		}
+
+		final Set<ResourceLocation> present = new HashSet<ResourceLocation>(structures);
+		final List<ResourceLocation> result = new ArrayList<ResourceLocation>(structures.size());
+		result.addAll(favorites);
+		// Recents keep their own order: the most recently searched first
+		for (ResourceLocation key : SearchHistory.getRecents()) {
+			if (present.contains(key) && !SearchHistory.isFavorite(key)) {
+				result.add(key);
+			}
+		}
+		result.addAll(rest);
+		return result;
 	}
 
 	private void setupWidgets() {
 		clearWidgets();
 		searchButton = addRenderableWidget(new TransparentButton(10, 40, 110, 20, Component.translatable("string.explorerscompass.search"), (onPress) -> {
-			if (selectionList.hasSelection()) {
+			if (multiSelectedKeys.size() > 1) {
+				searchForMultiSelection();
+			} else if (selectionList.hasSelection()) {
 				selectionList.getSelected().searchForStructure();
 			}
 		}));
@@ -364,10 +459,13 @@ public class ExplorersCompassScreen extends Screen {
 	/** Keeps the buttons in step with what the compass is currently able to do. */
 	private void updateButtons() {
 		final boolean hasSelection = selectionList != null && selectionList.hasSelection();
+		final int multiSelected = multiSelectedKeys.size();
 		final boolean located = explorersCompass.getState(stack) == CompassState.FOUND;
 
-		searchButton.active = hasSelection;
-		searchGroupButton.active = hasSelection;
+		searchButton.active = hasSelection || multiSelected > 0;
+		searchButton.setMessage(multiSelected > 1 ? Component.translatable("string.explorerscompass.search").append(Component.literal(" (" + multiSelected + ")")) : Component.translatable("string.explorerscompass.search"));
+		// A group search applies to a single structure's group
+		searchGroupButton.active = hasSelection && multiSelected <= 1;
 		// canTeleport arrives with the first sync, which may be after this screen was opened. The
 		// located coordinates only mean something in the dimension the search ran in.
 		final ResourceLocation foundDimension = explorersCompass.getFoundDimension(stack);
