@@ -16,27 +16,32 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 @OnlyIn(Dist.CLIENT)
 public class BookmarkList extends ObjectSelectionList<BookmarkListEntry> {
 
-	private static final int SELECTION_COLOR = 0x60000000;
-	private static final int SELECTION_MARKER_COLOR = 0xC0FFFFFF;
-	private static final int SCROLLBAR_TRACK_COLOR = 0x2B000000;
-	private static final int SCROLLBAR_THUMB_COLOR = 0xF2000000;
+	/** How much of the width is left over for the scrollbar and the margins beside the rows. */
+	private static final int ROW_INSET = 20;
+	private static final int SCROLLBAR_WIDTH = 6;
 
 	private final BookmarksScreen parentScreen;
 
-	public BookmarkList(BookmarksScreen parentScreen, Minecraft mc, int width, int height, int top, int bottom, int slotHeight) {
+	public BookmarkList(BookmarksScreen parentScreen, Minecraft mc, int left, int width, int height, int top, int bottom, int slotHeight) {
 		super(mc, width, height, top, bottom, slotHeight);
 		this.parentScreen = parentScreen;
+		setLeftPos(left);
 		refreshList();
 	}
 
 	@Override
 	protected int getScrollbarPosition() {
-		return super.getScrollbarPosition() + 20;
+		return x1 - SCROLLBAR_WIDTH;
 	}
 
 	@Override
 	public int getRowWidth() {
-		return super.getRowWidth() + 50;
+		return width - ROW_INSET;
+	}
+
+	@Override
+	public int getRowLeft() {
+		return x0 + width / 2 - getRowWidth() / 2;
 	}
 
 	@Override
@@ -55,33 +60,46 @@ public class BookmarkList extends ObjectSelectionList<BookmarkListEntry> {
 
 	@Override
 	protected void renderList(PoseStack poseStack, int mouseX, int mouseY, float partialTicks) {
+		final int bandLeft = getRowLeft() - 3;
+		final int bandRight = getRowLeft() + getRowWidth() + 3;
+		final boolean overList = isMouseOver((double) mouseX, (double) mouseY);
+
 		for (int j = 0; j < getItemCount(); ++j) {
-			int rowTop = getRowTop(j);
-			int rowBottom = rowTop + itemHeight;
-			if (rowBottom >= y0 && rowTop <= y1) {
-				int j1 = itemHeight - 4;
-				BookmarkListEntry entry = getEntry(j);
-				if (isSelectedItem(j)) {
-					final int insideLeft = x0 + width / 2 - getRowWidth() / 2 + 2;
-					RenderUtils.drawRect(insideLeft - 4, rowTop - 4, insideLeft + getRowWidth() + 4, rowTop + itemHeight, SELECTION_COLOR);
-					RenderUtils.drawRect(insideLeft - 4, rowTop - 4, insideLeft - 2, rowTop + itemHeight, SELECTION_MARKER_COLOR);
-				}
-				entry.render(poseStack, j, rowTop, getRowLeft(), getRowWidth(), j1, mouseX, mouseY, isMouseOver((double) mouseX, (double) mouseY) && Objects.equals(getEntryAtPosition((double) mouseX, (double) mouseY), entry), partialTicks);
+			final int rowTop = getRowTop(j);
+			final int bandTop = rowTop - 2;
+			final int bandBottom = bandTop + itemHeight;
+			if (bandBottom < y0 || bandTop > y1) {
+				continue;
 			}
+
+			final BookmarkListEntry entry = getEntry(j);
+			final boolean hovered = overList && Objects.equals(getEntryAtPosition((double) mouseX, (double) mouseY), entry);
+			if (isSelectedItem(j)) {
+				RenderUtils.drawHorizontalGradient(bandLeft, bandTop, bandRight, bandBottom, GuiTheme.ROW_SELECTED_LEFT, GuiTheme.ROW_SELECTED_RIGHT);
+				RenderUtils.drawRect(bandLeft, bandTop, bandLeft + 2, bandBottom, GuiTheme.ACCENT | 0xFF000000);
+			} else if (hovered) {
+				RenderUtils.drawRect(bandLeft, bandTop, bandRight, bandBottom, GuiTheme.ROW_HOVER);
+			}
+
+			if (j < getItemCount() - 1) {
+				RenderUtils.drawRect(bandLeft + 2, bandBottom - 1, bandRight - 2, bandBottom, GuiTheme.ROW_SEPARATOR);
+			}
+
+			entry.render(poseStack, j, rowTop, getRowLeft(), getRowWidth(), itemHeight - 4, mouseX, mouseY, hovered, partialTicks);
 		}
 
 		if (getMaxScroll() > 0) {
-			int left = getScrollbarPosition();
-			int right = left + 6;
-			int height = (int) ((float) ((y1 - y0) * (y1 - y0)) / (float) getMaxPosition());
-			height = Mth.clamp(height, 32, y1 - y0 - 8);
-			int top = (int) getScrollAmount() * (y1 - y0 - height) / getMaxScroll() + y0;
-			if (top < y0) {
-				top = y0;
+			final int left = getScrollbarPosition();
+			final int right = left + SCROLLBAR_WIDTH;
+			int thumbHeight = (int) ((float) ((y1 - y0) * (y1 - y0)) / (float) getMaxPosition());
+			thumbHeight = Mth.clamp(thumbHeight, 32, y1 - y0 - 8);
+			int thumbTop = (int) getScrollAmount() * (y1 - y0 - thumbHeight) / getMaxScroll() + y0;
+			if (thumbTop < y0) {
+				thumbTop = y0;
 			}
 
-			RenderUtils.drawRect(left, y0, right, y1, SCROLLBAR_TRACK_COLOR);
-			RenderUtils.drawRect(left, top, right, top + height, SCROLLBAR_THUMB_COLOR);
+			RenderUtils.drawRect(left, y0, right, y1, GuiTheme.SCROLLBAR_TRACK);
+			RenderUtils.drawRect(left + 1, thumbTop, right - 1, thumbTop + thumbHeight, GuiTheme.SCROLLBAR_THUMB);
 		}
 	}
 

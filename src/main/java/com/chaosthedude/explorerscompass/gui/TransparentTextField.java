@@ -19,6 +19,13 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 @OnlyIn(Dist.CLIENT)
 public class TransparentTextField extends EditBox {
 
+	private static final int BACKGROUND = 0x66000000;
+	private static final int BORDER = 0x26FFFFFF;
+	private static final int BORDER_FOCUSED = 0x99FFC24B;
+	/** The glyph that empties the field, and how much room is kept clear for it. */
+	private static final String CLEAR_GLYPH = "✕";
+	private static final int CLEAR_WIDTH = 12;
+
 	private Font font;
 	private Component label;
 	private int labelColor = 0x808080;
@@ -41,16 +48,23 @@ public class TransparentTextField extends EditBox {
 	@Override
 	public void render(PoseStack poseStack, int mouseX, int mouseY, float partialTicks) {
 		if (isVisible()) {
+			final boolean showClear = !getValue().isEmpty();
 			if (pseudoEnableBackgroundDrawing) {
-				final int color = (int) (255.0F * 0.55f);
-				RenderUtils.drawRect(x, y, x + width, y + height, color / 2 << 24);
+				RenderUtils.drawRect(x, y, x + width, y + height, BACKGROUND);
+				// The border is what says whether typing lands here, which the blinking cursor alone
+				// does not make obvious on a field that has no chrome of its own
+				RenderUtils.drawInnerOutline(x, y, x + width, y + height, isFocused() ? BORDER_FOCUSED : BORDER);
+			}
+			if (showClear) {
+				final boolean overClear = isOverClearGlyph(mouseX, mouseY);
+				font.draw(poseStack, CLEAR_GLYPH, x + width - CLEAR_WIDTH + 1, y + (height - 8) / 2, overClear ? GuiTheme.ACCENT : GuiTheme.TEXT_MUTED);
 			}
 			boolean showLabel = !isFocused() && getValue().isEmpty();
             int i = showLabel ? labelColor : (pseudoIsEnabled ? pseudoEnabledColor : pseudoDisabledColor);
 			int j = getCursorPosition() - pseudoLineScrollOffset;
 			int k = pseudoSelectionEnd - pseudoLineScrollOffset;
 			String text = showLabel ? label.getString() : getValue();
-			String s = font.plainSubstrByWidth(text.substring(pseudoLineScrollOffset), getWidth());
+			String s = font.plainSubstrByWidth(text.substring(pseudoLineScrollOffset), getWidth() - (showClear ? CLEAR_WIDTH + 4 : 4));
 			boolean flag = j >= 0 && j <= s.length();
 			boolean flag1 = isFocused() && pseudoCursorCounter / 6 % 2 == 0 && flag;
 			int l = pseudoEnableBackgroundDrawing ? x + 4 : x;
@@ -95,6 +109,22 @@ public class TransparentTextField extends EditBox {
 		}
 	}
 	
+	@Override
+	public boolean mouseClicked(double mouseX, double mouseY, int button) {
+		// Emptying the field is a click away, rather than a held backspace, which matters when the
+		// filter is what is standing between the player and the rest of the list
+		if (button == 0 && !getValue().isEmpty() && isOverClearGlyph((int) mouseX, (int) mouseY)) {
+			setValue("");
+			setFocused(true);
+			return true;
+		}
+		return super.mouseClicked(mouseX, mouseY, button);
+	}
+
+	private boolean isOverClearGlyph(int mouseX, int mouseY) {
+		return isVisible() && mouseX >= x + width - CLEAR_WIDTH && mouseX < x + width && mouseY >= y && mouseY < y + height;
+	}
+
 	@Override
 	public void setEditable(boolean enabled) {
 		super.setEditable(enabled);

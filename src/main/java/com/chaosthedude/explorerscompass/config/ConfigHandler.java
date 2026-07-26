@@ -79,6 +79,7 @@ public class ConfigHandler {
 		public final ForgeConfigSpec.IntValue xaeroWaypointColor;
 		public final ForgeConfigSpec.EnumValue<OverlaySide> overlaySide;
 		public final ForgeConfigSpec.IntValue overlayLineOffset;
+		public final ForgeConfigSpec.BooleanValue overlayBackground;
 		public final ForgeConfigSpec.BooleanValue showDirectionBar;
 		public final ForgeConfigSpec.IntValue directionBarY;
 		public final ForgeConfigSpec.IntValue directionBarWidth;
@@ -105,6 +106,9 @@ public class ConfigHandler {
 
 			desc = "The side for information rendered on the HUD. Ex: LEFT, RIGHT";
 			overlaySide = builder.comment(desc).defineEnum("overlaySide", OverlaySide.LEFT);
+
+			desc = "Draws the compass information on the HUD on a panel of its own, which keeps it legible against a bright sky or a snowy landscape. Turn this off for plain text.";
+			overlayBackground = builder.comment(desc).define("overlayBackground", true);
 
 			desc = "Displays a compass strip at the top of the screen marking the direction of the located structure.";
 			showDirectionBar = builder.comment(desc).define("showDirectionBar", true);

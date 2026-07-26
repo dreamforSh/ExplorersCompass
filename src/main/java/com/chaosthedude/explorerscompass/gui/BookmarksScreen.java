@@ -36,12 +36,14 @@ public class BookmarksScreen extends Screen {
 	// The tag the list was read from, so that it is only re-read once the server has changed it
 	private CompoundTag lastTag;
 	private BookmarkList selectionList;
-	private Button pointAtButton;
-	private Button teleportButton;
-	private Button shareButton;
-	private Button removeButton;
-	private Button clearButton;
-	private Button backButton;
+	private TransparentButton pointAtButton;
+	private TransparentButton teleportButton;
+	private TransparentButton shareButton;
+	private TransparentButton removeButton;
+	private TransparentButton clearButton;
+	private TransparentButton backButton;
+	// Where the sidebar has room for the next control
+	private int sidebarY;
 
 	public BookmarksScreen(Screen parentScreen, Player player, ItemStack stack, ExplorersCompassItem explorersCompass) {
 		super(Component.translatable("string.explorerscompass.bookmarks"));
@@ -98,10 +100,23 @@ public class BookmarksScreen extends Screen {
 	@Override
 	public void render(PoseStack poseStack, int mouseX, int mouseY, float partialTicks) {
 		renderBackground(poseStack);
-		drawCenteredString(poseStack, font, title.copy().append(Component.literal(" (" + bookmarks.size() + ")")), 65, 15, 0xffffff);
+		GuiTheme.drawHeader(width);
+		GuiTheme.drawSidebar(height);
+		GuiTheme.drawTitle(poseStack, font, title.getString(), String.valueOf(bookmarks.size()), GuiTheme.SIDEBAR_CONTENT_X, 10);
 		super.render(poseStack, mouseX, mouseY, partialTicks);
 		if (bookmarks.isEmpty()) {
-			drawCenteredString(poseStack, font, Component.translatable("string.explorerscompass.noBookmarks"), width / 2 + 55, height / 2 - 4, 0x808080);
+			drawCenteredString(poseStack, font, Component.translatable("string.explorerscompass.noBookmarks"), GuiTheme.contentLeft() + GuiTheme.contentWidth(width) / 2, height / 2 - 4, GuiTheme.TEXT_SECONDARY);
+		}
+		renderButtonTooltip(poseStack, mouseX, mouseY);
+	}
+
+	/** Explains whatever button the pointer is resting on, above everything else on the screen. */
+	private void renderButtonTooltip(PoseStack poseStack, int mouseX, int mouseY) {
+		for (Object widget : renderables) {
+			if (widget instanceof TransparentButton button && button.visible && button.isHoveredOrFocused() && !button.getTooltipLines().isEmpty()) {
+				renderComponentTooltip(poseStack, button.getTooltipLines(), mouseX, mouseY);
+				return;
+			}
 		}
 	}
 
@@ -142,37 +157,48 @@ public class BookmarksScreen extends Screen {
 
 	private void setupWidgets() {
 		clearWidgets();
-		pointAtButton = addRenderableWidget(new TransparentButton(10, 40, 110, 20, Component.translatable("string.explorerscompass.pointAt"), (onPress) -> {
+		sidebarY = GuiTheme.HEADER_HEIGHT + 8;
+
+		pointAtButton = addSidebarButton(Component.translatable("string.explorerscompass.pointAt"), (onPress) -> {
 			if (selectionList.hasSelection()) {
 				pointAt(selectionList.getSelected().getIndex());
 			}
-		}));
-		teleportButton = addRenderableWidget(new TransparentButton(10, 65, 110, 20, Component.translatable("string.explorerscompass.teleport"), (onPress) -> {
+		});
+		pointAtButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.pointAt"));
+		teleportButton = addSidebarButton(Component.translatable("string.explorerscompass.teleport"), (onPress) -> {
 			if (selectionList.hasSelection()) {
 				teleportTo(selectionList.getSelected().getIndex());
 			}
-		}));
-		shareButton = addRenderableWidget(new TransparentButton(10, 90, 110, 20, Component.translatable("string.explorerscompass.share"), (onPress) -> {
+		});
+		shareButton = addSidebarButton(Component.translatable("string.explorerscompass.share"), (onPress) -> {
 			if (selectionList.hasSelection()) {
 				share(selectionList.getSelected().getIndex());
 			}
-		}));
-		removeButton = addRenderableWidget(new TransparentButton(10, 115, 110, 20, Component.translatable("string.explorerscompass.remove"), (onPress) -> {
+		});
+		shareButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.share"));
+		removeButton = addSidebarButton(Component.translatable("string.explorerscompass.remove"), (onPress) -> {
 			if (selectionList.hasSelection()) {
 				remove(selectionList.getSelected().getIndex());
 			}
-		}));
-		clearButton = addRenderableWidget(new TransparentButton(10, 140, 110, 20, Component.translatable("string.explorerscompass.clearAll"), (onPress) -> {
+		});
+		clearButton = addSidebarButton(Component.translatable("string.explorerscompass.clearAll"), (onPress) -> {
 			clearAll();
-		}));
-		backButton = addRenderableWidget(new TransparentButton(10, height - 30, 110, 20, Component.translatable("string.explorerscompass.back"), (onPress) -> {
+		});
+		backButton = addRenderableWidget(new TransparentButton(GuiTheme.SIDEBAR_CONTENT_X, height - 26, GuiTheme.SIDEBAR_CONTENT_WIDTH, GuiTheme.BUTTON_HEIGHT, Component.translatable("string.explorerscompass.back"), (onPress) -> {
 			onClose();
 		}));
 
 		// Recreated on every init so that it picks up the current screen dimensions
-		selectionList = new BookmarkList(this, minecraft, width + 110, height, 40, height, 36);
+		selectionList = new BookmarkList(this, minecraft, GuiTheme.contentLeft(), GuiTheme.contentWidth(width), height, GuiTheme.HEADER_HEIGHT + 2, height - 10, 30);
 		addRenderableWidget(selectionList);
 		updateButtons();
+	}
+
+	/** Adds a control to the bottom of the sidebar column, and moves the column down past it. */
+	private TransparentButton addSidebarButton(Component label, Button.OnPress onPress) {
+		final TransparentButton button = addRenderableWidget(new TransparentButton(GuiTheme.SIDEBAR_CONTENT_X, sidebarY, GuiTheme.SIDEBAR_CONTENT_WIDTH, GuiTheme.BUTTON_HEIGHT, label, onPress));
+		sidebarY += GuiTheme.BUTTON_SPACING;
+		return button;
 	}
 
 	private void updateButtons() {

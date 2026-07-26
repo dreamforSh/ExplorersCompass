@@ -3,6 +3,7 @@ package com.chaosthedude.explorerscompass.gui;
 import com.chaosthedude.explorerscompass.client.ClientEventHandler;
 import com.chaosthedude.explorerscompass.items.ExplorersCompassItem;
 import com.chaosthedude.explorerscompass.util.BookmarkEntry;
+import com.chaosthedude.explorerscompass.util.RenderUtils;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -51,20 +52,28 @@ public class BookmarkListEntry extends ObjectSelectionList.Entry<BookmarkListEnt
 
 	@Override
 	public void render(PoseStack poseStack, int par1, int par2, int par3, int par4, int par5, int par6, int par7, boolean par8, float par9) {
-		mc.font.draw(poseStack, Component.literal(StructureUtils.getPrettyStructureName(bookmark.getStructureKey())), par3 + 1, par2 + 1, 0xffffff);
+		final int left = par3 + 2;
+		final int right = par3 + par4;
+
+		// In another dimension the distance means nothing, so the dimension takes the place of the
+		// badge that would otherwise say how far away this location is
+		final boolean here = isInCurrentDimension();
+		final String badgeText;
+		if (here) {
+			badgeText = String.format("%,d", StructureUtils.getHorizontalDistanceToLocation(parentScreen.getPlayer(), bookmark.getX(), bookmark.getZ())) + " " + ClientEventHandler.compassDirection(parentScreen.getPlayer(), bookmark.getX(), bookmark.getZ());
+		} else {
+			badgeText = StructureUtils.getDimensionName(bookmark.getDimensionKey());
+		}
+		final String badge = RenderUtils.trimToWidth(badgeText, Math.min(110, par4 / 2));
+		final int badgeLeft = right - mc.font.width(badge) - 8;
+		RenderUtils.drawChip(poseStack, badge, badgeLeft, par2, here ? GuiTheme.CHIP_BACKGROUND : GuiTheme.CHIP_ACCENT_BACKGROUND, here ? GuiTheme.TEXT_SECONDARY : GuiTheme.TEXT_WARNING);
+
+		final String name = RenderUtils.trimToWidth(StructureUtils.getPrettyStructureName(bookmark.getStructureKey()), badgeLeft - left - 6);
+		mc.font.draw(poseStack, name, left, par2 + 2, GuiTheme.TEXT_PRIMARY);
 
 		final int y = bookmark.getY();
 		final String coordinates = y != ExplorersCompassItem.UNKNOWN_Y ? bookmark.getX() + ", " + y + ", " + bookmark.getZ() : bookmark.getX() + ", " + bookmark.getZ();
-		mc.font.draw(poseStack, Component.translatable("string.explorerscompass.coordinates").append(Component.literal(": " + coordinates)), par3 + 1, par2 + mc.font.lineHeight + 3, 0x808080);
-
-		// In another dimension the distance means nothing, so the dimension is shown in its place
-		if (isInCurrentDimension()) {
-			final String distance = String.format("%,d", StructureUtils.getHorizontalDistanceToLocation(parentScreen.getPlayer(), bookmark.getX(), bookmark.getZ()));
-			final String direction = ClientEventHandler.compassDirection(parentScreen.getPlayer(), bookmark.getX(), bookmark.getZ());
-			mc.font.draw(poseStack, I18n.get("string.explorerscompass.distance") + ": " + distance + " (" + direction + ")", par3 + 1, par2 + mc.font.lineHeight + 14, 0x808080);
-		} else {
-			mc.font.draw(poseStack, I18n.get("string.explorerscompass.dimension") + ": " + StructureUtils.getDimensionName(bookmark.getDimensionKey()), par3 + 1, par2 + mc.font.lineHeight + 14, 0xCC6666);
-		}
+		mc.font.draw(poseStack, I18n.get("string.explorerscompass.coordinates") + ": " + coordinates, left, par2 + 14, GuiTheme.TEXT_MUTED);
 
 		RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
 	}
