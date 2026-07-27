@@ -149,10 +149,26 @@ public class BookmarksScreen extends Screen {
 
 	public void remove(int index) {
 		ExplorersCompass.network.sendToServer(new BookmarkActionPacket(BookmarkActionPacket.Action.REMOVE, index));
+		explorersCompass.removeBookmark(stack, index);
+		refreshBookmarks();
 	}
 
 	public void clearAll() {
 		ExplorersCompass.network.sendToServer(new BookmarkActionPacket(BookmarkActionPacket.Action.CLEAR, 0));
+		explorersCompass.clearBookmarks(stack);
+		refreshBookmarks();
+	}
+
+	/**
+	 * Re-reads the list after this side has changed it. The change is made here as well as asked for,
+	 * since the server only sends its copy of the stack back a round trip later, and until then the
+	 * list would still be showing the entries that have just been taken out of it.
+	 */
+	private void refreshBookmarks() {
+		lastTag = stack.getTag();
+		bookmarks = explorersCompass.getBookmarks(stack);
+		selectionList.refreshList();
+		updateButtons();
 	}
 
 	private void setupWidgets() {

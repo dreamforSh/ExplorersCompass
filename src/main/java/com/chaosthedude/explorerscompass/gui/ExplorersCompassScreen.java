@@ -17,6 +17,7 @@ import com.chaosthedude.explorerscompass.client.ClientEventHandler;
 import com.chaosthedude.explorerscompass.client.SearchHistory;
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.items.ExplorersCompassItem;
+import com.chaosthedude.explorerscompass.network.CancelSearchPacket;
 import com.chaosthedude.explorerscompass.network.ClearCachePacket;
 import com.chaosthedude.explorerscompass.network.CompassSearchForNextPacket;
 import com.chaosthedude.explorerscompass.network.CompassSearchPacket;
@@ -48,7 +49,9 @@ public class ExplorersCompassScreen extends Screen {
 
 	/** The strip along the bottom that says what the compass is doing, and acts on what it found. */
 	private static final int STATUS_BAR_HEIGHT = 34;
-	private static final int STATUS_BUTTON_WIDTH = 58;
+	// Narrow enough that all three of the controls standing in the strip still fit inside it on the
+	// smallest screen the game scales itself down to; their labels are shortened to fit either way
+	private static final int STATUS_BUTTON_WIDTH = 52;
 	private static final int STATUS_BUTTON_HEIGHT = 18;
 	private static final String DOT_GLYPH = "●";
 	private static final String CLEAR_GLYPH = "✕";
@@ -69,7 +72,8 @@ public class ExplorersCompassScreen extends Screen {
 	private TransparentButton bookmarksButton;
 	private TransparentButton teleportButton;
 	private TransparentButton shareButton;
-	private TransparentButton cancelButton;
+	private TransparentButton stopButton;
+	private TransparentButton closeButton;
 	private TransparentTextField searchTextField;
 	private StructureSearchList selectionList;
 	private ModFilterPanel modFilterPanel;
@@ -510,6 +514,22 @@ public class ExplorersCompassScreen extends Screen {
 
 	public void clearCache() {
 		ExplorersCompass.network.sendToServer(new ClearCachePacket());
+		// Applied to this copy of the stack as well as asked for, so that the count on the button, the
+		// status strip and the marks on the HUD all drop away at once. Waiting for the server to send
+		// its copy back would leave them showing locations that have already been forgotten, and would
+		// put the old count back on the button on the very next tick.
+		explorersCompass.clearPrevPos(stack);
+		cachedLocations = 0;
+		updateButtons();
+	}
+
+	/**
+	 * Stops the search and takes the structure the compass was aimed at back off it, leaving this
+	 * screen open so that something else can be picked straight away.
+	 */
+	public void cancelSearch() {
+		ExplorersCompass.network.sendToServer(new CancelSearchPacket());
+		explorersCompass.cancelSearch(level, player, stack);
 		cachedLocations = 0;
 		updateButtons();
 	}
@@ -706,11 +726,13 @@ public class ExplorersCompassScreen extends Screen {
 			bookmarksButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.bookmarks"));
 		}
 
-		cancelButton = addRenderableWidget(new TransparentButton(GuiTheme.SIDEBAR_CONTENT_X, height - 26, GuiTheme.SIDEBAR_CONTENT_WIDTH, GuiTheme.BUTTON_HEIGHT, Component.translatable("gui.cancel"), (onPress) -> {
+		// Named for what it does, since the strip below holds a control that stops the search, and one
+		// button reading "cancel" beside another would say nothing about which of the two is which
+		closeButton = addRenderableWidget(new TransparentButton(GuiTheme.SIDEBAR_CONTENT_X, height - 26, GuiTheme.SIDEBAR_CONTENT_WIDTH, GuiTheme.BUTTON_HEIGHT, Component.translatable("string.explorerscompass.close"), (onPress) -> {
 			minecraft.setScreen(null);
 		}));
 
-		// These two act on what the compass has found, so they stand in the strip that reports it
+		// These three act on what the compass is doing, so they stand in the strip that reports it
 		final int statusButtonY = statusBarTop() + (STATUS_BAR_HEIGHT - STATUS_BUTTON_HEIGHT) / 2;
 		teleportButton = addRenderableWidget(new TransparentButton(0, statusButtonY, STATUS_BUTTON_WIDTH, STATUS_BUTTON_HEIGHT, Component.translatable("string.explorerscompass.teleport"), (onPress) -> {
 			teleport();
@@ -719,6 +741,10 @@ public class ExplorersCompassScreen extends Screen {
 			share();
 		}));
 		shareButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.share"));
+		stopButton = addRenderableWidget(new TransparentButton(0, statusButtonY, STATUS_BUTTON_WIDTH, STATUS_BUTTON_HEIGHT, stopButtonLabel(), (onPress) -> {
+			cancelSearch();
+		}));
+		stopButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.stopSearch"));
 
 		// Carry the filter and the selection over, so that resizing the window does not lose them
 		final String previousSearchTerm = searchTextField != null ? searchTextField.getValue() : "";
@@ -768,6 +794,11 @@ public class ExplorersCompassScreen extends Screen {
 		return Component.translatable(filterByCurrentDimension ? "string.explorerscompass.currentDimension" : "string.explorerscompass.allDimensions");
 	}
 
+	/** What stopping means where the compass currently is: give up the search, or drop the target. */
+	private Component stopButtonLabel() {
+		return Component.translatable(explorersCompass.getState(stack) == CompassState.SEARCHING ? "string.explorerscompass.stopSearch" : "string.explorerscompass.clearTarget");
+	}
+
 	private Component modFilterButtonLabel() {
 		final String name = modFilter == null ? I18n.get("string.explorerscompass.allMods") : StructureUtils.getPrettyStructureSource(new ResourceLocation(modFilter, "any"));
 		return Component.translatable("string.explorerscompass.modFilter").append(Component.literal(": " + name));
@@ -777,7 +808,8 @@ public class ExplorersCompassScreen extends Screen {
 	private void updateButtons() {
 		final boolean hasSelection = selectionList != null && selectionList.hasSelection();
 		final int multiSelected = multiSelectedKeys.size();
-		final boolean located = explorersCompass.getState(stack) == CompassState.FOUND;
+		final CompassState state = explorersCompass.getState(stack);
+		final boolean located = state == CompassState.FOUND;
 
 		searchButton.active = hasSelection || multiSelected > 0;
 		searchButton.setMessage(multiSelected > 1 ? Component.translatable("string.explorerscompass.search").append(Component.literal(" (" + multiSelected + ")")) : Component.translatable("string.explorerscompass.search"));
@@ -800,8 +832,12 @@ public class ExplorersCompassScreen extends Screen {
 		shareButton.visible = ConfigHandler.GENERAL.allowSharing.get();
 		shareButton.active = located;
 
-		// Whichever of the two is actually there sits against the right edge of the status strip, and
-		// the text beside them stops where they begin
+		// A compass that is doing nothing has nothing to stop, and nothing aimed at it to take back off
+		stopButton.active = state != null && state != CompassState.INACTIVE;
+		stopButton.setMessage(stopButtonLabel());
+
+		// Whichever of them are actually there sit against the right edge of the status strip, and the
+		// text beside them stops where they begin
 		statusTextRight = GuiTheme.contentLeft() + GuiTheme.contentWidth(width) - 6;
 		if (shareButton.visible) {
 			shareButton.x = statusTextRight - STATUS_BUTTON_WIDTH;
@@ -811,6 +847,8 @@ public class ExplorersCompassScreen extends Screen {
 			teleportButton.x = statusTextRight - STATUS_BUTTON_WIDTH;
 			statusTextRight -= STATUS_BUTTON_WIDTH + 4;
 		}
+		stopButton.x = statusTextRight - STATUS_BUTTON_WIDTH;
+		statusTextRight -= STATUS_BUTTON_WIDTH + 4;
 	}
 
 }

@@ -18,7 +18,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.core.BlockPos;
-import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Player;
@@ -88,7 +88,7 @@ public class ClientEventHandler {
 
 	private static final Minecraft mc = Minecraft.getInstance();
 
-	private CompoundTag lastPrevPosTag;
+	private Tag lastPrevPosTag;
 	private List<BlockPos> cachedPrevPos = List.of();
 	// A search finishing is the one thing the player is not watching the panel for, so the panel says
 	// so by picking itself out for a moment afterwards
@@ -285,14 +285,18 @@ public class ClientEventHandler {
 	}
 
 	/**
-	 * The previously found locations, re-parsed from NBT only when the stack's tag object changes:
-	 * the server replaces the whole stack when it syncs a change, so the tag's identity tracks it.
-	 * This runs every frame, and parsing the list that often adds up.
+	 * The previously found locations, re-parsed from NBT only when the list itself changes: it is
+	 * replaced wholesale when the server syncs a change and removed when the compass is cleared, so
+	 * its identity tracks its contents. Watching the stack's tag instead would miss the compass being
+	 * cleared on this side, where the tag is emptied rather than replaced, and would leave the marks
+	 * for forgotten locations on the strip until the server happened to send a new stack. This runs
+	 * every frame, and parsing the list that often adds up.
 	 */
 	private List<BlockPos> getPrevPosCached(ExplorersCompassItem compass, ItemStack stack) {
-		if (stack.getTag() != lastPrevPosTag) {
+		final Tag prevPosTag = compass.getPrevPosTag(stack);
+		if (prevPosTag != lastPrevPosTag) {
 			cachedPrevPos = compass.getPrevPos(stack);
-			lastPrevPosTag = stack.getTag();
+			lastPrevPosTag = prevPosTag;
 		}
 		return cachedPrevPos;
 	}

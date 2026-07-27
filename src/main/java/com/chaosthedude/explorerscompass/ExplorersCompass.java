@@ -14,6 +14,7 @@ import com.chaosthedude.explorerscompass.config.CustomModelDataConfig;
 import com.chaosthedude.explorerscompass.config.StructureGroupsConfig;
 import com.chaosthedude.explorerscompass.items.ExplorersCompassItem;
 import com.chaosthedude.explorerscompass.network.BookmarkActionPacket;
+import com.chaosthedude.explorerscompass.network.CancelSearchPacket;
 import com.chaosthedude.explorerscompass.network.ClearCachePacket;
 import com.chaosthedude.explorerscompass.network.CompassSearchForNextPacket;
 import com.chaosthedude.explorerscompass.network.CompassSearchPacket;
@@ -56,7 +57,7 @@ public class ExplorersCompass {
 	// Bump this whenever the packets change. Both sides have to declare the same version: a mismatch
 	// is then refused during the handshake with a clear message, instead of connecting and failing
 	// to decode later.
-	public static final String PROTOCOL_VERSION = "2.0";
+	public static final String PROTOCOL_VERSION = "2.1";
 
 	public static final Logger LOGGER = LogManager.getLogger(MODID);
 
@@ -91,6 +92,7 @@ public class ExplorersCompass {
 		network.registerMessage(4, ClearCachePacket.class, ClearCachePacket::toBytes, ClearCachePacket::new, ClearCachePacket::handle);
 		network.registerMessage(5, BookmarkActionPacket.class, BookmarkActionPacket::toBytes, BookmarkActionPacket::new, BookmarkActionPacket::handle);
 		network.registerMessage(6, ShareLocationPacket.class, ShareLocationPacket::toBytes, ShareLocationPacket::new, ShareLocationPacket::handle);
+		network.registerMessage(7, CancelSearchPacket.class, CancelSearchPacket::toBytes, CancelSearchPacket::new, CancelSearchPacket::handle);
 
 		// Client packet
 		network.registerMessage(2, SyncPacket.class, SyncPacket::toBytes, SyncPacket::new, SyncPacket::handle);

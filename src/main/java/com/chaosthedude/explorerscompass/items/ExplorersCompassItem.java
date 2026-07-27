@@ -85,14 +85,7 @@ public class ExplorersCompassItem extends Item {
 				}
 			}
 		} else {
-			// Only the server runs searches; the client-side use of this item has no workers
-			if (!level.isClientSide()) {
-				final SearchWorkerManager workerManager = getWorkerManager(player);
-				workerManager.stop();
-				workerManager.clear();
-			}
-			setState(player.getItemInHand(hand), null, CompassState.INACTIVE, player);
-			clearPrevPos(player.getItemInHand(hand));
+			cancelSearch(level, player, player.getItemInHand(hand));
 		}
 		return new InteractionResultHolder<ItemStack>(InteractionResult.PASS, player.getItemInHand(hand));
 	}
@@ -207,6 +200,25 @@ public class ExplorersCompassItem extends Item {
 			targetKeys = List.of(structureKey);
 		}
 		search(serverLevel, player, targetKeys, targetKeys.get(0), false, pos, stack, prevPos, true);
+	}
+
+	/**
+	 * Stops whatever the compass is doing and takes the structure it was aimed at back off it,
+	 * forgetting the locations it had collected as well.
+	 *
+	 * <p>Both sides run this on their own copy of the stack: the server is where the search actually
+	 * stops, and the client doing the same to the copy it holds is what clears the HUD at the moment
+	 * it is asked to, rather than once the server's copy of the stack has made it back.
+	 */
+	public void cancelSearch(Level level, Player player, ItemStack stack) {
+		// Only the server runs searches; the client-side use of this item has no workers
+		if (!level.isClientSide()) {
+			final SearchWorkerManager workerManager = getWorkerManager(player);
+			workerManager.stop();
+			workerManager.clear();
+		}
+		setState(stack, null, CompassState.INACTIVE, player);
+		clearPrevPos(stack);
 	}
 
 	private void search(ServerLevel level, Player player, List<ResourceLocation> structureKeys, ResourceLocation displayKey, boolean isGroup, BlockPos pos, ItemStack stack, List<BlockPos> prevPos, boolean ignoreNearStart) {
@@ -620,6 +632,14 @@ public class ExplorersCompassItem extends Item {
 			}
 		}
 		return prevPos;
+	}
+
+	/**
+	 * The list those locations are held in, or null while there are none. It is replaced whenever
+	 * they change, so its identity is what tells a reader that parsing them again is worth it.
+	 */
+	public Tag getPrevPosTag(ItemStack stack) {
+		return ItemUtils.verifyNBT(stack) ? stack.getTag().get("PrevPos") : null;
 	}
 
 	public void setPrevPos(ItemStack stack, List<BlockPos> prevPos) {
