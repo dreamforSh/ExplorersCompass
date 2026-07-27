@@ -50,7 +50,17 @@
     "string.explorerscompass.multiSelected": "%s seleccionadas",
     "string.explorerscompass.noStructuresMatch": "Ninguna estructura coincide con los filtros",
     "string.explorerscompass.clearFiltersHint": "Quita un filtro para ver más",
-    "string.explorerscompass.listHint": "Clic derecho para marcar, Ctrl+clic para elegir varias",
+    "string.explorerscompass.listHint": "↑↓ y Enter para buscar · clic derecho para marcar · Ctrl+clic para varias",
+
+    "_comment": "STRINGS - COMPASS POINTS",
+    "string.explorerscompass.direction.north": "N",
+    "string.explorerscompass.direction.northeast": "NE",
+    "string.explorerscompass.direction.east": "E",
+    "string.explorerscompass.direction.southeast": "SE",
+    "string.explorerscompass.direction.south": "S",
+    "string.explorerscompass.direction.southwest": "SO",
+    "string.explorerscompass.direction.west": "O",
+    "string.explorerscompass.direction.northwest": "NO",
 
     "_comment": "STRINGS - TOOLTIPS",
     "string.explorerscompass.tooltip.search": "Busca la instancia más cercana de la estructura seleccionada.",

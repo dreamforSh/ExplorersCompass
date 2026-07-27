@@ -50,7 +50,17 @@
     "string.explorerscompass.multiSelected": "%s ausgewählt",
     "string.explorerscompass.noStructuresMatch": "Keine Bauwerke entsprechen den Filtern",
     "string.explorerscompass.clearFiltersHint": "Entferne einen Filter, um mehr zu sehen",
-    "string.explorerscompass.listHint": "Rechtsklick markiert ein Bauwerk, Strg+Klick wählt mehrere aus",
+    "string.explorerscompass.listHint": "↑↓ und Enter suchen · Rechtsklick markiert · Strg+Klick für mehrere",
+
+    "_comment": "STRINGS - COMPASS POINTS",
+    "string.explorerscompass.direction.north": "N",
+    "string.explorerscompass.direction.northeast": "NO",
+    "string.explorerscompass.direction.east": "O",
+    "string.explorerscompass.direction.southeast": "SO",
+    "string.explorerscompass.direction.south": "S",
+    "string.explorerscompass.direction.southwest": "SW",
+    "string.explorerscompass.direction.west": "W",
+    "string.explorerscompass.direction.northwest": "NW",
 
     "_comment": "STRINGS - TOOLTIPS",
     "string.explorerscompass.tooltip.search": "Sucht das nächstgelegene Vorkommen des ausgewählten Bauwerks.",

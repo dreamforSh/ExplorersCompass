@@ -10,6 +10,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.lwjgl.glfw.GLFW;
+
 import com.chaosthedude.explorerscompass.ExplorersCompass;
 import com.chaosthedude.explorerscompass.client.ClientEventHandler;
 import com.chaosthedude.explorerscompass.client.SearchHistory;
@@ -77,6 +79,8 @@ public class ExplorersCompassScreen extends Screen {
 	/** The mod the list is narrowed down to, or null while structures from every mod are listed. */
 	private String modFilter;
 	private int cachedLocations;
+	// How many rows the list is holding at its top rather than sorting into place
+	private int pinnedCount;
 	// Where the sidebar has room for the next control, and where the status text has to stop
 	private int sidebarY;
 	private int statusTextRight;
@@ -220,8 +224,8 @@ public class ExplorersCompassScreen extends Screen {
 		}
 
 		final int chipsY = 28;
-		final int chipsLeft = GuiTheme.contentLeft();
-		final int chipsRight = chipsLeft + GuiTheme.contentWidth(width);
+		final int chipsLeft = columnLeft();
+		final int chipsRight = chipsLeft + columnWidth();
 		if (filterChips.isEmpty()) {
 			// The space the chips would take is worth more as a reminder of what the list can do than
 			// as empty header
@@ -254,7 +258,7 @@ public class ExplorersCompassScreen extends Screen {
 		final int top = statusBarTop();
 		final int left = GuiTheme.contentLeft();
 		final int right = left + GuiTheme.contentWidth(width);
-		RenderUtils.drawPanel(left, top, right, top + STATUS_BAR_HEIGHT, GuiTheme.PANEL_TOP, GuiTheme.PANEL_BOTTOM, GuiTheme.PANEL_BORDER);
+		GuiTheme.drawScreenPanel(left, top, right, top + STATUS_BAR_HEIGHT, ConfigHandler.CLIENT.guiStatusBarBackground.get());
 
 		final CompassState state = explorersCompass.getState(stack);
 		final ResourceLocation foundDimension = explorersCompass.getFoundDimension(stack);
@@ -342,17 +346,63 @@ public class ExplorersCompassScreen extends Screen {
 		return height - STATUS_BAR_HEIGHT - 6;
 	}
 
+	/**
+	 * The left edge of the column the rows of the list are laid out in. The filter field and the
+	 * chips under it line up with the rows rather than with the panel the rows sit in, so that
+	 * everything to do with the list shares one edge down the screen.
+	 */
+	private int columnLeft() {
+		return GuiTheme.contentLeft() + StructureSearchList.ROW_INSET / 2;
+	}
+
+	private int columnWidth() {
+		return GuiTheme.contentWidth(width) - StructureSearchList.ROW_INSET;
+	}
+
 	@Override
 	public boolean keyPressed(int par1, int par2, int par3) {
 		if (par1 == 256 && modFilterPanel.isOpen()) {
 			modFilterPanel.close();
 			return true;
 		}
+
+		// The screen opens with the filter field focused, so the keys that work the list have to reach
+		// it from there: typing narrows the list, the arrows walk it, and return searches for what they
+		// land on, without the mouse being needed at any point
+		if (!modFilterPanel.isOpen()) {
+			if (par1 == GLFW.GLFW_KEY_DOWN || par1 == GLFW.GLFW_KEY_UP) {
+				selectionList.moveSelectionBy(par1 == GLFW.GLFW_KEY_DOWN ? 1 : -1);
+				return true;
+			}
+			if (par1 == GLFW.GLFW_KEY_ENTER || par1 == GLFW.GLFW_KEY_KP_ENTER) {
+				return searchFromKeyboard();
+			}
+		}
+
 		boolean ret = super.keyPressed(par1, par2, par3);
 		if (searchTextField.isFocused()) {
 			return true;
 		}
 		return ret;
+	}
+
+	/**
+	 * Searches for whatever return should act on: everything picked with Ctrl-click, the selected
+	 * structure, or, when nothing has been selected yet, the first one the filter left in the list.
+	 */
+	private boolean searchFromKeyboard() {
+		if (multiSelectedKeys.size() > 1) {
+			searchForMultiSelection();
+			return true;
+		}
+		if (!selectionList.hasSelection()) {
+			selectionList.selectFirst();
+		}
+		if (selectionList.hasSelection()) {
+			selectionList.getSelected().searchForStructure();
+			return true;
+		}
+		return false;
 	}
 
 	@Override
@@ -413,6 +463,15 @@ public class ExplorersCompassScreen extends Screen {
 	/** Stars or unstars a structure, keeping the selection where it was. */
 	public void toggleFavorite(ResourceLocation key) {
 		SearchHistory.toggleFavorite(key);
+		refreshListKeepingSelection();
+	}
+
+	/**
+	 * Rebuilds the rows, holding on to whatever was selected if the change left it in the list. A
+	 * structure picked out of hundreds should survive narrowing the list down around it, or sorting
+	 * it differently.
+	 */
+	private void refreshListKeepingSelection() {
 		final ResourceLocation selectedKey = selectionList.hasSelection() ? selectionList.getSelected().getStructureKey() : null;
 		selectionList.refreshList();
 		if (selectedKey != null) {
@@ -474,7 +533,7 @@ public class ExplorersCompassScreen extends Screen {
 			}
 		}
 		if (selectionList != null) {
-			selectionList.refreshList();
+			refreshListKeepingSelection();
 		}
 	}
 
@@ -563,8 +622,16 @@ public class ExplorersCompassScreen extends Screen {
 				result.add(key);
 			}
 		}
+		// Everything up to here was held at the top rather than sorted there, which is what the list
+		// draws a rule under
+		pinnedCount = result.size();
 		result.addAll(rest);
 		return result;
+	}
+
+	/** How many rows at the top of the list are favorites or recent searches. */
+	public int getPinnedCount() {
+		return pinnedCount;
 	}
 
 	private void setupWidgets() {
@@ -605,7 +672,7 @@ public class ExplorersCompassScreen extends Screen {
 		sortByButton = addSidebarButton(new TransparentButton(GuiTheme.SIDEBAR_CONTENT_X, sidebarY, GuiTheme.SIDEBAR_CONTENT_WIDTH, GuiTheme.BUTTON_HEIGHT, sortByButtonLabel(), (onPress) -> {
 			sortingCategory = sortingCategory.next();
 			sortByButton.setMessage(sortByButtonLabel());
-			selectionList.refreshList();
+			refreshListKeepingSelection();
 		}) {
 			@Override
 			public boolean mouseClicked(double mouseX, double mouseY, int button) {
@@ -613,7 +680,7 @@ public class ExplorersCompassScreen extends Screen {
 				if (button == 1 && clicked(mouseX, mouseY)) {
 					sortDescending = !sortDescending;
 					setMessage(sortByButtonLabel());
-					selectionList.refreshList();
+					refreshListKeepingSelection();
 					playDownSound(minecraft.getSoundManager());
 					return true;
 				}
@@ -658,12 +725,16 @@ public class ExplorersCompassScreen extends Screen {
 		final ResourceLocation previousSelectionKey = selectionList != null && selectionList.hasSelection() ? selectionList.getSelected().getStructureKey() : null;
 		selectionList = null;
 
-		searchTextField = new TransparentTextField(font, GuiTheme.contentLeft(), 8, Math.min(200, GuiTheme.contentWidth(width)), 18, Component.translatable("string.explorerscompass.searchHint"));
+		searchTextField = new TransparentTextField(font, columnLeft(), 8, columnWidth(), 18, Component.translatable("string.explorerscompass.searchHint"));
 		searchTextField.setValue(previousSearchTerm);
 		// Filtering as the field changes covers every way it can: typing, pasting, and the button that
 		// empties it
 		searchTextField.setResponder((text) -> processSearchTerm());
 		addRenderableWidget(searchTextField);
+		// Opening straight into the filter is what makes the keyboard alone enough: type, arrow down,
+		// return. Nothing else on this screen wants the keys more than the filter does.
+		setInitialFocus(searchTextField);
+		searchTextField.setFocused(true);
 
 		// The list is recreated on every init so that it picks up the current screen dimensions
 		processSearchTerm();

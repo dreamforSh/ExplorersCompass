@@ -50,7 +50,17 @@
     "string.explorerscompass.multiSelected": "已选 %s 个",
     "string.explorerscompass.noStructuresMatch": "没有符合筛选条件的结构",
     "string.explorerscompass.clearFiltersHint": "清除一项筛选条件以显示更多",
-    "string.explorerscompass.listHint": "右键收藏结构，Ctrl+左键可多选",
+    "string.explorerscompass.listHint": "↑↓ 选择、回车搜索 · 右键收藏 · Ctrl+左键多选",
+
+    "_comment": "STRINGS - COMPASS POINTS",
+    "string.explorerscompass.direction.north": "北",
+    "string.explorerscompass.direction.northeast": "东北",
+    "string.explorerscompass.direction.east": "东",
+    "string.explorerscompass.direction.southeast": "东南",
+    "string.explorerscompass.direction.south": "南",
+    "string.explorerscompass.direction.southwest": "西南",
+    "string.explorerscompass.direction.west": "西",
+    "string.explorerscompass.direction.northwest": "西北",
 
     "_comment": "STRINGS - TOOLTIPS",
     "string.explorerscompass.tooltip.search": "搜索离你最近的所选结构。",

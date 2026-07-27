@@ -1,5 +1,6 @@
 package com.chaosthedude.explorerscompass.gui;
 
+import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.util.RenderUtils;
 import com.mojang.blaze3d.vertex.PoseStack;
 
@@ -41,6 +42,8 @@ public class GuiTheme {
 	public static final int ROW_SELECTED_RIGHT = 0x10FFC24B;
 	public static final int ROW_MULTI_SELECTED = 0x28FFC24B;
 	public static final int ROW_SEPARATOR = 0x18FFFFFF;
+	/** Closes off the favorites and recent searches held at the top of a list. */
+	public static final int ROW_SECTION_SEPARATOR = 0x66FFC24B;
 
 	public static final int SCROLLBAR_TRACK = 0x40000000;
 	public static final int SCROLLBAR_THUMB = 0x99FFFFFF;
@@ -68,12 +71,28 @@ public class GuiTheme {
 	}
 
 	public static void drawHeader(int screenWidth) {
-		RenderUtils.drawVerticalGradient(0, 0, screenWidth, HEADER_HEIGHT, HEADER_TOP, HEADER_BOTTOM);
+		if (ConfigHandler.CLIENT.guiHeaderBackground.get()) {
+			RenderUtils.drawVerticalGradient(0, 0, screenWidth, HEADER_HEIGHT, HEADER_TOP, HEADER_BOTTOM);
+		}
+		// The rule under the header stays either way: it is what separates the title and the filter
+		// from the list below them
 		RenderUtils.drawRect(0, HEADER_HEIGHT - 1, screenWidth, HEADER_HEIGHT, PANEL_BORDER);
 	}
 
 	public static void drawSidebar(int screenHeight) {
-		RenderUtils.drawPanel(SIDEBAR_X, HEADER_HEIGHT + 6, SIDEBAR_X + SIDEBAR_WIDTH, screenHeight - 6, PANEL_TOP, PANEL_BOTTOM, PANEL_BORDER);
+		drawScreenPanel(SIDEBAR_X, HEADER_HEIGHT + 6, SIDEBAR_X + SIDEBAR_WIDTH, screenHeight - 6, ConfigHandler.CLIENT.guiSidebarBackground.get());
+	}
+
+	/**
+	 * One of the panels a screen is laid out on. Filled in by default, and left outlined but see
+	 * through where the player asked to keep the world behind that part of the screen in view.
+	 */
+	public static void drawScreenPanel(int left, int top, int right, int bottom, boolean filled) {
+		if (filled) {
+			RenderUtils.drawPanel(left, top, right, bottom, PANEL_TOP, PANEL_BOTTOM, PANEL_BORDER);
+		} else {
+			RenderUtils.drawInnerOutline(left, top, right, bottom, PANEL_BORDER);
+		}
 	}
 
 	/** The title of a screen, with the number of things it is showing beside it. */

@@ -80,10 +80,14 @@ public class ConfigHandler {
 		public final ForgeConfigSpec.EnumValue<OverlaySide> overlaySide;
 		public final ForgeConfigSpec.IntValue overlayLineOffset;
 		public final ForgeConfigSpec.BooleanValue overlayBackground;
+		public final ForgeConfigSpec.BooleanValue guiHeaderBackground;
+		public final ForgeConfigSpec.BooleanValue guiSidebarBackground;
+		public final ForgeConfigSpec.BooleanValue guiStatusBarBackground;
 		public final ForgeConfigSpec.BooleanValue showDirectionBar;
 		public final ForgeConfigSpec.IntValue directionBarY;
 		public final ForgeConfigSpec.IntValue directionBarWidth;
 		public final ForgeConfigSpec.IntValue directionBarSpan;
+		public final ForgeConfigSpec.BooleanValue directionBarBackground;
 
 		Client(ForgeConfigSpec.Builder builder) {
 			String desc;
@@ -110,17 +114,31 @@ public class ConfigHandler {
 			desc = "Draws the compass information on the HUD on a panel of its own, which keeps it legible against a bright sky or a snowy landscape. Turn this off for plain text.";
 			overlayBackground = builder.comment(desc).define("overlayBackground", true);
 
+			// Each panel of the compass screens is filled in or left see through on its own, so that a
+			// player who only wants the world visible behind part of the screen can have exactly that
+			desc = "Fills in the strip along the top of the compass screens, which holds the title, the filter field and the filters in force. Turn this off to have it outlined but see through.";
+			guiHeaderBackground = builder.comment(desc).define("guiHeaderBackground", true);
+
+			desc = "Fills in the column of controls beside the list on the compass screens. Turn this off to have it outlined but see through.";
+			guiSidebarBackground = builder.comment(desc).define("guiSidebarBackground", true);
+
+			desc = "Fills in the bar along the bottom of the structure screen, which reports what the compass is doing. Turn this off to have it outlined but see through.";
+			guiStatusBarBackground = builder.comment(desc).define("guiStatusBarBackground", true);
+
 			desc = "Displays a compass strip at the top of the screen marking the direction of the located structure.";
 			showDirectionBar = builder.comment(desc).define("showDirectionBar", true);
 
 			desc = "How far down from the top of the screen the direction strip is drawn.";
 			directionBarY = builder.comment(desc).defineInRange("directionBarY", 4, 0, 200);
 
-			desc = "How wide the direction strip is, in pixels of the scaled interface.";
-			directionBarWidth = builder.comment(desc).defineInRange("directionBarWidth", 240, 120, 480);
+			desc = "How wide the direction strip is, in pixels of the scaled interface. A strip wider than the screen is cut down to it, so any large value here makes the strip span the whole width of whatever screen it is drawn on.";
+			directionBarWidth = builder.comment(desc).defineInRange("directionBarWidth", 240, 60, 4096);
 
-			desc = "How much of the horizon the direction strip covers, in degrees. Lower values spread the marks further apart and make small changes in direction easier to see, higher values keep more of the horizon in view at once.";
+			desc = "How much of the horizon the direction strip covers, in degrees. Lower values spread the marks further apart and make small changes in direction easier to see, higher values keep more of the horizon in view at once. Pair a full width strip with a large span to have the whole horizon on screen at once.";
 			directionBarSpan = builder.comment(desc).defineInRange("directionBarSpan", 120, 60, 360);
+
+			desc = "Draws the direction strip on a panel of its own. Turn this off to leave only the marks, the compass points and the readout, with nothing behind them: they carry their own shadows, and fade out towards the ends of the strip on their own.";
+			directionBarBackground = builder.comment(desc).define("directionBarBackground", true);
 
 			builder.pop();
 		}

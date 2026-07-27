@@ -16,7 +16,7 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 public class StructureSearchList extends ObjectSelectionList<StructureSearchEntry> {
 
 	/** How much of the width is left over for the scrollbar and the margins beside the rows. */
-	private static final int ROW_INSET = 20;
+	public static final int ROW_INSET = 20;
 	private static final int SCROLLBAR_WIDTH = 6;
 
 	private final ExplorersCompassScreen parentScreen;
@@ -90,7 +90,10 @@ public class StructureSearchList extends ObjectSelectionList<StructureSearchEntr
 			}
 
 			if (j < getItemCount() - 1) {
-				RenderUtils.drawRect(bandLeft + 2, bandBottom - 1, bandRight - 2, bandBottom, GuiTheme.ROW_SEPARATOR);
+				// A brighter rule closes off the structures held at the top of the list, so that their
+				// order reads as deliberate rather than as the sort having gone wrong
+				final boolean lastPinned = j == parentScreen.getPinnedCount() - 1;
+				RenderUtils.drawRect(bandLeft + 2, bandBottom - 1, bandRight - 2, bandBottom, lastPinned ? GuiTheme.ROW_SECTION_SEPARATOR : GuiTheme.ROW_SEPARATOR);
 			}
 
 			entry.render(poseStack, j, rowTop, getRowLeft(), getRowWidth(), itemHeight - 4, mouseX, mouseY, hovered, partialTicks);
@@ -123,6 +126,30 @@ public class StructureSearchList extends ObjectSelectionList<StructureSearchEntr
 	public void selectStructure(StructureSearchEntry entry) {
 		setSelected(entry);
 		parentScreen.selectStructure(entry);
+	}
+
+	/**
+	 * Moves the selection up or down the list and scrolls it into view, so that a structure can be
+	 * picked without leaving the filter field the screen opens focused on.
+	 */
+	public void moveSelectionBy(int delta) {
+		if (children().isEmpty()) {
+			return;
+		}
+		final int size = children().size();
+		// From no selection at all, the first press takes the row at whichever end it came from
+		final int index = hasSelection() ? Mth.clamp(children().indexOf(getSelected()) + delta, 0, size - 1) : (delta > 0 ? 0 : size - 1);
+		final StructureSearchEntry entry = children().get(index);
+		selectStructure(entry);
+		ensureVisible(entry);
+	}
+
+	/** Selects the row at the top of the list, if there is one. */
+	public void selectFirst() {
+		if (!children().isEmpty()) {
+			selectStructure(children().get(0));
+			ensureVisible(children().get(0));
+		}
 	}
 
 	/** Selects the entry for the given key, if the list holds one, and scrolls it into view. */

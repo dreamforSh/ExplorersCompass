@@ -50,7 +50,17 @@
     "string.explorerscompass.multiSelected": "%s 個選択中",
     "string.explorerscompass.noStructuresMatch": "条件に合う構造物がありません",
     "string.explorerscompass.clearFiltersHint": "絞り込みを解除するともっと表示されます",
-    "string.explorerscompass.listHint": "右クリックでお気に入り、Ctrl+クリックで複数選択",
+    "string.explorerscompass.listHint": "↑↓ で選択、Enter で検索 · 右クリックでお気に入り · Ctrl+クリックで複数選択",
+
+    "_comment": "STRINGS - COMPASS POINTS",
+    "string.explorerscompass.direction.north": "北",
+    "string.explorerscompass.direction.northeast": "北東",
+    "string.explorerscompass.direction.east": "東",
+    "string.explorerscompass.direction.southeast": "南東",
+    "string.explorerscompass.direction.south": "南",
+    "string.explorerscompass.direction.southwest": "南西",
+    "string.explorerscompass.direction.west": "西",
+    "string.explorerscompass.direction.northwest": "北西",
 
     "_comment": "STRINGS - TOOLTIPS",
     "string.explorerscompass.tooltip.search": "選んだ構造物のうち、最も近いものを検索します。",
