@@ -7,6 +7,7 @@ import com.chaosthedude.explorerscompass.items.ExplorersCompassItem;
 import com.chaosthedude.explorerscompass.util.CompassState;
 import com.chaosthedude.explorerscompass.util.ItemUtils;
 import com.chaosthedude.explorerscompass.util.RenderUtils;
+import com.chaosthedude.explorerscompass.util.SearchTarget;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
 import com.mojang.blaze3d.vertex.PoseStack;
 
@@ -145,7 +146,7 @@ public class ClientEventHandler {
 			XaeroMinimapIntegration.reset();
 		} else if (state == CompassState.FOUND && isInFoundDimension(player, compass, stack)) {
 			// A waypoint in another dimension's coordinates would point at the wrong place
-			XaeroMinimapIntegration.createWaypointForLocatedStructure(player, compass, stack);
+			XaeroMinimapIntegration.createWaypointForLocation(player, compass, stack);
 			if (ConfigHandler.CLIENT.showDirectionBar.get()) {
 				renderDirectionBar(poseStack, player, compass, stack);
 			}
@@ -184,7 +185,7 @@ public class ClientEventHandler {
 			}
 		} else if (state == CompassState.FOUND) {
 			headline = I18n.get("string.explorerscompass.found");
-			target = StructureUtils.getPrettyStructureName(compass.getStructureKey(stack));
+			target = compass.getSearchTarget(stack).getPrettyName(compass.getTargetKey(stack));
 			final boolean here = isInFoundDimension(player, compass, stack);
 			dotColor = here ? GuiTheme.TEXT_SUCCESS : GuiTheme.TEXT_WARNING;
 
@@ -210,7 +211,7 @@ public class ClientEventHandler {
 		} else {
 			headline = I18n.get("string.explorerscompass.notFound");
 			dotColor = GuiTheme.TEXT_WARNING;
-			target = StructureUtils.getPrettyStructureName(compass.getStructureKey(stack));
+			target = compass.getSearchTarget(stack).getPrettyName(compass.getTargetKey(stack));
 			rows.add(new HudRow(I18n.get("string.explorerscompass.radius"), String.format("%,d", compass.getSearchRadius(stack)), GuiTheme.TEXT_PRIMARY));
 			// A search can also end because it ran out of samples, in which case the radius alone is far
 			// below the configured maximum and looks like a premature stop
@@ -307,9 +308,10 @@ public class ClientEventHandler {
 		return foundDimension == null || foundDimension.equals(player.level.dimension().location());
 	}
 
-	/** What a search is aiming at: the structure or group name, plus how many more it considers. */
+	/** What a search is aiming at: the name of what or of the group, plus how many more it considers. */
 	public static String searchTargetName(ExplorersCompassItem compass, ItemStack stack) {
-		String name = compass.getIsGroup(stack) ? StructureUtils.getPrettyGroupName(compass.getStructureKey(stack)) : StructureUtils.getPrettyStructureName(compass.getStructureKey(stack));
+		final SearchTarget searchTarget = compass.getSearchTarget(stack);
+		String name = compass.getIsGroup(stack) ? searchTarget.getPrettyGroupName(compass.getTargetKey(stack)) : searchTarget.getPrettyName(compass.getTargetKey(stack));
 		final int targetCount = compass.getTargetCount(stack);
 		if (targetCount > 1) {
 			name += " (+" + (targetCount - 1) + ")";

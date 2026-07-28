@@ -1,5 +1,6 @@
 package com.chaosthedude.explorerscompass.sorting;
 
+import com.chaosthedude.explorerscompass.util.SearchTarget;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
 
 import net.minecraft.client.resources.language.I18n;
@@ -11,13 +12,8 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 public class SourceSorting implements ISorting {
 
 	@Override
-	public int compare(ResourceLocation key1, ResourceLocation key2) {
-		return StructureUtils.getPrettyStructureSource(key1).compareTo(StructureUtils.getPrettyStructureSource(key2));
-	}
-
-	@Override
-	public Object getValue(ResourceLocation key) {
-		return StructureUtils.getPrettyStructureSource(key);
+	public Comparable<?> getValue(SearchTarget searchTarget, ResourceLocation key) {
+		return StructureUtils.getPrettySourceName(key);
 	}
 
 	@Override

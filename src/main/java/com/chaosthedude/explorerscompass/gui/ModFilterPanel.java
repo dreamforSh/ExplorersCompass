@@ -20,8 +20,8 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
 /**
- * The list of mods the structures in this world come from, dropped down beside the sidebar so that
- * the list can be narrowed to one of them. It is drawn and clicked by the screen that owns it
+ * The list of mods whatever the compass is listing comes from, dropped down beside the sidebar so
+ * that the list can be narrowed to one of them. It is drawn and clicked by the screen that owns it
  * rather than being a widget of its own, which is what lets it sit above the selection list instead
  * of being covered by it.
  */
@@ -42,12 +42,12 @@ public class ModFilterPanel {
 
 		private final String namespace;
 		private final String displayName;
-		private final int structureCount;
+		private final int entryCount;
 
-		public ModOption(String namespace, String displayName, int structureCount) {
+		public ModOption(String namespace, String displayName, int entryCount) {
 			this.namespace = namespace;
 			this.displayName = displayName;
-			this.structureCount = structureCount;
+			this.entryCount = entryCount;
 		}
 
 		public String getNamespace() {
@@ -58,8 +58,9 @@ public class ModFilterPanel {
 			return displayName;
 		}
 
-		public int getStructureCount() {
-			return structureCount;
+		/** How many of the listed structures or biomes this mod accounts for. */
+		public int getEntryCount() {
+			return entryCount;
 		}
 
 	}
@@ -79,12 +80,12 @@ public class ModFilterPanel {
 	}
 
 	/**
-	 * Collects the mods that contribute the given structures, most prolific first among the mods and
-	 * with Minecraft itself always at the top, each carrying how many structures it accounts for.
+	 * Collects the mods that contribute the given keys, most prolific first among the mods and with
+	 * Minecraft itself always at the top, each carrying how many of them it accounts for.
 	 */
-	public static List<ModOption> collectOptions(List<ResourceLocation> structureKeys) {
+	public static List<ModOption> collectOptions(List<ResourceLocation> keys) {
 		final Map<String, Integer> countsByNamespace = new LinkedHashMap<String, Integer>();
-		for (ResourceLocation key : structureKeys) {
+		for (ResourceLocation key : keys) {
 			countsByNamespace.merge(key.getNamespace(), 1, Integer::sum);
 		}
 
@@ -92,11 +93,11 @@ public class ModFilterPanel {
 		for (Map.Entry<String, Integer> entry : countsByNamespace.entrySet()) {
 			// The source is resolved from a key rather than from the namespace, so that the mod's own
 			// display name is what shows wherever it is known
-			final String displayName = StructureUtils.getPrettyStructureSource(new ResourceLocation(entry.getKey(), "any"));
+			final String displayName = StructureUtils.getPrettySourceName(new ResourceLocation(entry.getKey(), "any"));
 			options.add(new ModOption(entry.getKey(), displayName, entry.getValue()));
 		}
 		options.sort(Comparator.comparing((ModOption option) -> !option.getNamespace().equals("minecraft")).thenComparing(ModOption::getDisplayName, String.CASE_INSENSITIVE_ORDER));
-		options.add(0, new ModOption(null, I18n.get("string.explorerscompass.allMods"), structureKeys.size()));
+		options.add(0, new ModOption(null, I18n.get("string.explorerscompass.allMods"), keys.size()));
 		return options;
 	}
 
@@ -108,8 +109,8 @@ public class ModFilterPanel {
 	 * Drops the panel down beside the given point, sized to what is left of the screen below it and
 	 * scrolled to whichever mod is currently picked.
 	 */
-	public void open(List<ResourceLocation> structureKeys, int anchorX, int anchorY, int screenWidth, int screenHeight, String selectedNamespace) {
-		options = collectOptions(structureKeys);
+	public void open(List<ResourceLocation> keys, int anchorX, int anchorY, int screenWidth, int screenHeight, String selectedNamespace) {
+		options = collectOptions(keys);
 		open = true;
 		x = Math.min(anchorX, Math.max(0, screenWidth - WIDTH - 4));
 
@@ -129,11 +130,11 @@ public class ModFilterPanel {
 		open = false;
 	}
 
-	public void toggle(List<ResourceLocation> structureKeys, int anchorX, int anchorY, int screenWidth, int screenHeight, String selectedNamespace) {
+	public void toggle(List<ResourceLocation> keys, int anchorX, int anchorY, int screenWidth, int screenHeight, String selectedNamespace) {
 		if (open) {
 			close();
 		} else {
-			open(structureKeys, anchorX, anchorY, screenWidth, screenHeight, selectedNamespace);
+			open(keys, anchorX, anchorY, screenWidth, screenHeight, selectedNamespace);
 		}
 	}
 
@@ -182,7 +183,7 @@ public class ModFilterPanel {
 				RenderUtils.drawRect(rowsLeft, rowTop, rowsRight, rowTop + ROW_HEIGHT, GuiTheme.ROW_HOVER);
 			}
 
-			final String count = String.valueOf(option.getStructureCount());
+			final String count = String.valueOf(option.getEntryCount());
 			final int countWidth = mc.font.width(count);
 			final String name = RenderUtils.trimToWidth(option.getDisplayName(), rowsRight - rowsLeft - countWidth - 12);
 			mc.font.draw(poseStack, name, rowsLeft + 4, rowTop + 3, selected ? GuiTheme.ACCENT : (hovered ? GuiTheme.TEXT_PRIMARY : GuiTheme.TEXT_SECONDARY));

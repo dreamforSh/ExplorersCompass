@@ -24,7 +24,11 @@ public class ConfigHandler {
 		public final ForgeConfigSpec.BooleanValue displayCoordinates;
 		public final ForgeConfigSpec.IntValue maxRadius;
 		public final ForgeConfigSpec.ConfigValue<List<String>> structureBlacklist;
+		public final ForgeConfigSpec.ConfigValue<List<String>> biomeBlacklist;
 		public final ForgeConfigSpec.IntValue maxSamples;
+		public final ForgeConfigSpec.IntValue maxBiomeSamples;
+		public final ForgeConfigSpec.IntValue biomeSampleSpacing;
+		public final ForgeConfigSpec.IntValue biomeVerticalSampleSpacing;
 		public final ForgeConfigSpec.IntValue maxSearchTimePerTick;
 		public final ForgeConfigSpec.IntValue searchRequestCooldownMillis;
 		public final ForgeConfigSpec.IntValue maxBookmarks;
@@ -50,8 +54,20 @@ public class ConfigHandler {
 			desc = "A list of structures that the compass will not display in the GUI and will not be able to search for. Wildcard character * can be used to match any number of characters, and ? can be used to match one character. Ex: [\"minecraft:stronghold\", \"minecraft:endcity\", \"minecraft:*village*\"]";
 			structureBlacklist = builder.comment(desc).define("structureBlacklist", new ArrayList<String>());
 
+			desc = "A list of biomes that the compass will not display in the GUI and will not be able to search for. Wildcards work the same way they do for the structure blacklist. Ex: [\"minecraft:deep_dark\", \"minecraft:*ocean*\"]";
+			biomeBlacklist = builder.comment(desc).define("biomeBlacklist", new ArrayList<String>());
+
 			desc = "The maximum number of samples to be taken when searching for a structure.";
 			maxSamples = builder.comment(desc).defineInRange("maxSamples", 100000, 0, 100000000);
+
+			desc = "The maximum number of samples to be taken when searching for a biome. A biome can lie anywhere, where a structure can only lie where its placement allows one, so a biome search takes far more samples than a structure search does. Each of them is much cheaper, since which biome generates somewhere follows from the world seed alone and needs no part of the world to have been generated.";
+			maxBiomeSamples = builder.comment(desc).defineInRange("maxBiomeSamples", 2000000, 0, 100000000);
+
+			desc = "How far apart in blocks the locations sampled by a biome search are. Lower values make the search less likely to step over a small biome entirely, higher values let it cover the same area in fewer samples.";
+			biomeSampleSpacing = builder.comment(desc).defineInRange("biomeSampleSpacing", 32, 4, 512);
+
+			desc = "How far apart in blocks the heights sampled by a biome search are. Sampling the whole height of a dimension is what makes the biomes that fill the caves findable from the surface, and costs a search as many samples per location as there are heights to sample. Set to 0 to sample only the height the search was started at, which searches several times faster but only finds the biomes reaching it.";
+			biomeVerticalSampleSpacing = builder.comment(desc).defineInRange("biomeVerticalSampleSpacing", 64, 0, 512);
 
 			desc = "The maximum amount of time in milliseconds that a search may spend on the server thread during a single tick. Sampling a location can be expensive, so this caps how much of each tick a search is allowed to consume. Lower values keep the game responsive while a search is running, higher values complete searches sooner.";
 			maxSearchTimePerTick = builder.comment(desc).defineInRange("maxSearchTimePerTick", 10, 1, 50);
@@ -75,6 +91,7 @@ public class ConfigHandler {
 	public static class Client {
 		public final ForgeConfigSpec.BooleanValue displayWithChatOpen;
 		public final ForgeConfigSpec.BooleanValue translateStructureNames;
+		public final ForgeConfigSpec.BooleanValue translateBiomeNames;
 		public final ForgeConfigSpec.BooleanValue createXaeroWaypoints;
 		public final ForgeConfigSpec.IntValue xaeroWaypointColor;
 		public final ForgeConfigSpec.EnumValue<OverlaySide> overlaySide;
@@ -98,6 +115,9 @@ public class ConfigHandler {
 
 			desc = "Attempts to translate structure names before fixing the unlocalized names. Translations may not be available for all structures.";
 			translateStructureNames = builder.comment(desc).define("translateStructureNames", true);
+
+			desc = "Attempts to translate biome names before fixing the unlocalized names. Unlike structures, almost every biome is named by the game itself or by the mod that adds it, so there is rarely anything left to fix up.";
+			translateBiomeNames = builder.comment(desc).define("translateBiomeNames", true);
 
 			desc = "Creates a waypoint in Xaero's Minimap for each located structure. Has no effect when that mod is not installed.";
 			createXaeroWaypoints = builder.comment(desc).define("createXaeroWaypoints", true);

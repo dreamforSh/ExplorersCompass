@@ -7,9 +7,7 @@ import java.util.List;
 import com.chaosthedude.explorerscompass.ExplorersCompass;
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.items.ExplorersCompassItem;
-import com.chaosthedude.explorerscompass.util.StructureUtils;
 
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
@@ -17,7 +15,7 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.fml.ModList;
 
 /**
- * Adds a waypoint to Xaero's Minimap for every structure the compass locates.
+ * Adds a waypoint to Xaero's Minimap for every location the compass finds.
  *
  * <p>That mod is not a dependency and publishes no artifact to build against, so it is reached
  * through reflection and switched off for good the first time anything it needs turns out to be
@@ -52,10 +50,10 @@ public class XaeroMinimapIntegration {
 	private static boolean hasLast;
 
 	/**
-	 * Creates a waypoint for the structure the given compass is pointing at, unless one was already
+	 * Creates a waypoint for whatever the given compass is pointing at, unless one was already
 	 * created for that location.
 	 */
-	public static void createWaypointForLocatedStructure(Player player, ExplorersCompassItem compass, ItemStack stack) {
+	public static void createWaypointForLocation(Player player, ExplorersCompassItem compass, ItemStack stack) {
 		if (unavailable || !ConfigHandler.CLIENT.createXaeroWaypoints.get() || !ModList.get().isLoaded(MOD_ID)) {
 			return;
 		}
@@ -66,8 +64,7 @@ public class XaeroMinimapIntegration {
 			return;
 		}
 
-		final ResourceLocation structureKey = compass.getStructureKey(stack);
-		final String name = StructureUtils.getPrettyStructureName(structureKey);
+		final String name = compass.getSearchTarget(stack).getPrettyName(compass.getTargetKey(stack));
 		try {
 			if (!resolve()) {
 				return;

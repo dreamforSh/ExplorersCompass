@@ -6,11 +6,14 @@ import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import com.chaosthedude.explorerscompass.ExplorersCompass;
+import com.chaosthedude.explorerscompass.util.SearchTarget;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -23,44 +26,68 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.fml.loading.FMLPaths;
 
 /**
- * The player's favorite structures and their most recent searches, shown at the top of the
- * selection list. Kept in {@code config/explorerscompass/history.json}, so they survive across
- * sessions; structures from other worlds simply do not show while they are not in the list.
+ * The player's favorites and their most recent searches, shown at the top of the selection list.
+ * Kept in {@code config/explorerscompass/history.json}, so they survive across sessions; entries
+ * from other worlds simply do not show while they are not in the list.
+ *
+ * <p>Structures and biomes are kept apart, so that starring a biome does not pin a structure of the
+ * same name and the recent searches of one do not crowd out the other's.
  */
 @OnlyIn(Dist.CLIENT)
 public class SearchHistory {
 
 	private static final String FILE_NAME = "history.json";
-	private static final String FAVORITES_FIELD = "favorites";
-	private static final String RECENTS_FIELD = "recents";
 	private static final int MAX_RECENTS = 8;
 
 	private static boolean loaded;
-	private static final Set<ResourceLocation> favorites = new LinkedHashSet<ResourceLocation>();
-	// Most recent first
-	private static final List<ResourceLocation> recents = new ArrayList<ResourceLocation>();
+	private static final Map<SearchTarget, History> histories = new EnumMap<SearchTarget, History>(SearchTarget.class);
 
-	public static boolean isFavorite(ResourceLocation key) {
-		ensureLoaded();
-		return favorites.contains(key);
+	/** The favorites and recent searches of one kind of target, and what they are stored under. */
+	private static class History {
+
+		private final String favoritesField;
+		private final String recentsField;
+		private final Set<ResourceLocation> favorites = new LinkedHashSet<ResourceLocation>();
+		// Most recent first
+		private final List<ResourceLocation> recents = new ArrayList<ResourceLocation>();
+
+		private History(String favoritesField, String recentsField) {
+			this.favoritesField = favoritesField;
+			this.recentsField = recentsField;
+		}
+
 	}
 
-	public static void toggleFavorite(ResourceLocation key) {
+	static {
+		// The structure fields keep the names they had before biomes could be searched for, so that an
+		// existing history file is read rather than started over
+		histories.put(SearchTarget.STRUCTURE, new History("favorites", "recents"));
+		histories.put(SearchTarget.BIOME, new History("biomeFavorites", "biomeRecents"));
+	}
+
+	public static boolean isFavorite(SearchTarget searchTarget, ResourceLocation key) {
 		ensureLoaded();
+		return histories.get(searchTarget).favorites.contains(key);
+	}
+
+	public static void toggleFavorite(SearchTarget searchTarget, ResourceLocation key) {
+		ensureLoaded();
+		final Set<ResourceLocation> favorites = histories.get(searchTarget).favorites;
 		if (!favorites.remove(key)) {
 			favorites.add(key);
 		}
 		save();
 	}
 
-	/** The structures searched for most recently, most recent first. */
-	public static List<ResourceLocation> getRecents() {
+	/** What was searched for most recently, most recent first. */
+	public static List<ResourceLocation> getRecents(SearchTarget searchTarget) {
 		ensureLoaded();
-		return recents;
+		return histories.get(searchTarget).recents;
 	}
 
-	public static void pushRecent(ResourceLocation key) {
+	public static void pushRecent(SearchTarget searchTarget, ResourceLocation key) {
 		ensureLoaded();
+		final List<ResourceLocation> recents = histories.get(searchTarget).recents;
 		recents.remove(key);
 		recents.add(0, key);
 		while (recents.size() > MAX_RECENTS) {
@@ -85,10 +112,12 @@ public class SearchHistory {
 			if (!root.isJsonObject()) {
 				throw new JsonParseException("Expected an object");
 			}
-			readKeys(root.getAsJsonObject().get(FAVORITES_FIELD), favorites::add);
-			readKeys(root.getAsJsonObject().get(RECENTS_FIELD), recents::add);
-			while (recents.size() > MAX_RECENTS) {
-				recents.remove(recents.size() - 1);
+			for (History history : histories.values()) {
+				readKeys(root.getAsJsonObject().get(history.favoritesField), history.favorites::add);
+				readKeys(root.getAsJsonObject().get(history.recentsField), history.recents::add);
+				while (history.recents.size() > MAX_RECENTS) {
+					history.recents.remove(history.recents.size() - 1);
+				}
 			}
 		} catch (IOException | JsonParseException e) {
 			ExplorersCompass.LOGGER.warn("Failed to read " + path + ", favorites and recent searches start empty", e);
@@ -111,12 +140,10 @@ public class SearchHistory {
 
 	private static void save() {
 		final JsonObject root = new JsonObject();
-		final JsonArray favoritesArray = new JsonArray();
-		favorites.forEach((key) -> favoritesArray.add(key.toString()));
-		root.add(FAVORITES_FIELD, favoritesArray);
-		final JsonArray recentsArray = new JsonArray();
-		recents.forEach((key) -> recentsArray.add(key.toString()));
-		root.add(RECENTS_FIELD, recentsArray);
+		for (History history : histories.values()) {
+			root.add(history.favoritesField, toArray(history.favorites));
+			root.add(history.recentsField, toArray(history.recents));
+		}
 
 		final Path path = filePath();
 		try {
@@ -127,6 +154,12 @@ public class SearchHistory {
 		} catch (IOException e) {
 			ExplorersCompass.LOGGER.warn("Failed to write " + path + ", favorites and recent searches will not persist", e);
 		}
+	}
+
+	private static JsonArray toArray(Iterable<ResourceLocation> keys) {
+		final JsonArray array = new JsonArray();
+		keys.forEach((key) -> array.add(key.toString()));
+		return array;
 	}
 
 	private static Path filePath() {

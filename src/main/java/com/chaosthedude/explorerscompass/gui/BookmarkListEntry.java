@@ -68,7 +68,7 @@ public class BookmarkListEntry extends ObjectSelectionList.Entry<BookmarkListEnt
 		final int badgeLeft = right - mc.font.width(badge) - 8;
 		RenderUtils.drawChip(poseStack, badge, badgeLeft, par2, here ? GuiTheme.CHIP_BACKGROUND : GuiTheme.CHIP_ACCENT_BACKGROUND, here ? GuiTheme.TEXT_SECONDARY : GuiTheme.TEXT_WARNING);
 
-		final String name = RenderUtils.trimToWidth(StructureUtils.getPrettyStructureName(bookmark.getStructureKey()), badgeLeft - left - 6);
+		final String name = RenderUtils.trimToWidth(bookmark.getSearchTarget().getPrettyName(bookmark.getTargetKey()), badgeLeft - left - 6);
 		mc.font.draw(poseStack, name, left, par2 + 2, GuiTheme.TEXT_PRIMARY);
 
 		final int y = bookmark.getY();
@@ -94,7 +94,7 @@ public class BookmarkListEntry extends ObjectSelectionList.Entry<BookmarkListEnt
 
 	@Override
 	public Component getNarration() {
-		return Component.literal(StructureUtils.getPrettyStructureName(bookmark.getStructureKey()));
+		return Component.literal(bookmark.getSearchTarget().getPrettyName(bookmark.getTargetKey()));
 	}
 
 	public void pointAt() {

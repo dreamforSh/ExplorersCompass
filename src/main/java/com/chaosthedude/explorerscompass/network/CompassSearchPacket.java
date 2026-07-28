@@ -7,6 +7,7 @@ import java.util.function.Supplier;
 import com.chaosthedude.explorerscompass.ExplorersCompass;
 import com.chaosthedude.explorerscompass.items.ExplorersCompassItem;
 import com.chaosthedude.explorerscompass.util.ItemUtils;
+import com.chaosthedude.explorerscompass.util.SearchTarget;
 
 import io.netty.handler.codec.DecoderException;
 import net.minecraft.core.BlockPos;
@@ -17,54 +18,57 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.network.NetworkEvent;
 
 /**
- * Asks for a search: either for the nearest of a set of structures, or for the nearest member of
- * a group.
+ * Asks for a search: either for the nearest of a set of structures or biomes, or for the nearest
+ * member of a group of either.
  */
 public class CompassSearchPacket {
 
-	// Far more structures than any real selection holds; a count past this is a malformed packet
-	private static final int MAX_STRUCTURE_KEYS = 4096;
+	// Far more keys than any real selection holds; a count past this is a malformed packet
+	private static final int MAX_TARGET_KEYS = 4096;
 
+	private SearchTarget searchTarget;
 	private boolean isGroup;
 	private ResourceLocation groupKey;
-	private List<ResourceLocation> structureKeys;
+	private List<ResourceLocation> targetKeys;
 	private int x;
 	private int y;
 	private int z;
 
-	private CompassSearchPacket(boolean isGroup, ResourceLocation groupKey, List<ResourceLocation> structureKeys, BlockPos pos) {
+	private CompassSearchPacket(SearchTarget searchTarget, boolean isGroup, ResourceLocation groupKey, List<ResourceLocation> targetKeys, BlockPos pos) {
+		this.searchTarget = searchTarget;
 		this.isGroup = isGroup;
 		this.groupKey = groupKey;
-		this.structureKeys = structureKeys;
+		this.targetKeys = targetKeys;
 
 		x = pos.getX();
 		y = pos.getY();
 		z = pos.getZ();
 	}
 
-	/** A search for the nearest of the given structures. */
-	public static CompassSearchPacket forStructures(List<ResourceLocation> structureKeys, BlockPos pos) {
-		return new CompassSearchPacket(false, null, structureKeys, pos);
+	/** A search for the nearest of the given structures or biomes. */
+	public static CompassSearchPacket forTargets(SearchTarget searchTarget, List<ResourceLocation> targetKeys, BlockPos pos) {
+		return new CompassSearchPacket(searchTarget, false, null, targetKeys, pos);
 	}
 
 	/** A search for the nearest member of the given group. */
-	public static CompassSearchPacket forGroup(ResourceLocation groupKey, BlockPos pos) {
-		return new CompassSearchPacket(true, groupKey, List.of(), pos);
+	public static CompassSearchPacket forGroup(SearchTarget searchTarget, ResourceLocation groupKey, BlockPos pos) {
+		return new CompassSearchPacket(searchTarget, true, groupKey, List.of(), pos);
 	}
 
 	public CompassSearchPacket(FriendlyByteBuf buf) {
+		searchTarget = SearchTarget.fromID(buf.readVarInt());
 		isGroup = buf.readBoolean();
 		if (isGroup) {
 			groupKey = buf.readResourceLocation();
-			structureKeys = List.of();
+			targetKeys = List.of();
 		} else {
 			int numKeys = buf.readVarInt();
-			if (numKeys < 1 || numKeys > MAX_STRUCTURE_KEYS) {
-				throw new DecoderException("Search requested for " + numKeys + " structures");
+			if (numKeys < 1 || numKeys > MAX_TARGET_KEYS) {
+				throw new DecoderException("Search requested for " + numKeys + " targets");
 			}
-			structureKeys = new ArrayList<ResourceLocation>(numKeys);
+			targetKeys = new ArrayList<ResourceLocation>(numKeys);
 			for (int i = 0; i < numKeys; i++) {
-				structureKeys.add(buf.readResourceLocation());
+				targetKeys.add(buf.readResourceLocation());
 			}
 		}
 
@@ -74,13 +78,14 @@ public class CompassSearchPacket {
 	}
 
 	public void toBytes(FriendlyByteBuf buf) {
+		buf.writeVarInt(searchTarget.getID());
 		buf.writeBoolean(isGroup);
 		if (isGroup) {
 			buf.writeResourceLocation(groupKey);
 		} else {
-			buf.writeVarInt(structureKeys.size());
-			for (ResourceLocation structureKey : structureKeys) {
-				buf.writeResourceLocation(structureKey);
+			buf.writeVarInt(targetKeys.size());
+			for (ResourceLocation targetKey : targetKeys) {
+				buf.writeResourceLocation(targetKey);
 			}
 		}
 
@@ -101,9 +106,9 @@ public class CompassSearchPacket {
 				final ExplorersCompassItem explorersCompass = (ExplorersCompassItem) stack.getItem();
 				try {
 					if (isGroup) {
-						explorersCompass.searchForGroup(player.getLevel(), player, groupKey, new BlockPos(x, y, z), stack);
+						explorersCompass.searchForGroup(player.getLevel(), player, searchTarget, groupKey, new BlockPos(x, y, z), stack);
 					} else {
-						explorersCompass.searchForStructures(player.getLevel(), player, structureKeys, new BlockPos(x, y, z), stack);
+						explorersCompass.searchForTargets(player.getLevel(), player, searchTarget, targetKeys, new BlockPos(x, y, z), stack);
 					}
 				} catch (Throwable t) {
 					// This runs on the server thread, so an exception here would take down the server

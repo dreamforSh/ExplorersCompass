@@ -16,28 +16,29 @@ import net.minecraft.core.Holder;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.levelgen.structure.placement.ConcentricRingsStructurePlacement;
 import net.minecraft.world.level.levelgen.structure.placement.RandomSpreadStructurePlacement;
 import net.minecraft.world.level.levelgen.structure.placement.StructurePlacement;
 
 public class SearchWorkerManager {
-	
+
 	private final String id = RandomStringUtils.random(8, "0123456789abcdef");
-	
-	private List<StructureSearchWorker<?>> workers;
-	
+
+	private List<SearchWorker> workers;
+
 	public SearchWorkerManager() {
-		workers = new ArrayList<StructureSearchWorker<?>>();
+		workers = new ArrayList<SearchWorker>();
 	}
-	
-	public void createWorkers(ServerLevel level, Player player, ItemStack stack, List<Structure> structures, BlockPos startPos, List<BlockPos> prevPos, boolean isGroup, boolean ignoreNearStart) {
+
+	public void createStructureWorkers(ServerLevel level, Player player, ItemStack stack, List<Structure> structures, BlockPos startPos, List<BlockPos> prevPos, boolean isGroup, boolean ignoreNearStart) {
 		workers.clear();
-		
+
 		// Linked so that placements stay in the order the structures were requested in, since the
 		// workers are run one after another and the first one to find something wins
 		Map<StructurePlacement, List<Structure>> placementToStructuresMap = new Object2ObjectLinkedOpenHashMap<>();
-		
+
 		for (Structure structure : structures) {
 			Holder<Structure> holder = StructureUtils.getHolderForStructure(level, structure);
 			if (holder == null) {
@@ -63,7 +64,17 @@ public class SearchWorkerManager {
 			}
 		}
 	}
-	
+
+	/**
+	 * Creates the single worker a biome search takes. Where structures are split up by the placement
+	 * that puts them in the world, every biome of a dimension comes out of the one biome source, so
+	 * looking for several of them at once costs no more than looking for one.
+	 */
+	public void createBiomeWorker(ServerLevel level, Player player, ItemStack stack, List<Holder<Biome>> biomes, BlockPos startPos, List<BlockPos> prevPos, boolean isGroup, boolean ignoreNearStart) {
+		workers.clear();
+		workers.add(new BiomeSearchWorker(level, player, stack, startPos, biomes, prevPos, isGroup, ignoreNearStart, id));
+	}
+
 	// Returns true if a worker starts, false otherwise
 	public boolean start() {
 		if (!workers.isEmpty()) {
@@ -72,19 +83,19 @@ public class SearchWorkerManager {
 		}
 		return false;
 	}
-	
+
 	public void pop() {
 		if (!workers.isEmpty()) {
 			workers.remove(0);
 		}
 	}
-	
+
 	public void stop() {
-		for (StructureSearchWorker<?> worker : workers) {
+		for (SearchWorker worker : workers) {
 			worker.stop();
 		}
 	}
-	
+
 	public void clear() {
 		workers.clear();
 	}

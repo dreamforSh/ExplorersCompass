@@ -231,7 +231,11 @@ public class StructureUtils {
 		return dimensionsForAllowedStructures;
 	}
 
-	private static Map<ResourceLocation, Set<Holder<Biome>>> getBiomesPerDimension(ServerLevel serverLevel) {
+	/**
+	 * The biomes each dimension of this server can generate, in the order the server walks its
+	 * levels. Shared with {@link BiomeUtils}, which builds the biome list out of the same data.
+	 */
+	static Map<ResourceLocation, Set<Holder<Biome>>> getBiomesPerDimension(ServerLevel serverLevel) {
 		final Map<ResourceLocation, Set<Holder<Biome>>> biomesPerDimension = new LinkedHashMap<ResourceLocation, Set<Holder<Biome>>>();
 		for (ServerLevel level : serverLevel.getServer().getAllLevels()) {
 			final ChunkGenerator chunkGenerator = level.getChunkSource().getGenerator();
@@ -317,8 +321,13 @@ public class StructureUtils {
 		return getPrettyStructureName(typeKey);
 	}
 
+	/**
+	 * Display name of whatever a key came from: the mod's own name where it is known, and its id
+	 * otherwise. This reads the namespace alone, so it names the source of a biome as well as of a
+	 * structure.
+	 */
 	@OnlyIn(Dist.CLIENT)
-	public static String getPrettyStructureSource(ResourceLocation key) {
+	public static String getPrettySourceName(ResourceLocation key) {
 		if (key == null) {
 			return "";
 		}

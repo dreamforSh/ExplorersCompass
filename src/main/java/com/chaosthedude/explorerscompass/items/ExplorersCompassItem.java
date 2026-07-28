@@ -16,15 +16,18 @@ import com.chaosthedude.explorerscompass.config.CustomModelDataConfig;
 import com.chaosthedude.explorerscompass.gui.GuiWrapper;
 import com.chaosthedude.explorerscompass.network.ShareLocationPacket;
 import com.chaosthedude.explorerscompass.network.SyncPacket;
+import com.chaosthedude.explorerscompass.util.BiomeUtils;
 import com.chaosthedude.explorerscompass.util.BookmarkEntry;
 import com.chaosthedude.explorerscompass.util.CompassState;
 import com.chaosthedude.explorerscompass.util.ItemUtils;
 import com.chaosthedude.explorerscompass.util.PlayerUtils;
+import com.chaosthedude.explorerscompass.util.SearchTarget;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
 import com.chaosthedude.explorerscompass.worker.SearchWorkerManager;
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.StringTag;
@@ -44,6 +47,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraftforge.network.NetworkDirection;
 
@@ -106,18 +110,19 @@ public class ExplorersCompassItem extends Item {
 		}
 
 		// The basic name works on both sides; the translated one is only available on the client
-		final String structureName = StructureUtils.getBasicStructureName(getStructureKey(stack));
+		final SearchTarget searchTarget = getSearchTarget(stack);
+		final String name = searchTarget.getBasicName(getTargetKey(stack));
 		if (state == CompassState.SEARCHING) {
 			// While a group is being searched, the stored key is the group's, which may have a
-			// configured display name; a multi-structure search shows how many more it considers
-			String targetName = getIsGroup(stack) ? ExplorersCompass.groupNames.getOrDefault(getStructureKey(stack), structureName) : structureName;
+			// configured display name; a search for several at once shows how many more it considers
+			String targetName = getIsGroup(stack) ? ExplorersCompass.groupNames.getOrDefault(getTargetKey(stack), searchTarget.getBasicGroupName(getTargetKey(stack))) : name;
 			final int targetCount = getTargetCount(stack);
 			if (targetCount > 1) {
 				targetName += " (+" + (targetCount - 1) + ")";
 			}
 			tooltip.add(Component.translatable("string.explorerscompass.searching").append(Component.literal(": " + targetName)).withStyle(ChatFormatting.GRAY));
 		} else if (state == CompassState.FOUND) {
-			tooltip.add(Component.translatable("string.explorerscompass.found").append(Component.literal(": " + structureName)).withStyle(ChatFormatting.GRAY));
+			tooltip.add(Component.translatable("string.explorerscompass.found").append(Component.literal(": " + name)).withStyle(ChatFormatting.GRAY));
 			if (shouldDisplayCoordinates(stack)) {
 				final int foundY = getFoundStructureY(stack);
 				final String coordinates = foundY != UNKNOWN_Y ? getFoundStructureX(stack) + ", " + foundY + ", " + getFoundStructureZ(stack) : getFoundStructureX(stack) + ", " + getFoundStructureZ(stack);
@@ -129,51 +134,52 @@ public class ExplorersCompassItem extends Item {
 				tooltip.add(Component.translatable("string.explorerscompass.previousLocations").append(Component.literal(": " + previousLocations)).withStyle(ChatFormatting.DARK_GRAY));
 			}
 		} else if (state == CompassState.NOT_FOUND) {
-			tooltip.add(Component.translatable("string.explorerscompass.notFound").append(Component.literal(": " + structureName)).withStyle(ChatFormatting.GRAY));
+			tooltip.add(Component.translatable("string.explorerscompass.notFound").append(Component.literal(": " + name)).withStyle(ChatFormatting.GRAY));
 		}
 	}
 
 	/**
-	 * Starts a fresh search for the nearest of the given structures, forgetting the locations any
-	 * earlier search had collected.
+	 * Starts a fresh search for the nearest of the given structures or biomes, forgetting the
+	 * locations any earlier search had collected.
 	 */
-	public void searchForStructures(Level level, Player player, List<ResourceLocation> structureKeys, BlockPos pos, ItemStack stack) {
-		if (!(level instanceof ServerLevel) || structureKeys.isEmpty() || !tryAcquireSearchSlot(player)) {
+	public void searchForTargets(Level level, Player player, SearchTarget searchTarget, List<ResourceLocation> keys, BlockPos pos, ItemStack stack) {
+		if (!(level instanceof ServerLevel) || keys.isEmpty() || !tryAcquireSearchSlot(player)) {
 			return;
 		}
 
 		setIsGroup(stack, false);
 		clearPrevPos(stack);
-		search((ServerLevel) level, player, structureKeys, structureKeys.get(0), false, pos, stack, new ArrayList<BlockPos>(), false);
+		search((ServerLevel) level, player, searchTarget, keys, keys.get(0), false, pos, stack, new ArrayList<BlockPos>(), false);
 	}
 
 	/**
 	 * Starts a fresh search for the nearest member of the given group, forgetting the locations any
 	 * earlier search had collected.
 	 */
-	public void searchForGroup(Level level, Player player, ResourceLocation groupKey, BlockPos pos, ItemStack stack) {
+	public void searchForGroup(Level level, Player player, SearchTarget searchTarget, ResourceLocation groupKey, BlockPos pos, ItemStack stack) {
 		if (!(level instanceof ServerLevel) || !tryAcquireSearchSlot(player)) {
 			return;
 		}
 
 		setIsGroup(stack, true);
 		clearPrevPos(stack);
-		search((ServerLevel) level, player, StructureUtils.getStructureKeysForTypeKey((ServerLevel) level, groupKey), groupKey, true, pos, stack, new ArrayList<BlockPos>(), false);
+		search((ServerLevel) level, player, searchTarget, getKeysForGroup((ServerLevel) level, searchTarget, groupKey), groupKey, true, pos, stack, new ArrayList<BlockPos>(), false);
 	}
 
 	/**
-	 * Searches for another instance of the structure the compass has already located, skipping the
-	 * ones it has collected so far. Once the configured number of instances has been collected the
-	 * list is dropped and the search starts over from the closest one again.
+	 * Searches for another instance of whatever the compass has already located, skipping the ones
+	 * it has collected so far. Once the configured number of instances has been collected the list
+	 * is dropped and the search starts over from the closest one again.
 	 */
-	public void searchForNextStructure(Level level, Player player, BlockPos pos, ItemStack stack) {
+	public void searchForNext(Level level, Player player, BlockPos pos, ItemStack stack) {
 		if (!(level instanceof ServerLevel) || ConfigHandler.GENERAL.maxNextSearches.get() <= 0 || !tryAcquireSearchSlot(player)) {
 			return;
 		}
 
 		ServerLevel serverLevel = (ServerLevel) level;
-		ResourceLocation structureKey = getStructureKey(stack);
-		if (structureKey == null || getState(stack) != CompassState.FOUND) {
+		SearchTarget searchTarget = getSearchTarget(stack);
+		ResourceLocation targetKey = getTargetKey(stack);
+		if (targetKey == null || getState(stack) != CompassState.FOUND) {
 			return;
 		}
 
@@ -182,24 +188,24 @@ public class ExplorersCompassItem extends Item {
 			prevPos.clear();
 		}
 
-		// The compass stores the key of the structure that was found, so a group search has to be
-		// widened back out to the group it belongs to
+		// The compass stores the key of what was found, so a group search has to be widened back out
+		// to the group it belongs to
 		if (getIsGroup(stack)) {
-			ResourceLocation groupKey = StructureUtils.getStructureKeysToTypeKeys(serverLevel).get(structureKey);
+			ResourceLocation groupKey = getGroupKey(serverLevel, searchTarget, targetKey);
 			if (groupKey != null) {
-				search(serverLevel, player, StructureUtils.getStructureKeysForTypeKey(serverLevel, groupKey), groupKey, true, pos, stack, prevPos, true);
+				search(serverLevel, player, searchTarget, getKeysForGroup(serverLevel, searchTarget, groupKey), groupKey, true, pos, stack, prevPos, true);
 				return;
 			}
 			setIsGroup(stack, false);
 		}
 
-		// A multi-structure selection is remembered, so that searching for the next instance keeps
-		// considering the whole selection rather than only the structure that happened to be found
+		// A selection of several is remembered, so that searching for the next instance keeps
+		// considering the whole selection rather than only the one that happened to be found
 		List<ResourceLocation> targetKeys = getTargetKeys(stack);
 		if (targetKeys.isEmpty()) {
-			targetKeys = List.of(structureKey);
+			targetKeys = List.of(targetKey);
 		}
-		search(serverLevel, player, targetKeys, targetKeys.get(0), false, pos, stack, prevPos, true);
+		search(serverLevel, player, searchTarget, targetKeys, targetKeys.get(0), false, pos, stack, prevPos, true);
 	}
 
 	/**
@@ -221,46 +227,73 @@ public class ExplorersCompassItem extends Item {
 		clearPrevPos(stack);
 	}
 
-	private void search(ServerLevel level, Player player, List<ResourceLocation> structureKeys, ResourceLocation displayKey, boolean isGroup, BlockPos pos, ItemStack stack, List<BlockPos> prevPos, boolean ignoreNearStart) {
-		// The keys arrive over the network, so they may be stale (the client keeps the structure list
-		// from the last world it synced with), duplicated, or simply made up. Resolve them against this
-		// world and drop anything that does not belong, rather than handing nulls to world generation.
+	private void search(ServerLevel level, Player player, SearchTarget searchTarget, List<ResourceLocation> keys, ResourceLocation displayKey, boolean isGroup, BlockPos pos, ItemStack stack, List<BlockPos> prevPos, boolean ignoreNearStart) {
+		// The keys arrive over the network, so they may be stale (the client keeps the list from the
+		// last world it synced with), duplicated, or simply made up. Resolve them against this world
+		// and drop anything that does not belong, rather than handing nulls to world generation.
 		List<Structure> structures = new ArrayList<Structure>();
+		List<Holder<Biome>> biomes = new ArrayList<Holder<Biome>>();
 		List<ResourceLocation> validKeys = new ArrayList<ResourceLocation>();
 		Set<ResourceLocation> seenKeys = new HashSet<ResourceLocation>();
-		for (ResourceLocation key : structureKeys) {
+		for (ResourceLocation key : keys) {
 			if (key == null || !seenKeys.add(key)) {
 				continue;
 			}
 
-			Structure structure = StructureUtils.getStructureForKey(level, key);
-			if (structure == null) {
-				ExplorersCompass.LOGGER.warn("Ignoring search for " + key + ": no such structure in this world");
-			} else if (StructureUtils.structureIsBlacklisted(level, structure)) {
-				ExplorersCompass.LOGGER.warn("Ignoring search for " + key + ": structure is blacklisted");
+			if (searchTarget == SearchTarget.BIOME) {
+				Holder<Biome> biome = BiomeUtils.getHolderForKey(level, key);
+				if (biome == null) {
+					ExplorersCompass.LOGGER.warn("Ignoring search for " + key + ": no such biome in this world");
+				} else if (BiomeUtils.biomeIsBlacklisted(key)) {
+					ExplorersCompass.LOGGER.warn("Ignoring search for " + key + ": biome is blacklisted");
+				} else {
+					biomes.add(biome);
+					validKeys.add(key);
+				}
 			} else {
-				structures.add(structure);
-				validKeys.add(key);
+				Structure structure = StructureUtils.getStructureForKey(level, key);
+				if (structure == null) {
+					ExplorersCompass.LOGGER.warn("Ignoring search for " + key + ": no such structure in this world");
+				} else if (StructureUtils.structureIsBlacklisted(level, structure)) {
+					ExplorersCompass.LOGGER.warn("Ignoring search for " + key + ": structure is blacklisted");
+				} else {
+					structures.add(structure);
+					validKeys.add(key);
+				}
 			}
 		}
 
-		setSearching(stack, displayKey, player);
-		setTargetCount(stack, isGroup ? 1 : structures.size());
+		setSearching(stack, searchTarget, displayKey, player);
+		setTargetCount(stack, isGroup ? 1 : validKeys.size());
 		setTargetKeys(stack, isGroup ? List.<ResourceLocation>of() : validKeys);
 		setSearchRadius(stack, 0, player);
 
 		final SearchWorkerManager workerManager = getWorkerManager(player);
 		workerManager.stop();
-		if (structures.isEmpty()) {
+		if (validKeys.isEmpty()) {
 			setNotFound(stack, 0, 0);
 			return;
 		}
 
-		workerManager.createWorkers(level, player, stack, structures, pos, prevPos, isGroup, ignoreNearStart);
+		if (searchTarget == SearchTarget.BIOME) {
+			workerManager.createBiomeWorker(level, player, stack, biomes, pos, prevPos, isGroup, ignoreNearStart);
+		} else {
+			workerManager.createStructureWorkers(level, player, stack, structures, pos, prevPos, isGroup, ignoreNearStart);
+		}
 		boolean started = workerManager.start();
 		if (!started) {
 			setNotFound(stack, 0, 0);
 		}
+	}
+
+	/** The keys of everything belonging to the given group of the given kind. */
+	private static List<ResourceLocation> getKeysForGroup(ServerLevel level, SearchTarget searchTarget, ResourceLocation groupKey) {
+		return searchTarget == SearchTarget.BIOME ? BiomeUtils.getBiomeKeysForGroupKey(level, groupKey) : StructureUtils.getStructureKeysForTypeKey(level, groupKey);
+	}
+
+	/** The group the given key belongs to, or null when this world holds no such key. */
+	private static ResourceLocation getGroupKey(ServerLevel level, SearchTarget searchTarget, ResourceLocation key) {
+		return searchTarget == SearchTarget.BIOME ? BiomeUtils.getBiomeKeysToGroupKeys(level).get(key) : StructureUtils.getStructureKeysToTypeKeys(level).get(key);
 	}
 
 	/** The worker manager running the given player's searches. */
@@ -305,17 +338,18 @@ public class ExplorersCompassItem extends Item {
 		return true;
 	}
 
-	public void succeed(Player player, ItemStack stack, ResourceLocation structureKey, boolean isGroup, int x, int z, int y, ResourceLocation dimensionKey, List<BlockPos> prevPos, int samples, boolean displayCoordinates) {
-		setFound(stack, structureKey, x, z, y, dimensionKey, samples);
+	public void succeed(Player player, ItemStack stack, ResourceLocation targetKey, boolean isGroup, int x, int z, int y, ResourceLocation dimensionKey, List<BlockPos> prevPos, int samples, boolean displayCoordinates) {
+		final SearchTarget searchTarget = getSearchTarget(stack);
+		setFound(stack, targetKey, x, z, y, dimensionKey, samples);
 		setIsGroup(stack, isGroup);
 		setPrevPos(stack, prevPos);
 		setDisplayCoordinates(stack, displayCoordinates);
-		addBookmark(stack, new BookmarkEntry(structureKey, x, y, z, dimensionKey));
+		addBookmark(stack, new BookmarkEntry(searchTarget, targetKey, x, y, z, dimensionKey));
 		getWorkerManager(player).clear();
 
-		final String structureName = StructureUtils.getBasicStructureName(structureKey);
+		final String name = searchTarget.getBasicName(targetKey);
 		final String coordinates = y != UNKNOWN_Y ? x + ", " + y + ", " + z : x + ", " + z;
-		notifySearchResult(player, Component.translatable("string.explorerscompass.found").append(Component.literal(displayCoordinates ? ": " + structureName + " (" + coordinates + ")" : ": " + structureName)));
+		notifySearchResult(player, Component.translatable("string.explorerscompass.found").append(Component.literal(displayCoordinates ? ": " + name + " (" + coordinates + ")" : ": " + name)));
 	}
 
 	public void fail(Player player, ItemStack stack, int radius, int samples) {
@@ -324,7 +358,7 @@ public class ExplorersCompassItem extends Item {
 		boolean started = workerManager.start();
 		if (!started) {
 			setNotFound(stack, radius, samples);
-			notifySearchResult(player, Component.translatable("string.explorerscompass.notFound").append(Component.literal(": " + StructureUtils.getBasicStructureName(getStructureKey(stack)))));
+			notifySearchResult(player, Component.translatable("string.explorerscompass.notFound").append(Component.literal(": " + getSearchTarget(stack).getBasicName(getTargetKey(stack)))));
 		}
 	}
 
@@ -346,18 +380,19 @@ public class ExplorersCompassItem extends Item {
 		return false;
 	}
 
-	public void setSearching(ItemStack stack, ResourceLocation structureKey, Player player) {
+	public void setSearching(ItemStack stack, SearchTarget searchTarget, ResourceLocation targetKey, Player player) {
 		if (ItemUtils.verifyNBT(stack)) {
-			stack.getTag().putString("StructureKey", structureKey.toString());
+			setSearchTarget(stack, searchTarget);
+			stack.getTag().putString("StructureKey", targetKey.toString());
 			stack.getTag().putInt("State", CompassState.SEARCHING.getID());
-			CustomModelDataConfig.apply(stack, structureKey);
+			CustomModelDataConfig.apply(stack, targetKey);
 		}
 	}
 
-	public void setFound(ItemStack stack, ResourceLocation structureKey, int x, int z, int y, ResourceLocation dimensionKey, int samples) {
+	public void setFound(ItemStack stack, ResourceLocation targetKey, int x, int z, int y, ResourceLocation dimensionKey, int samples) {
 		if (ItemUtils.verifyNBT(stack)) {
 			stack.getTag().putInt("State", CompassState.FOUND.getID());
-			stack.getTag().putString("StructureKey", structureKey.toString());
+			stack.getTag().putString("StructureKey", targetKey.toString());
 			stack.getTag().putInt("FoundX", x);
 			stack.getTag().putInt("FoundZ", z);
 			if (y != UNKNOWN_Y) {
@@ -369,7 +404,7 @@ public class ExplorersCompassItem extends Item {
 				stack.getTag().putString("FoundDimension", dimensionKey.toString());
 			}
 			stack.getTag().putInt("Samples", samples);
-			CustomModelDataConfig.apply(stack, structureKey);
+			CustomModelDataConfig.apply(stack, targetKey);
 		}
 	}
 
@@ -393,6 +428,23 @@ public class ExplorersCompassItem extends Item {
 			if (state == CompassState.INACTIVE) {
 				CustomModelDataConfig.remove(stack);
 			}
+		}
+	}
+
+	/** What the compass is currently looking for, or last looked for. */
+	public SearchTarget getSearchTarget(ItemStack stack) {
+		if (ItemUtils.verifyNBT(stack) && stack.getTag().contains("SearchTarget")) {
+			return SearchTarget.fromID(stack.getTag().getInt("SearchTarget"));
+		}
+
+		// A compass from before biomes could be searched for records nothing here, and everything one
+		// could point at back then was a structure
+		return SearchTarget.STRUCTURE;
+	}
+
+	public void setSearchTarget(ItemStack stack, SearchTarget searchTarget) {
+		if (ItemUtils.verifyNBT(stack)) {
+			stack.getTag().putInt("SearchTarget", searchTarget.getID());
 		}
 	}
 
@@ -519,7 +571,8 @@ public class ExplorersCompassItem extends Item {
 		}
 
 		final BookmarkEntry entry = bookmarks.get(index);
-		setFound(stack, entry.getStructureKey(), entry.getX(), entry.getZ(), entry.getY(), entry.getDimensionKey(), 0);
+		setSearchTarget(stack, entry.getSearchTarget());
+		setFound(stack, entry.getTargetKey(), entry.getX(), entry.getZ(), entry.getY(), entry.getDimensionKey(), 0);
 		setIsGroup(stack, false);
 		setTargetCount(stack, 1);
 		setTargetKeys(stack, List.<ResourceLocation>of());
@@ -552,7 +605,8 @@ public class ExplorersCompassItem extends Item {
 			return;
 		}
 
-		final ResourceLocation structureKey;
+		final SearchTarget searchTarget;
+		final ResourceLocation targetKey;
 		final int x;
 		final int y;
 		final int z;
@@ -561,7 +615,8 @@ public class ExplorersCompassItem extends Item {
 			if (getState(stack) != CompassState.FOUND) {
 				return;
 			}
-			structureKey = getStructureKey(stack);
+			searchTarget = getSearchTarget(stack);
+			targetKey = getTargetKey(stack);
 			x = getFoundStructureX(stack);
 			y = getFoundStructureY(stack);
 			z = getFoundStructureZ(stack);
@@ -572,7 +627,8 @@ public class ExplorersCompassItem extends Item {
 				return;
 			}
 			final BookmarkEntry entry = bookmarks.get(bookmarkIndex);
-			structureKey = entry.getStructureKey();
+			searchTarget = entry.getSearchTarget();
+			targetKey = entry.getTargetKey();
 			x = entry.getX();
 			y = entry.getY();
 			z = entry.getZ();
@@ -585,14 +641,14 @@ public class ExplorersCompassItem extends Item {
 
 		// A compass from before the dimension was recorded reports where its holder is instead
 		final ResourceLocation dimension = dimensionKey != null ? dimensionKey : player.getLevel().dimension().location();
-		player.getServer().getPlayerList().broadcastSystemMessage(sharedLocationMessage(player, structureKey, x, y, z, dimension), false);
+		player.getServer().getPlayerList().broadcastSystemMessage(sharedLocationMessage(player, searchTarget, targetKey, x, y, z, dimension), false);
 	}
 
 	/**
 	 * The chat message a shared location produces. The coordinates can be clicked to copy them,
 	 * which needs no permission, unlike suggesting a teleport command.
 	 */
-	private static Component sharedLocationMessage(ServerPlayer player, ResourceLocation structureKey, int x, int y, int z, ResourceLocation dimensionKey) {
+	private static Component sharedLocationMessage(ServerPlayer player, SearchTarget searchTarget, ResourceLocation targetKey, int x, int y, int z, ResourceLocation dimensionKey) {
 		final String coordinates = y != UNKNOWN_Y ? x + ", " + y + ", " + z : x + ", " + z;
 		final Component coordinatesComponent = Component.literal(coordinates).withStyle((style) -> style
 				.withColor(ChatFormatting.GREEN)
@@ -602,7 +658,7 @@ public class ExplorersCompassItem extends Item {
 		// translation and every client would then see the raw key
 		return Component.translatable("string.explorerscompass.sharedLocation",
 				player.getDisplayName(),
-				Component.literal(StructureUtils.getBasicStructureName(structureKey)),
+				Component.literal(searchTarget.getBasicName(targetKey)),
 				coordinatesComponent,
 				Component.literal(StructureUtils.getBasicStructureName(dimensionKey)));
 	}
@@ -674,9 +730,9 @@ public class ExplorersCompassItem extends Item {
 		}
 	}
 
-	public void setStructureKey(ItemStack stack, ResourceLocation structureKey, Player player) {
+	public void setTargetKey(ItemStack stack, ResourceLocation targetKey, Player player) {
 		if (ItemUtils.verifyNBT(stack)) {
-			stack.getTag().putString("StructureKey", structureKey.toString());
+			stack.getTag().putString("StructureKey", targetKey.toString());
 		}
 	}
 
@@ -740,7 +796,13 @@ public class ExplorersCompassItem extends Item {
 		return null;
 	}
 
-	public ResourceLocation getStructureKey(ItemStack stack) {
+	/**
+	 * The key of whatever the compass is aimed at: a structure, a biome, or the group either of them
+	 * is being searched within. Which of those it is follows from {@link #getSearchTarget} and
+	 * {@link #getIsGroup}. The tag is named for structures because that is all a compass could point
+	 * at when it was first written, and renaming it would leave every existing compass blank.
+	 */
+	public ResourceLocation getTargetKey(ItemStack stack) {
 		if (ItemUtils.verifyNBT(stack)) {
 			return new ResourceLocation(stack.getTag().getString("StructureKey"));
 		}

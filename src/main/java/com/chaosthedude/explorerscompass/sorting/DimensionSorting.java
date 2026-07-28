@@ -1,6 +1,6 @@
 package com.chaosthedude.explorerscompass.sorting;
 
-import com.chaosthedude.explorerscompass.ExplorersCompass;
+import com.chaosthedude.explorerscompass.util.SearchTarget;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
 
 import net.minecraft.client.resources.language.I18n;
@@ -10,15 +10,10 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 
 @OnlyIn(Dist.CLIENT)
 public class DimensionSorting implements ISorting {
-	
-	@Override
-	public int compare(ResourceLocation key1, ResourceLocation key2) {
-		return StructureUtils.dimensionKeysToString(ExplorersCompass.dimensionKeysForAllowedStructureKeys.get(key1)).compareTo(StructureUtils.dimensionKeysToString(ExplorersCompass.dimensionKeysForAllowedStructureKeys.get(key2)));
-	}
 
 	@Override
-	public Object getValue(ResourceLocation key) {
-		return StructureUtils.dimensionKeysToString(ExplorersCompass.dimensionKeysForAllowedStructureKeys.get(key));
+	public Comparable<?> getValue(SearchTarget searchTarget, ResourceLocation key) {
+		return StructureUtils.dimensionKeysToString(searchTarget.getDimensionKeys(key));
 	}
 
 	@Override

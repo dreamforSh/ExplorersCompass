@@ -15,12 +15,10 @@ import net.minecraft.world.level.levelgen.structure.placement.RandomSpreadStruct
 
 public class RandomSpreadSearchWorker extends StructureSearchWorker<RandomSpreadStructurePlacement> {
 
+	private final RingWalker ring = new RingWalker();
 	private int spacing;
-	private int length;
 	private int startSectionPosX;
 	private int startSectionPosZ;
-	private int x;
-	private int z;
 
 	public RandomSpreadSearchWorker(ServerLevel level, Player player, ItemStack stack, BlockPos startPos, RandomSpreadStructurePlacement placement, List<Structure> structureSet, List<BlockPos> prevPos, boolean isGroup, boolean ignoreNearStart, String managerId) {
 		super(level, player, stack, startPos, placement, structureSet, prevPos, isGroup, ignoreNearStart, managerId);
@@ -28,16 +26,13 @@ public class RandomSpreadSearchWorker extends StructureSearchWorker<RandomSpread
 		spacing = placement.spacing();
 		startSectionPosX = SectionPos.blockToSectionCoord(startPos.getX());
 		startSectionPosZ = SectionPos.blockToSectionCoord(startPos.getZ());
-		x = 0;
-		z = 0;
-		length = 0;
 	}
 
 	@Override
 	protected boolean doSample() {
 		if (hasWork()) {
-			int sampleX = startSectionPosX + (spacing * x);
-			int sampleZ = startSectionPosZ + (spacing * z);
+			int sampleX = startSectionPosX + (spacing * ring.getX());
+			int sampleZ = startSectionPosZ + (spacing * ring.getZ());
 
 			ChunkPos chunkPos = placement.getPotentialStructureChunk(seed, sampleX, sampleZ);
 			// The corners of a ring reach past its edges, so part of the outer rings lies beyond the
@@ -52,7 +47,7 @@ public class RandomSpreadSearchWorker extends StructureSearchWorker<RandomSpread
 				}
 			}
 
-			advanceToNextRingCell();
+			ring.advance();
 		}
 
 		if (hasWork()) {
@@ -67,38 +62,6 @@ public class RandomSpreadSearchWorker extends StructureSearchWorker<RandomSpread
 	}
 
 	/**
-	 * Moves to the next cell on the ring being walked, growing to the next ring once it is done.
-	 *
-	 * <p>Only cells on the ring itself are visited. The cells it encloses were covered by the
-	 * smaller rings before it, and stepping over them instead of walking them matters: a ring of the
-	 * given length has about 8 * length cells on it, but encloses roughly 4 * length * length of
-	 * them.
-	 *
-	 * <p>Both coordinates have to be reset to -length using the length of the ring they are about to
-	 * walk, otherwise x never reaches -length and the entire western column of every ring is
-	 * skipped.
-	 */
-	private void advanceToNextRingCell() {
-		if (x == -length || x == length) {
-			// Every cell of the westmost and eastmost rows is on the ring
-			z++;
-		} else {
-			// Of the rows in between, only the two ends are
-			z = z < length ? length : length + 1;
-		}
-
-		if (z > length) {
-			x++;
-			z = -length;
-			if (x > length) {
-				length++;
-				x = -length;
-				z = -length;
-			}
-		}
-	}
-
-	/**
 	 * The radius this worker has finished searching, which is what bounds the search and what the
 	 * compass reports.
 	 *
@@ -110,11 +73,9 @@ public class RandomSpreadSearchWorker extends StructureSearchWorker<RandomSpread
 	 */
 	@Override
 	protected int getRadius() {
-		// A cell of this ring is at least length - 1 cells away from the one the search started in, so
-		// everything closer than that has been covered by the rings already walked. Capping this at the
-		// configured radius keeps the reported value from overshooting it, and still ends the search on
-		// the ring that reaches it.
-		final int covered = Math.max(0, SectionPos.sectionToBlockCoord((length - 1) * spacing));
+		// Capping this at the configured radius keeps the reported value from overshooting it, and
+		// still ends the search on the ring that reaches it
+		final int covered = SectionPos.sectionToBlockCoord(ring.getCoveredLength() * spacing);
 		return Math.min(covered, maxRadius);
 	}
 

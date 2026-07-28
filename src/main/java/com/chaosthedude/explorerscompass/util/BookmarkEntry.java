@@ -13,14 +13,16 @@ import net.minecraft.resources.ResourceLocation;
  */
 public class BookmarkEntry {
 
-	private final ResourceLocation structureKey;
+	private final SearchTarget searchTarget;
+	private final ResourceLocation targetKey;
 	private final int x;
 	private final int y;
 	private final int z;
 	private final ResourceLocation dimensionKey;
 
-	public BookmarkEntry(ResourceLocation structureKey, int x, int y, int z, ResourceLocation dimensionKey) {
-		this.structureKey = structureKey;
+	public BookmarkEntry(SearchTarget searchTarget, ResourceLocation targetKey, int x, int y, int z, ResourceLocation dimensionKey) {
+		this.searchTarget = searchTarget;
+		this.targetKey = targetKey;
 		this.x = x;
 		this.y = y;
 		this.z = z;
@@ -29,19 +31,23 @@ public class BookmarkEntry {
 
 	/** Reads an entry, or returns null when the tag does not hold a usable one. */
 	public static BookmarkEntry fromNBT(CompoundTag tag) {
-		final ResourceLocation structureKey = ResourceLocation.tryParse(tag.getString("StructureKey"));
-		if (structureKey == null) {
+		final ResourceLocation targetKey = ResourceLocation.tryParse(tag.getString("StructureKey"));
+		if (targetKey == null) {
 			return null;
 		}
 
+		// An entry from before biomes could be searched for records no target, and back then every
+		// location a compass remembered was a structure's
+		final SearchTarget searchTarget = SearchTarget.fromID(tag.getInt("SearchTarget"));
 		final ResourceLocation dimensionKey = ResourceLocation.tryParse(tag.getString("Dimension"));
 		final int y = tag.contains("Y") ? tag.getInt("Y") : ExplorersCompassItem.UNKNOWN_Y;
-		return new BookmarkEntry(structureKey, tag.getInt("X"), y, tag.getInt("Z"), dimensionKey);
+		return new BookmarkEntry(searchTarget, targetKey, tag.getInt("X"), y, tag.getInt("Z"), dimensionKey);
 	}
 
 	public CompoundTag toNBT() {
 		final CompoundTag tag = new CompoundTag();
-		tag.putString("StructureKey", structureKey.toString());
+		tag.putString("StructureKey", targetKey.toString());
+		tag.putInt("SearchTarget", searchTarget.getID());
 		tag.putInt("X", x);
 		tag.putInt("Z", z);
 		if (y != ExplorersCompassItem.UNKNOWN_Y) {
@@ -53,8 +59,13 @@ public class BookmarkEntry {
 		return tag;
 	}
 
-	public ResourceLocation getStructureKey() {
-		return structureKey;
+	/** Whether this location is a structure's or a biome's. */
+	public SearchTarget getSearchTarget() {
+		return searchTarget;
+	}
+
+	public ResourceLocation getTargetKey() {
+		return targetKey;
 	}
 
 	public int getX() {
@@ -89,12 +100,12 @@ public class BookmarkEntry {
 			return false;
 		}
 		final BookmarkEntry entry = (BookmarkEntry) other;
-		return x == entry.x && y == entry.y && z == entry.z && structureKey.equals(entry.structureKey) && Objects.equals(dimensionKey, entry.dimensionKey);
+		return x == entry.x && y == entry.y && z == entry.z && searchTarget == entry.searchTarget && targetKey.equals(entry.targetKey) && Objects.equals(dimensionKey, entry.dimensionKey);
 	}
 
 	@Override
 	public int hashCode() {
-		return Objects.hash(structureKey, x, y, z, dimensionKey);
+		return Objects.hash(searchTarget, targetKey, x, y, z, dimensionKey);
 	}
 
 }

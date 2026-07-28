@@ -28,6 +28,7 @@ import com.chaosthedude.explorerscompass.sorting.NameSorting;
 import com.chaosthedude.explorerscompass.util.CompassState;
 import com.chaosthedude.explorerscompass.util.ItemUtils;
 import com.chaosthedude.explorerscompass.util.RenderUtils;
+import com.chaosthedude.explorerscompass.util.SearchTarget;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
 import com.mojang.blaze3d.vertex.PoseStack;
 
@@ -53,15 +54,23 @@ public class ExplorersCompassScreen extends Screen {
 	// smallest screen the game scales itself down to; their labels are shortened to fit either way
 	private static final int STATUS_BUTTON_WIDTH = 52;
 	private static final int STATUS_BUTTON_HEIGHT = 18;
+	// The control that switches between structures and biomes stands in the header rather than in
+	// the column of controls below it, which is already as full as the shortest screen allows
+	private static final int TARGET_BUTTON_Y = 30;
+	private static final int TARGET_BUTTON_HEIGHT = 13;
 	private static final String DOT_GLYPH = "●";
 	private static final String CLEAR_GLYPH = "✕";
+	private static final String SWITCH_GLYPH = "⇄";
 
 	private Level level;
 	private Player player;
-	private List<ResourceLocation> allowedStructureKeys;
-	private List<ResourceLocation> structureKeysMatchingSearch;
+	/** Whether the list is showing structures or biomes. */
+	private SearchTarget searchTarget;
+	private List<ResourceLocation> allowedKeys;
+	private List<ResourceLocation> keysMatchingSearch;
 	private ItemStack stack;
 	private ExplorersCompassItem explorersCompass;
+	private TransparentButton targetButton;
 	private TransparentButton searchButton;
 	private TransparentButton searchGroupButton;
 	private TransparentButton searchNextButton;
@@ -80,7 +89,7 @@ public class ExplorersCompassScreen extends Screen {
 	private ISorting sortingCategory;
 	private boolean sortDescending;
 	private boolean filterByCurrentDimension;
-	/** The mod the list is narrowed down to, or null while structures from every mod are listed. */
+	/** The mod the list is narrowed down to, or null while entries from every mod are listed. */
 	private String modFilter;
 	private int cachedLocations;
 	// How many rows the list is holding at its top rather than sorting into place
@@ -88,7 +97,7 @@ public class ExplorersCompassScreen extends Screen {
 	// Where the sidebar has room for the next control, and where the status text has to stop
 	private int sidebarY;
 	private int statusTextRight;
-	// The structures picked with Ctrl-click, to search for the nearest of them all at once
+	// The entries picked with Ctrl-click, to search for the nearest of them all at once
 	private final Set<ResourceLocation> multiSelectedKeys = new LinkedHashSet<ResourceLocation>();
 	// Where the chips that lift a filter were last drawn, rebuilt on every frame
 	private final List<FilterChip> filterChips = new ArrayList<FilterChip>();
@@ -110,17 +119,25 @@ public class ExplorersCompassScreen extends Screen {
 
 	}
 
-	public ExplorersCompassScreen(Level level, Player player, ItemStack stack, ExplorersCompassItem explorersCompass, List<ResourceLocation> allowedStructureKeys) {
+	public ExplorersCompassScreen(Level level, Player player, ItemStack stack, ExplorersCompassItem explorersCompass) {
 		super(Component.translatable("string.explorerscompass.selectStructure"));
 		this.level = level;
 		this.player = player;
 		this.stack = stack;
 		this.explorersCompass = explorersCompass;
 
-		this.allowedStructureKeys = new ArrayList<ResourceLocation>(allowedStructureKeys);
-		structureKeysMatchingSearch = new ArrayList<ResourceLocation>(this.allowedStructureKeys);
+		// Opening on whatever was searched for last is what keeps a run of biome searches from having
+		// to be switched back to on every use of the compass
+		searchTarget = explorersCompass.getSearchTarget(stack);
+		allowedKeys = new ArrayList<ResourceLocation>(searchTarget.getAllowedKeys());
+		keysMatchingSearch = new ArrayList<ResourceLocation>(allowedKeys);
 		sortingCategory = new NameSorting();
 		cachedLocations = explorersCompass.getPrevPos(stack).size();
+	}
+
+	/** Whether the list is showing structures or biomes. */
+	public SearchTarget getSearchTarget() {
+		return searchTarget;
 	}
 
 	@Override
@@ -171,22 +188,11 @@ public class ExplorersCompassScreen extends Screen {
 		cachedLocations = explorersCompass.getPrevPos(stack).size();
 		updateButtons();
 
-		// Check if the allowed structure list has synced. Comparing contents rather than sizes matters
-		// when opening the compass in a world whose structure list differs from the one synced last:
-		// searching for a structure that does not exist here would be rejected by the server.
-		if (!allowedStructureKeys.equals(ExplorersCompass.allowedStructureKeys)) {
-			removeWidget(selectionList);
-			allowedStructureKeys = new ArrayList<ResourceLocation>(ExplorersCompass.allowedStructureKeys);
-			multiSelectedKeys.retainAll(allowedStructureKeys);
-			// A mod whose structures are all gone is no longer something to be filtered by
-			if (modFilter != null && allowedStructureKeys.stream().noneMatch((key) -> key.getNamespace().equals(modFilter))) {
-				modFilter = null;
-				modFilterButton.setMessage(modFilterButtonLabel());
-			}
-			// Re-apply whatever is already typed in the search field, rather than resetting the filter
-			selectionList = null;
-			processSearchTerm();
-			selectionList = addRenderableWidget(createSelectionList());
+		// Check if the allowed list has synced. Comparing contents rather than sizes matters when
+		// opening the compass in a world whose list differs from the one synced last: searching for
+		// something that does not exist here would be rejected by the server.
+		if (!allowedKeys.equals(searchTarget.getAllowedKeys())) {
+			rebuildList();
 		}
 	}
 
@@ -202,9 +208,9 @@ public class ExplorersCompassScreen extends Screen {
 
 		super.render(poseStack, mouseX, mouseY, partialTicks);
 
-		if (structureKeysMatchingSearch.isEmpty()) {
+		if (keysMatchingSearch.isEmpty()) {
 			final int listCenterX = GuiTheme.contentLeft() + GuiTheme.contentWidth(width) / 2;
-			drawCenteredString(poseStack, font, Component.translatable("string.explorerscompass.noStructuresMatch"), listCenterX, height / 2 - 10, GuiTheme.TEXT_SECONDARY);
+			drawCenteredString(poseStack, font, Component.translatable(searchTarget.getNoneMatchTranslationKey()), listCenterX, height / 2 - 10, GuiTheme.TEXT_SECONDARY);
 			drawCenteredString(poseStack, font, Component.translatable("string.explorerscompass.clearFiltersHint"), listCenterX, height / 2 + 2, GuiTheme.TEXT_MUTED);
 		}
 
@@ -214,11 +220,13 @@ public class ExplorersCompassScreen extends Screen {
 
 	/** Draws the title, how much of the list is showing, and the filters that are cutting it down. */
 	private void renderHeaderContents(PoseStack poseStack, int mouseX, int mouseY) {
-		GuiTheme.drawTitle(poseStack, font, title.getString(), structureKeysMatchingSearch.size() + " / " + allowedStructureKeys.size(), GuiTheme.SIDEBAR_CONTENT_X, 10);
+		// The title names what is being picked, which is whichever of the two lists is showing rather
+		// than the one this screen was opened on
+		GuiTheme.drawTitle(poseStack, font, I18n.get(searchTarget.getSelectTranslationKey()), keysMatchingSearch.size() + " / " + allowedKeys.size(), GuiTheme.SIDEBAR_CONTENT_X, 10);
 
 		filterChips.clear();
 		if (modFilter != null) {
-			filterChips.add(new FilterChip(I18n.get("string.explorerscompass.modFilter") + ": " + StructureUtils.getPrettyStructureSource(new ResourceLocation(modFilter, "any")), () -> setModFilter(null)));
+			filterChips.add(new FilterChip(I18n.get("string.explorerscompass.modFilter") + ": " + StructureUtils.getPrettySourceName(new ResourceLocation(modFilter, "any")), () -> setModFilter(null)));
 		}
 		if (filterByCurrentDimension) {
 			filterChips.add(new FilterChip(I18n.get("string.explorerscompass.currentDimension"), () -> toggleDimensionFilter()));
@@ -292,10 +300,10 @@ public class ExplorersCompassScreen extends Screen {
 		font.drawShadow(poseStack, headline, headlineX, top + 6, GuiTheme.TEXT_PRIMARY);
 		headlineX += font.width(headline) + 6;
 
-		// An inactive compass still remembers the last structure it was pointed at, which would read as
-		// if it were still doing something with it
+		// An inactive compass still remembers the last thing it was pointed at, which would read as if
+		// it were still doing something with it
 		if (state == CompassState.SEARCHING || state == CompassState.FOUND || state == CompassState.NOT_FOUND) {
-			final String target = state == CompassState.SEARCHING ? ClientEventHandler.searchTargetName(explorersCompass, stack) : StructureUtils.getPrettyStructureName(explorersCompass.getStructureKey(stack));
+			final String target = state == CompassState.SEARCHING ? ClientEventHandler.searchTargetName(explorersCompass, stack) : explorersCompass.getSearchTarget(stack).getPrettyName(explorersCompass.getTargetKey(stack));
 			if (!target.isEmpty()) {
 				font.draw(poseStack, RenderUtils.trimToWidth(target, statusTextRight - headlineX), headlineX, top + 6, GuiTheme.TEXT_SECONDARY);
 			}
@@ -381,6 +389,12 @@ public class ExplorersCompassScreen extends Screen {
 			if (par1 == GLFW.GLFW_KEY_ENTER || par1 == GLFW.GLFW_KEY_KP_ENTER) {
 				return searchFromKeyboard();
 			}
+			if (par1 == GLFW.GLFW_KEY_TAB && !hasShiftDown()) {
+				// The one thing on this screen worth reaching without the mouse that the arrows and
+				// return do not already cover
+				switchTarget();
+				return true;
+			}
 		}
 
 		boolean ret = super.keyPressed(par1, par2, par3);
@@ -392,7 +406,7 @@ public class ExplorersCompassScreen extends Screen {
 
 	/**
 	 * Searches for whatever return should act on: everything picked with Ctrl-click, the selected
-	 * structure, or, when nothing has been selected yet, the first one the filter left in the list.
+	 * entry, or, when nothing has been selected yet, the first one the filter left in the list.
 	 */
 	private boolean searchFromKeyboard() {
 		if (multiSelectedKeys.size() > 1) {
@@ -403,7 +417,7 @@ public class ExplorersCompassScreen extends Screen {
 			selectionList.selectFirst();
 		}
 		if (selectionList.hasSelection()) {
-			selectionList.getSelected().searchForStructure();
+			selectionList.getSelected().search();
 			return true;
 		}
 		return false;
@@ -424,7 +438,7 @@ public class ExplorersCompassScreen extends Screen {
 		minecraft.keyboardHandler.setSendRepeatsToGui(false);
 	}
 
-	public void selectStructure(StructureSearchEntry entry) {
+	public void selectEntry(StructureSearchEntry entry) {
 		updateButtons();
 	}
 
@@ -444,7 +458,38 @@ public class ExplorersCompassScreen extends Screen {
 		updateButtons();
 	}
 
-	/** The mod the list is narrowed down to, or null while structures from every mod are listed. */
+	/** Lists biomes instead of structures, or the other way round. */
+	private void switchTarget() {
+		searchTarget = searchTarget.next();
+		targetButton.setMessage(targetButtonLabel());
+		modFilterPanel.close();
+		// What was picked out of one list means nothing in the other
+		multiSelectedKeys.clear();
+		rebuildList();
+	}
+
+	/**
+	 * Takes the list of what may be searched for as it currently stands, and rebuilds the rows around
+	 * whatever is already typed in the filter.
+	 */
+	private void rebuildList() {
+		removeWidget(selectionList);
+		allowedKeys = new ArrayList<ResourceLocation>(searchTarget.getAllowedKeys());
+		multiSelectedKeys.retainAll(allowedKeys);
+		// A mod that contributes nothing to the list now showing is no longer something to filter by
+		if (modFilter != null && allowedKeys.stream().noneMatch((key) -> key.getNamespace().equals(modFilter))) {
+			modFilter = null;
+			modFilterButton.setMessage(modFilterButtonLabel());
+			modFilterButton.setHighlighted(false);
+		}
+		// Re-apply whatever is already typed in the search field, rather than resetting the filter
+		selectionList = null;
+		processSearchTerm();
+		selectionList = addRenderableWidget(createSelectionList());
+		updateButtons();
+	}
+
+	/** The mod the list is narrowed down to, or null while entries from every mod are listed. */
 	public String getModFilter() {
 		return modFilter;
 	}
@@ -464,38 +509,38 @@ public class ExplorersCompassScreen extends Screen {
 		processSearchTerm();
 	}
 
-	/** Stars or unstars a structure, keeping the selection where it was. */
+	/** Stars or unstars an entry, keeping the selection where it was. */
 	public void toggleFavorite(ResourceLocation key) {
-		SearchHistory.toggleFavorite(key);
+		SearchHistory.toggleFavorite(searchTarget, key);
 		refreshListKeepingSelection();
 	}
 
 	/**
-	 * Rebuilds the rows, holding on to whatever was selected if the change left it in the list. A
-	 * structure picked out of hundreds should survive narrowing the list down around it, or sorting
+	 * Rebuilds the rows, holding on to whatever was selected if the change left it in the list.
+	 * Something picked out of hundreds should survive narrowing the list down around it, or sorting
 	 * it differently.
 	 */
 	private void refreshListKeepingSelection() {
-		final ResourceLocation selectedKey = selectionList.hasSelection() ? selectionList.getSelected().getStructureKey() : null;
+		final ResourceLocation selectedKey = selectionList.hasSelection() ? selectionList.getSelected().getKey() : null;
 		selectionList.refreshList();
 		if (selectedKey != null) {
 			selectionList.selectByKey(selectedKey);
 		}
 	}
 
-	public void searchForStructure(ResourceLocation key) {
-		SearchHistory.pushRecent(key);
-		ExplorersCompass.network.sendToServer(CompassSearchPacket.forStructures(List.of(key), player.blockPosition()));
+	public void searchForTarget(ResourceLocation key) {
+		SearchHistory.pushRecent(searchTarget, key);
+		ExplorersCompass.network.sendToServer(CompassSearchPacket.forTargets(searchTarget, List.of(key), player.blockPosition()));
 		minecraft.setScreen(null);
 	}
 
-	/** Searches for the nearest of all the structures picked with Ctrl-click. */
+	/** Searches for the nearest of everything picked with Ctrl-click. */
 	public void searchForMultiSelection() {
 		final List<ResourceLocation> keys = new ArrayList<ResourceLocation>(multiSelectedKeys);
 		for (ResourceLocation key : keys) {
-			SearchHistory.pushRecent(key);
+			SearchHistory.pushRecent(searchTarget, key);
 		}
-		ExplorersCompass.network.sendToServer(CompassSearchPacket.forStructures(keys, player.blockPosition()));
+		ExplorersCompass.network.sendToServer(CompassSearchPacket.forTargets(searchTarget, keys, player.blockPosition()));
 		minecraft.setScreen(null);
 	}
 
@@ -503,11 +548,11 @@ public class ExplorersCompassScreen extends Screen {
 		if (key == null) {
 			return;
 		}
-		ExplorersCompass.network.sendToServer(CompassSearchPacket.forGroup(key, player.blockPosition()));
+		ExplorersCompass.network.sendToServer(CompassSearchPacket.forGroup(searchTarget, key, player.blockPosition()));
 		minecraft.setScreen(null);
 	}
 
-	public void searchForNextStructure() {
+	public void searchForNext() {
 		ExplorersCompass.network.sendToServer(new CompassSearchForNextPacket(player.blockPosition()));
 		minecraft.setScreen(null);
 	}
@@ -524,8 +569,8 @@ public class ExplorersCompassScreen extends Screen {
 	}
 
 	/**
-	 * Stops the search and takes the structure the compass was aimed at back off it, leaving this
-	 * screen open so that something else can be picked straight away.
+	 * Stops the search and takes whatever the compass was aimed at back off it, leaving this screen
+	 * open so that something else can be picked straight away.
 	 */
 	public void cancelSearch() {
 		ExplorersCompass.network.sendToServer(new CancelSearchPacket());
@@ -539,17 +584,17 @@ public class ExplorersCompassScreen extends Screen {
 		minecraft.setScreen(null);
 	}
 
-	/** Announces the located structure to the other players, leaving this screen open. */
+	/** Announces the located place to the other players, leaving this screen open. */
 	public void share() {
 		ExplorersCompass.network.sendToServer(new ShareLocationPacket(ShareLocationPacket.CURRENT_TARGET));
 	}
 
 	public void processSearchTerm() {
 		final String[] tokens = searchTextField.getValue().toLowerCase().split("\\s+");
-		structureKeysMatchingSearch = new ArrayList<ResourceLocation>();
-		for (ResourceLocation key : allowedStructureKeys) {
+		keysMatchingSearch = new ArrayList<ResourceLocation>();
+		for (ResourceLocation key : allowedKeys) {
 			if (matchesModFilter(key) && matchesDimensionFilter(key) && matchesSearchTokens(key, tokens)) {
-				structureKeysMatchingSearch.add(key);
+				keysMatchingSearch.add(key);
 			}
 		}
 		if (selectionList != null) {
@@ -565,15 +610,15 @@ public class ExplorersCompassScreen extends Screen {
 		if (!filterByCurrentDimension) {
 			return true;
 		}
-		// Structures with no known dimensions are kept: absent data is not proof they cannot generate here
-		final List<ResourceLocation> dimensionKeys = ExplorersCompass.dimensionKeysForAllowedStructureKeys.get(key);
+		// Entries with no known dimensions are kept: absent data is not proof they cannot generate here
+		final List<ResourceLocation> dimensionKeys = searchTarget.getDimensionKeys(key);
 		return dimensionKeys.isEmpty() || dimensionKeys.contains(player.level.dimension().location());
 	}
 
 	/**
 	 * Matches the typed filter. Every whitespace-separated token has to match: plain tokens against
-	 * the structure name, and tokens starting with {@code @} against its source, by mod id or by mod
-	 * name. A lone {@code @} matches everything, so nothing vanishes while the id is being typed.
+	 * the name, and tokens starting with {@code @} against the source, by mod id or by mod name. A
+	 * lone {@code @} matches everything, so nothing vanishes while the id is being typed.
 	 */
 	private boolean matchesSearchTokens(ResourceLocation key, String[] tokens) {
 		for (String token : tokens) {
@@ -582,63 +627,63 @@ public class ExplorersCompassScreen extends Screen {
 			}
 			if (token.charAt(0) == '@') {
 				final String source = token.substring(1);
-				if (!source.isEmpty() && !key.getNamespace().toLowerCase().contains(source) && !StructureUtils.getPrettyStructureSource(key).toLowerCase().contains(source)) {
+				if (!source.isEmpty() && !key.getNamespace().toLowerCase().contains(source) && !StructureUtils.getPrettySourceName(key).toLowerCase().contains(source)) {
 					return false;
 				}
-			} else if (!StructureUtils.getPrettyStructureName(key).toLowerCase().contains(token)) {
+			} else if (!searchTarget.getPrettyName(key).toLowerCase().contains(token)) {
 				return false;
 			}
 		}
 		return true;
 	}
 
-	public List<ResourceLocation> sortStructures() {
-		final List<ResourceLocation> structures = structureKeysMatchingSearch;
-		// Sort on values computed once per structure instead of once per comparison: the names and
-		// sources behind them do translation and mod list lookups, and O(n log n) comparisons would
-		// repeat them thousands of times on every refresh while typing in the filter
+	public List<ResourceLocation> sortKeys() {
+		final List<ResourceLocation> keys = keysMatchingSearch;
+		// Sort on values computed once per entry instead of once per comparison: the names and sources
+		// behind them do translation and mod list lookups, and O(n log n) comparisons would repeat
+		// them thousands of times on every refresh while typing in the filter
 		final Map<ResourceLocation, String> names = new HashMap<ResourceLocation, String>();
-		for (ResourceLocation key : structures) {
-			names.put(key, StructureUtils.getPrettyStructureName(key));
+		for (ResourceLocation key : keys) {
+			names.put(key, searchTarget.getPrettyName(key));
 		}
-		structures.sort(Comparator.comparing(names::get));
+		keys.sort(Comparator.comparing(names::get));
 		if (!(sortingCategory instanceof NameSorting)) {
-			final Map<ResourceLocation, Object> values = new HashMap<ResourceLocation, Object>();
-			for (ResourceLocation key : structures) {
-				values.put(key, sortingCategory.getValue(key));
+			final Map<ResourceLocation, Comparable<?>> values = new HashMap<ResourceLocation, Comparable<?>>();
+			for (ResourceLocation key : keys) {
+				values.put(key, sortingCategory.getValue(searchTarget, key));
 			}
-			structures.sort((key1, key2) -> compareSortValues(values.get(key1), values.get(key2)));
+			keys.sort((key1, key2) -> compareSortValues(values.get(key1), values.get(key2)));
 		}
 		if (sortDescending) {
-			Collections.reverse(structures);
+			Collections.reverse(keys);
 		}
-		return partitionByHistory(structures);
+		return partitionByHistory(keys);
 	}
 
 	@SuppressWarnings({ "unchecked", "rawtypes" })
-	private static int compareSortValues(Object value1, Object value2) {
+	private static int compareSortValues(Comparable<?> value1, Comparable<?> value2) {
 		return ((Comparable) value1).compareTo(value2);
 	}
 
 	/** Puts favorites first and recent searches right after them, keeping everything else sorted. */
-	private List<ResourceLocation> partitionByHistory(List<ResourceLocation> structures) {
+	private List<ResourceLocation> partitionByHistory(List<ResourceLocation> keys) {
 		final List<ResourceLocation> favorites = new ArrayList<ResourceLocation>();
 		final List<ResourceLocation> rest = new ArrayList<ResourceLocation>();
-		final Set<ResourceLocation> recentSet = new HashSet<ResourceLocation>(SearchHistory.getRecents());
-		for (ResourceLocation key : structures) {
-			if (SearchHistory.isFavorite(key)) {
+		final Set<ResourceLocation> recentSet = new HashSet<ResourceLocation>(SearchHistory.getRecents(searchTarget));
+		for (ResourceLocation key : keys) {
+			if (SearchHistory.isFavorite(searchTarget, key)) {
 				favorites.add(key);
 			} else if (!recentSet.contains(key)) {
 				rest.add(key);
 			}
 		}
 
-		final Set<ResourceLocation> present = new HashSet<ResourceLocation>(structures);
-		final List<ResourceLocation> result = new ArrayList<ResourceLocation>(structures.size());
+		final Set<ResourceLocation> present = new HashSet<ResourceLocation>(keys);
+		final List<ResourceLocation> result = new ArrayList<ResourceLocation>(keys.size());
 		result.addAll(favorites);
 		// Recents keep their own order: the most recently searched first
-		for (ResourceLocation key : SearchHistory.getRecents()) {
-			if (present.contains(key) && !SearchHistory.isFavorite(key)) {
+		for (ResourceLocation key : SearchHistory.getRecents(searchTarget)) {
+			if (present.contains(key) && !SearchHistory.isFavorite(searchTarget, key)) {
 				result.add(key);
 			}
 		}
@@ -661,11 +706,18 @@ public class ExplorersCompassScreen extends Screen {
 		bookmarksButton = null;
 		sidebarY = GuiTheme.HEADER_HEIGHT + 8;
 
+		// Stands in the header above the column of controls, which is already as full as the shortest
+		// screen the game scales itself down to has room for
+		targetButton = addRenderableWidget(new TransparentButton(GuiTheme.SIDEBAR_CONTENT_X, TARGET_BUTTON_Y, GuiTheme.SIDEBAR_CONTENT_WIDTH, TARGET_BUTTON_HEIGHT, targetButtonLabel(), (onPress) -> {
+			switchTarget();
+		}));
+		targetButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.searchTarget"));
+
 		searchButton = addSidebarButton(Component.translatable("string.explorerscompass.search"), (onPress) -> {
 			if (multiSelectedKeys.size() > 1) {
 				searchForMultiSelection();
 			} else if (selectionList.hasSelection()) {
-				selectionList.getSelected().searchForStructure();
+				selectionList.getSelected().search();
 			}
 		});
 		searchButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.search"), Component.translatable("string.explorerscompass.tooltip.multiSelect"));
@@ -680,7 +732,7 @@ public class ExplorersCompassScreen extends Screen {
 		// are left out of the layout entirely rather than taking up a slot they cannot be used from
 		if (ConfigHandler.GENERAL.maxNextSearches.get() > 0) {
 			searchNextButton = addSidebarButton(Component.translatable("string.explorerscompass.searchForNext"), (onPress) -> {
-				searchForNextStructure();
+				searchForNext();
 			});
 			searchNextButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.searchForNext"));
 			clearCacheButton = addSidebarButton(Component.translatable("string.explorerscompass.clearCache"), (onPress) -> {
@@ -714,7 +766,7 @@ public class ExplorersCompassScreen extends Screen {
 		dimensionFilterButton.setHighlighted(filterByCurrentDimension);
 		dimensionFilterButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.dimensionFilter"));
 		modFilterButton = addSidebarButton(modFilterButtonLabel(), (onPress) -> {
-			modFilterPanel.toggle(allowedStructureKeys, GuiTheme.SIDEBAR_X + GuiTheme.SIDEBAR_WIDTH + 2, modFilterButton.y, width, height, modFilter);
+			modFilterPanel.toggle(allowedKeys, GuiTheme.SIDEBAR_X + GuiTheme.SIDEBAR_WIDTH + 2, modFilterButton.y, width, height, modFilter);
 		});
 		modFilterButton.setHighlighted(modFilter != null);
 		modFilterButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.modFilter"));
@@ -748,7 +800,7 @@ public class ExplorersCompassScreen extends Screen {
 
 		// Carry the filter and the selection over, so that resizing the window does not lose them
 		final String previousSearchTerm = searchTextField != null ? searchTextField.getValue() : "";
-		final ResourceLocation previousSelectionKey = selectionList != null && selectionList.hasSelection() ? selectionList.getSelected().getStructureKey() : null;
+		final ResourceLocation previousSelectionKey = selectionList != null && selectionList.hasSelection() ? selectionList.getSelected().getKey() : null;
 		selectionList = null;
 
 		searchTextField = new TransparentTextField(font, columnLeft(), 8, columnWidth(), 18, Component.translatable("string.explorerscompass.searchHint"));
@@ -786,6 +838,10 @@ public class ExplorersCompassScreen extends Screen {
 		return button;
 	}
 
+	private Component targetButtonLabel() {
+		return Component.literal(SWITCH_GLYPH + " ").append(Component.translatable(searchTarget.getNameTranslationKey()));
+	}
+
 	private Component sortByButtonLabel() {
 		return Component.translatable("string.explorerscompass.sortBy").append(Component.literal(": " + sortingCategory.getLocalizedName() + (sortDescending ? " ↓" : " ↑")));
 	}
@@ -800,7 +856,7 @@ public class ExplorersCompassScreen extends Screen {
 	}
 
 	private Component modFilterButtonLabel() {
-		final String name = modFilter == null ? I18n.get("string.explorerscompass.allMods") : StructureUtils.getPrettyStructureSource(new ResourceLocation(modFilter, "any"));
+		final String name = modFilter == null ? I18n.get("string.explorerscompass.allMods") : StructureUtils.getPrettySourceName(new ResourceLocation(modFilter, "any"));
 		return Component.translatable("string.explorerscompass.modFilter").append(Component.literal(": " + name));
 	}
 
@@ -813,7 +869,7 @@ public class ExplorersCompassScreen extends Screen {
 
 		searchButton.active = hasSelection || multiSelected > 0;
 		searchButton.setMessage(multiSelected > 1 ? Component.translatable("string.explorerscompass.search").append(Component.literal(" (" + multiSelected + ")")) : Component.translatable("string.explorerscompass.search"));
-		// A group search applies to a single structure's group
+		// A group search applies to the group of a single entry
 		searchGroupButton.active = hasSelection && multiSelected <= 1;
 
 		// Searching for a further instance needs something to have been located to look past

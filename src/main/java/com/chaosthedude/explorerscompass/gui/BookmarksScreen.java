@@ -22,8 +22,8 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
 /**
- * Lists the structures this compass has located, so that any of them can be pointed at, travelled
- * to, or shared again after the compass has moved on to something else.
+ * Lists the places this compass has located, so that any of them can be pointed at, travelled to,
+ * or shared again after the compass has moved on to something else.
  */
 @OnlyIn(Dist.CLIENT)
 public class BookmarksScreen extends Screen {

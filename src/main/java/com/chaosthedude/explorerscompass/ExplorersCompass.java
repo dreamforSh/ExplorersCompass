@@ -57,7 +57,7 @@ public class ExplorersCompass {
 	// Bump this whenever the packets change. Both sides have to declare the same version: a mismatch
 	// is then refused during the handshake with a clear message, instead of connecting and failing
 	// to decode later.
-	public static final String PROTOCOL_VERSION = "2.1";
+	public static final String PROTOCOL_VERSION = "2.2";
 
 	public static final Logger LOGGER = LogManager.getLogger(MODID);
 
@@ -69,7 +69,10 @@ public class ExplorersCompass {
 	public static ListMultimap<ResourceLocation, ResourceLocation> dimensionKeysForAllowedStructureKeys;
 	public static Map<ResourceLocation, ResourceLocation> structureKeysToTypeKeys;
 	public static Map<ResourceLocation, String> groupNames;
-	
+	public static List<ResourceLocation> allowedBiomeKeys;
+	public static ListMultimap<ResourceLocation, ResourceLocation> dimensionKeysForAllowedBiomeKeys;
+	public static Map<ResourceLocation, ResourceLocation> biomeKeysToGroupKeys;
+
 	public ExplorersCompass() {
 		FMLJavaModLoadingContext.get().getModEventBus().addListener(this::commonSetup);
 		DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> {
@@ -104,6 +107,9 @@ public class ExplorersCompass {
 		dimensionKeysForAllowedStructureKeys = ArrayListMultimap.create();
 		structureKeysToTypeKeys = new HashMap<ResourceLocation, ResourceLocation>();
 		groupNames = new HashMap<ResourceLocation, String>();
+		allowedBiomeKeys = new ArrayList<ResourceLocation>();
+		dimensionKeysForAllowedBiomeKeys = ArrayListMultimap.create();
+		biomeKeysToGroupKeys = new HashMap<ResourceLocation, ResourceLocation>();
 	}
 	
 	@OnlyIn(Dist.CLIENT)

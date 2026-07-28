@@ -81,7 +81,7 @@ public class StructureSearchList extends ObjectSelectionList<StructureSearchEntr
 				// The selection fades out towards the right, so that the row it marks stays readable
 				RenderUtils.drawHorizontalGradient(bandLeft, bandTop, bandRight, bandBottom, GuiTheme.ROW_SELECTED_LEFT, GuiTheme.ROW_SELECTED_RIGHT);
 				RenderUtils.drawRect(bandLeft, bandTop, bandLeft + 2, bandBottom, GuiTheme.ACCENT | 0xFF000000);
-			} else if (parentScreen.isMultiSelected(entry.getStructureKey())) {
+			} else if (parentScreen.isMultiSelected(entry.getKey())) {
 				// Rows picked with Ctrl-click show fainter, with the same accent along their edge
 				RenderUtils.drawRect(bandLeft, bandTop, bandRight, bandBottom, GuiTheme.ROW_MULTI_SELECTED);
 				RenderUtils.drawRect(bandLeft, bandTop, bandLeft + 2, bandBottom, GuiTheme.ACCENT_DIM);
@@ -90,8 +90,8 @@ public class StructureSearchList extends ObjectSelectionList<StructureSearchEntr
 			}
 
 			if (j < getItemCount() - 1) {
-				// A brighter rule closes off the structures held at the top of the list, so that their
-				// order reads as deliberate rather than as the sort having gone wrong
+				// A brighter rule closes off the rows held at the top of the list, so that their order
+				// reads as deliberate rather than as the sort having gone wrong
 				final boolean lastPinned = j == parentScreen.getPinnedCount() - 1;
 				RenderUtils.drawRect(bandLeft + 2, bandBottom - 1, bandRight - 2, bandBottom, lastPinned ? GuiTheme.ROW_SECTION_SEPARATOR : GuiTheme.ROW_SEPARATOR);
 			}
@@ -116,21 +116,21 @@ public class StructureSearchList extends ObjectSelectionList<StructureSearchEntr
 
 	public void refreshList() {
 		clearEntries();
-		for (ResourceLocation key : parentScreen.sortStructures()) {
+		for (ResourceLocation key : parentScreen.sortKeys()) {
 			addEntry(new StructureSearchEntry(this, key));
 		}
-		selectStructure(null);
+		selectEntry(null);
 		setScrollAmount(0);
 	}
 
-	public void selectStructure(StructureSearchEntry entry) {
+	public void selectEntry(StructureSearchEntry entry) {
 		setSelected(entry);
-		parentScreen.selectStructure(entry);
+		parentScreen.selectEntry(entry);
 	}
 
 	/**
-	 * Moves the selection up or down the list and scrolls it into view, so that a structure can be
-	 * picked without leaving the filter field the screen opens focused on.
+	 * Moves the selection up or down the list and scrolls it into view, so that a row can be picked
+	 * without leaving the filter field the screen opens focused on.
 	 */
 	public void moveSelectionBy(int delta) {
 		if (children().isEmpty()) {
@@ -140,14 +140,14 @@ public class StructureSearchList extends ObjectSelectionList<StructureSearchEntr
 		// From no selection at all, the first press takes the row at whichever end it came from
 		final int index = hasSelection() ? Mth.clamp(children().indexOf(getSelected()) + delta, 0, size - 1) : (delta > 0 ? 0 : size - 1);
 		final StructureSearchEntry entry = children().get(index);
-		selectStructure(entry);
+		selectEntry(entry);
 		ensureVisible(entry);
 	}
 
 	/** Selects the row at the top of the list, if there is one. */
 	public void selectFirst() {
 		if (!children().isEmpty()) {
-			selectStructure(children().get(0));
+			selectEntry(children().get(0));
 			ensureVisible(children().get(0));
 		}
 	}
@@ -155,8 +155,8 @@ public class StructureSearchList extends ObjectSelectionList<StructureSearchEntr
 	/** Selects the entry for the given key, if the list holds one, and scrolls it into view. */
 	public void selectByKey(ResourceLocation key) {
 		for (StructureSearchEntry entry : children()) {
-			if (entry.getStructureKey().equals(key)) {
-				selectStructure(entry);
+			if (entry.getKey().equals(key)) {
+				selectEntry(entry);
 				centerScrollOn(entry);
 				return;
 			}
