@@ -54,6 +54,18 @@ public class BiomeSearchWorker extends SearchWorker {
 	private final int depthInterval;
 	private final RingWalker ring = new RingWalker();
 
+	// Whether the sampling is running on a thread of its own. Set before either side starts.
+	private volatile boolean background;
+
+	// What the search thread turned up. Publishing this last is what makes everything the search
+	// thread wrote before it visible to the server thread that sees it set.
+	private volatile boolean backgroundDone;
+	private Pair<BlockPos, ResourceLocation> backgroundLocated;
+	private Throwable backgroundError;
+
+	// Whether the server thread has already acted on that. Only ever touched on the server thread.
+	private boolean applied;
+
 	public BiomeSearchWorker(ServerLevel level, Player player, ItemStack stack, BlockPos startPos, List<Holder<Biome>> biomes, List<BlockPos> prevPos, boolean isGroup, boolean ignoreNearStart, SearchWorkerManager manager) {
 		super(level, player, stack, startPos, prevPos, isGroup, ignoreNearStart, ConfigHandler.GENERAL.maxBiomeSamples.get(), manager);
 
@@ -83,23 +95,62 @@ public class BiomeSearchWorker extends SearchWorker {
 	}
 
 	@Override
-	protected boolean doSample() {
-		if (hasWork()) {
-			final int sampleX = startPos.getX() + spacing * ring.getX();
-			final int sampleZ = startPos.getZ() + spacing * ring.getZ();
+	protected void run() {
+		if (!ConfigHandler.GENERAL.asyncBiomeSearch.get()) {
+			super.run();
+			return;
+		}
 
-			// The corners of a ring reach past its edges, so part of the outer rings lies beyond the
-			// configured radius
-			if (isWithinMaxRadius(sampleX, sampleZ)) {
-				currentPos = new BlockPos(sampleX, startPos.getY(), sampleZ);
+		background = true;
+		// The server thread stays registered so that it notices the search finishing and puts what it
+		// turned up onto the compass; the sampling itself happens on the thread taken below
+		super.run();
+		try {
+			SearchExecutor.execute(this::searchInBackground);
+		} catch (Throwable t) {
+			// Nothing is going to run it, so answer as though it had run and failed rather than leaving
+			// the server thread watching for a result that will never arrive
+			backgroundError = t;
+			backgroundDone = true;
+		}
+	}
 
-				final Pair<BlockPos, ResourceLocation> pair = getTargetBiomeAt(sampleX, sampleZ, isDepthSampleLocation());
-				if (pair != null && !shouldIgnore(pair.getFirst())) {
-					succeed(pair.getFirst(), pair.getSecond());
+	/** Samples until something is found or there is nothing left, off the server thread. */
+	private void searchInBackground() {
+		try {
+			while (!Thread.currentThread().isInterrupted() && hasMoreToSample()) {
+				final Pair<BlockPos, ResourceLocation> located = sampleNext();
+				if (located != null) {
+					backgroundLocated = located;
+					break;
 				}
 			}
+		} catch (Throwable t) {
+			backgroundError = t;
+		} finally {
+			backgroundDone = true;
+		}
+	}
 
-			ring.advance();
+	@Override
+	public boolean hasWork() {
+		// While the search runs on a thread of its own, the server thread stays registered until it has
+		// acted on the outcome, however far the search has got: what is left to sample is the search
+		// thread's business, and reading it from here would be a race
+		return background ? !applied : super.hasWork();
+	}
+
+	@Override
+	protected boolean doSample() {
+		if (background) {
+			return applyBackgroundResult();
+		}
+
+		if (hasWork()) {
+			final Pair<BlockPos, ResourceLocation> located = sampleNext();
+			if (located != null) {
+				succeed(located.getFirst(), located.getSecond());
+			}
 		}
 
 		if (hasWork()) {
@@ -107,10 +158,69 @@ public class BiomeSearchWorker extends SearchWorker {
 		}
 
 		if (!finished) {
-			fail();
+			endOfWork();
 		}
 
+		return hasWork();
+	}
+
+	/**
+	 * Puts what the search thread turned up onto the compass, once it has finished. Runs on the
+	 * server thread, which is where everything a result touches belongs.
+	 */
+	private boolean applyBackgroundResult() {
+		if (!backgroundDone || applied) {
+			return false;
+		}
+
+		applied = true;
+		if (finished) {
+			// The search was stopped, or replaced by another one, while this was running
+			return false;
+		}
+
+		if (backgroundError != null) {
+			abort(backgroundError);
+		} else if (backgroundLocated != null) {
+			succeed(backgroundLocated.getFirst(), backgroundLocated.getSecond());
+		} else {
+			endOfWork();
+		}
 		return false;
+	}
+
+	/**
+	 * Samples the location the search has reached and moves on to the next one, answering with what
+	 * it found there. Touches nothing outside this worker, which is what lets it run off the server
+	 * thread.
+	 */
+	private Pair<BlockPos, ResourceLocation> sampleNext() {
+		final int sampleX = startPos.getX() + spacing * ring.getX();
+		final int sampleZ = startPos.getZ() + spacing * ring.getZ();
+
+		Pair<BlockPos, ResourceLocation> located = null;
+		// The corners of a ring reach past its edges, so part of the outer rings lies beyond the
+		// configured radius
+		if (isWithinMaxRadius(sampleX, sampleZ)) {
+			currentPos = new BlockPos(sampleX, startPos.getY(), sampleZ);
+
+			final Pair<BlockPos, ResourceLocation> pair = getTargetBiomeAt(sampleX, sampleZ, isDepthSampleLocation());
+			if (pair != null && !shouldIgnore(pair.getFirst())) {
+				located = pair;
+			}
+		}
+
+		ring.advance();
+		return located;
+	}
+
+	/**
+	 * A biome search is a single worker, so there is never another waiting to take a turn and this
+	 * one simply runs to the end of what it is allowed.
+	 */
+	@Override
+	protected boolean isExhausted() {
+		return true;
 	}
 
 	/**
@@ -208,6 +318,11 @@ public class BiomeSearchWorker extends SearchWorker {
 	 * The radius this worker has finished searching. Like the search for a randomly spread structure
 	 * this is the ring that has been walked all the way around rather than the location sampled
 	 * last, since the cells of a ring are walked row by row and the first of them is a corner.
+	 *
+	 * <p>While the search runs on a thread of its own, the server thread reads this for the readout
+	 * on the compass and may see a ring it has already left behind. That is all it is used for
+	 * there: what is left to search is answered by {@link #hasWork()} without reading any of this,
+	 * and the value the search ends on is read only once it has published that it finished.
 	 */
 	@Override
 	protected int getRadius() {

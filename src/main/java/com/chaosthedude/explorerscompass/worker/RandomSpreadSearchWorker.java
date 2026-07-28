@@ -55,10 +55,11 @@ public class RandomSpreadSearchWorker extends StructureSearchWorker<RandomSpread
 		}
 
 		if (!finished) {
-			fail();
+			endOfWork();
 		}
 
-		return false;
+		// Handing back can widen what this worker may search, in which case it carries straight on
+		return hasWork();
 	}
 
 	/**

@@ -7,6 +7,7 @@ import java.util.Map;
 import org.apache.commons.lang3.RandomStringUtils;
 
 import com.chaosthedude.explorerscompass.ExplorersCompass;
+import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
 
 import it.unimi.dsi.fastutil.objects.Object2ObjectLinkedOpenHashMap;
@@ -37,8 +38,19 @@ import net.minecraft.world.level.levelgen.structure.placement.StructurePlacement
  * so it is cut down to that radius and stops there. A search whose answer is nearby therefore still
  * finishes almost at once, and only one that finds nothing pays the full radius for every
  * placement — which is what it cost before as well.
+ *
+ * <p>So that a bound turns up as early as there is one to be had, the workers take turns rather
+ * than running one after another: each searches out to a band that widens once they have all
+ * reached it. Because a worker picks up where it left off, taking turns costs no more samples than
+ * running them in order does — it only changes which of them spends them first. Without it, a
+ * search whose first placement holds nothing at all would pay the whole radius for it before the
+ * one with the answer had sampled anything.
  */
 public class SearchWorkerManager {
+
+	// How far the first turn round the workers searches. It doubles from here, so this only decides
+	// how fine grained the early turns are, not how far the search reaches.
+	private static final int INITIAL_BAND_RADIUS = 1000;
 
 	private final String id = RandomStringUtils.random(8, "0123456789abcdef");
 
@@ -54,6 +66,10 @@ public class SearchWorkerManager {
 	private BlockPos locatedPos;
 	private ResourceLocation locatedKey;
 	private long locatedDistanceSqr;
+
+	// How far the turn the workers are currently taking searches, and the ceiling it grows towards
+	private int bandRadius;
+	private int maxRadius;
 
 	// What the whole search has done, for the report once it is over
 	private int samples;
@@ -124,6 +140,8 @@ public class SearchWorkerManager {
 		samples = 0;
 		radius = 0;
 		lastRadiusThreshold = 0;
+		bandRadius = 0;
+		maxRadius = 0;
 		advancing = false;
 		lastFinished = null;
 	}
@@ -133,7 +151,15 @@ public class SearchWorkerManager {
 		if (workers.isEmpty()) {
 			return false;
 		}
-		workers.get(0).start();
+
+		maxRadius = ConfigHandler.GENERAL.maxRadius.get();
+		// Taking turns only means anything when there is someone to take turns with; a search made of
+		// one worker simply runs it to the end
+		bandRadius = workers.size() > 1 ? Math.min(INITIAL_BAND_RADIUS, maxRadius) : maxRadius;
+
+		final SearchWorker first = workers.get(0);
+		applyLimits(first);
+		first.start();
 		return true;
 	}
 
@@ -147,14 +173,24 @@ public class SearchWorkerManager {
 			locatedDistanceSqr = distanceSqr;
 		}
 		samples += workerSamples;
-		runNext(worker);
+		finishWorker(worker);
 	}
 
 	/** Takes note of a worker that has nothing left to search and moves on to the next one. */
 	void onExhausted(SearchWorker worker, int workerRadius, int workerSamples) {
 		samples += workerSamples;
 		radius = Math.max(radius, workerRadius);
-		runNext(worker);
+		finishWorker(worker);
+	}
+
+	/** Puts a worker that has reached the end of its turn at the back of the queue. */
+	void onYielded(SearchWorker worker) {
+		if (!workers.remove(worker)) {
+			// No longer part of a live search
+			return;
+		}
+		workers.add(worker);
+		advance(worker);
 	}
 
 	/**
@@ -170,8 +206,8 @@ public class SearchWorkerManager {
 		return true;
 	}
 
-	/** Starts the next worker that has something to do, or reports the outcome when none is left. */
-	private void runNext(SearchWorker finishedWorker) {
+	/** Drops a worker that is finished for good, and hands the turn on. */
+	private void finishWorker(SearchWorker finishedWorker) {
 		if (!workers.remove(finishedWorker)) {
 			// This worker no longer belongs to a live search: it was stopped, or the search it was part
 			// of has already been replaced by another one
@@ -179,6 +215,17 @@ public class SearchWorkerManager {
 		}
 
 		lastFinished = finishedWorker;
+		advance(null);
+	}
+
+	/**
+	 * Gives the turn to the worker at the front of the queue, or reports the outcome when none is
+	 * left.
+	 *
+	 * @param current the worker whose call this is running inside, if any. It is already being
+	 *     called, so widening what it may search is all it needs to carry straight on.
+	 */
+	private void advance(SearchWorker current) {
 		if (advancing) {
 			// Started from the loop below, which carries on with the next worker itself
 			return;
@@ -188,9 +235,9 @@ public class SearchWorkerManager {
 		try {
 			while (!workers.isEmpty()) {
 				final SearchWorker next = workers.get(0);
-				if (locatedPos != null) {
-					// Anything further out than what has already been located cannot be the answer
-					next.setRadiusLimit((int) Math.sqrt(locatedDistanceSqr));
+				applyLimits(next);
+				if (next == current) {
+					return;
 				}
 
 				next.start();
@@ -204,6 +251,22 @@ public class SearchWorkerManager {
 		}
 
 		report(lastFinished);
+	}
+
+	/**
+	 * Sets how far the worker about to take its turn may search: never past what has already been
+	 * located, and no further than the band the search has reached. Reaching the front of the queue
+	 * having already covered the current band means every worker has, so the band widens.
+	 */
+	private void applyLimits(SearchWorker next) {
+		if (locatedPos != null) {
+			// Anything further out than what has already been located cannot be the answer
+			next.setRadiusLimit((int) Math.sqrt(locatedDistanceSqr));
+		}
+		while (bandRadius < maxRadius && next.getRadius() >= bandRadius) {
+			bandRadius = Math.min(bandRadius * 2, maxRadius);
+		}
+		next.setBandLimit(bandRadius);
 	}
 
 	/** Hands the outcome of the whole search to the compass. */

@@ -301,6 +301,13 @@ public class ExplorersCompassItem extends Item {
 		return workerManagers.computeIfAbsent(player.getUUID(), (uuid) -> new SearchWorkerManager());
 	}
 
+	/** Stops every search on this server, and forgets who they belonged to. */
+	public void forgetAllPlayers() {
+		for (UUID playerId : new ArrayList<UUID>(workerManagers.keySet())) {
+			forgetPlayer(playerId);
+		}
+	}
+
 	/**
 	 * Drops everything remembered about a player who has left the server, so that none of it is kept
 	 * for the rest of the server's life.

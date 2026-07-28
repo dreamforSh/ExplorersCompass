@@ -40,7 +40,8 @@ public abstract class SearchWorker implements WorldWorkerManager.IWorker {
 	protected boolean isGroup;
 	protected boolean ignoreNearStart;
 	protected int samples;
-	protected boolean finished;
+	// Set by the server thread to stop a search, and read by whichever thread is sampling
+	protected volatile boolean finished;
 
 	// Snapshots of the limits this search runs under. The sampling loop reads them for every
 	// location, and a config lookup walks the config tree on every call, which is far too slow for
@@ -49,10 +50,14 @@ public abstract class SearchWorker implements WorldWorkerManager.IWorker {
 	protected final int maxSamples;
 	private final int maxSearchTimePerTick;
 
-	// How far this worker is allowed to search. It starts out as the configured maximum and is
-	// narrowed down by the manager once something has been located, since a worker that has covered
-	// that far can no longer improve on it.
-	private int radiusLimit;
+	// How far this worker may ever search. It starts out as the configured maximum and is narrowed
+	// down by the manager once something has been located, since a worker that has covered that far
+	// can no longer improve on it. Reaching this is the end of the worker.
+	private volatile int radiusLimit;
+
+	// How far the turn this worker is currently taking searches. The manager widens this once every
+	// worker of the search has reached it; reaching it only ends the turn, not the worker.
+	private volatile int bandLimit;
 
 	// When this worker started working during the current tick, or -1 if it is not currently working
 	private long sliceStartTime;
@@ -76,6 +81,7 @@ public abstract class SearchWorker implements WorldWorkerManager.IWorker {
 		maxRadius = ConfigHandler.GENERAL.maxRadius.get();
 		maxSearchTimePerTick = ConfigHandler.GENERAL.maxSearchTimePerTick.get();
 		radiusLimit = maxRadius;
+		bandLimit = maxRadius;
 	}
 
 	public void start() {
@@ -83,29 +89,67 @@ public abstract class SearchWorker implements WorldWorkerManager.IWorker {
 		// cannot sample anything at all has to hand straight back to the manager rather than leaving
 		// the search waiting for a result that will never arrive
 		if (!stack.isEmpty() && stack.getItem() == ExplorersCompass.explorersCompass && hasWork()) {
-			ExplorersCompass.LOGGER.info("SearchWorkerManager " + managerId + ": " + getName() + " starting with " + (shouldLogRadius() ? radiusLimit + " max radius, " : "") + maxSamples + " max samples");
-			WorldWorkerManager.addWorker(this);
+			ExplorersCompass.LOGGER.info("SearchWorkerManager " + managerId + ": " + getName() + " starting with " + (shouldLogRadius() ? getEffectiveRadiusLimit() + " max radius, " : "") + maxSamples + " max samples");
+			run();
 		} else {
 			fail();
 		}
 	}
 
 	/**
-	 * Cuts this worker down to the given radius. Called by the manager once another worker has
-	 * located something, since anything this one turns up beyond that distance cannot be the answer.
+	 * Puts this worker to work. By default that hands it to Forge, which calls it back for a slice
+	 * of every server tick until it has nothing left to do.
+	 */
+	protected void run() {
+		WorldWorkerManager.addWorker(this);
+	}
+
+	/**
+	 * Cuts this worker down to the given radius for good. Called by the manager once something has
+	 * been located, since anything this one turns up beyond that distance cannot be the answer.
 	 */
 	void setRadiusLimit(int limit) {
 		radiusLimit = Math.min(radiusLimit, limit);
 	}
 
-	/** How far this worker is allowed to search, which is at most the configured maximum. */
-	protected int getRadiusLimit() {
-		return radiusLimit;
+	/** Sets how far the turn this worker is about to take searches. */
+	void setBandLimit(int limit) {
+		bandLimit = limit;
+	}
+
+	/** How far this worker may search before it has to hand back, for whichever reason. */
+	protected int getEffectiveRadiusLimit() {
+		return Math.min(radiusLimit, bandLimit);
 	}
 
 	@Override
 	public boolean hasWork() {
-		return !finished && getRadius() < radiusLimit && samples < maxSamples;
+		return hasMoreToSample();
+	}
+
+	/** Whether there is anything left for this worker to sample under the limits it currently has. */
+	protected boolean hasMoreToSample() {
+		return !finished && getRadius() < getEffectiveRadiusLimit() && samples < maxSamples;
+	}
+
+	/**
+	 * Whether this worker is finished for good, rather than having only reached the end of the turn
+	 * it was taking.
+	 */
+	protected boolean isExhausted() {
+		return finished || getRadius() >= radiusLimit || samples >= maxSamples;
+	}
+
+	/**
+	 * Hands back once there is nothing left to sample: to the compass when this worker is finished
+	 * for good, and to the manager for the next turn when it has only reached the end of this one.
+	 */
+	protected void endOfWork() {
+		if (isExhausted()) {
+			fail();
+		} else {
+			manager.onYielded(this);
+		}
 	}
 
 	@Override

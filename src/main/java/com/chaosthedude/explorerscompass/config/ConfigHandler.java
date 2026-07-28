@@ -30,6 +30,7 @@ public class ConfigHandler {
 		public final ForgeConfigSpec.IntValue biomeSampleSpacing;
 		public final ForgeConfigSpec.IntValue biomeVerticalSampleSpacing;
 		public final ForgeConfigSpec.IntValue biomeDepthSampleInterval;
+		public final ForgeConfigSpec.BooleanValue asyncBiomeSearch;
 		public final ForgeConfigSpec.IntValue maxSearchTimePerTick;
 		public final ForgeConfigSpec.IntValue searchRequestCooldownMillis;
 		public final ForgeConfigSpec.IntValue maxBookmarks;
@@ -72,6 +73,9 @@ public class ConfigHandler {
 
 			desc = "How many locations apart, along each axis, a biome search looks at the heights other than the one it was started at. The height a search starts at is sampled everywhere, since that is where the biome being looked for usually is; the rest of the dimension is sampled on a coarser grid, since a biome that fills the caves covers far more ground than the spacing between two locations. Raising this searches faster but can step over a small cave biome, and 1 samples every height at every location.";
 			biomeDepthSampleInterval = builder.comment(desc).defineInRange("biomeDepthSampleInterval", 4, 1, 64);
+
+			desc = "Runs biome searches on a thread of their own rather than in slices of the server tick, which finishes them several times sooner and costs the server nothing while they run. This is safe because which biome generates somewhere follows from the world seed and the generator's noise alone, which the game itself samples from its own worldgen threads. Turn it off if a mod that adds a biome source of its own turns out not to be safe to sample from another thread. Structure searches are unaffected: answering whether a structure is present reads chunks from storage, which only the server thread may do.";
+			asyncBiomeSearch = builder.comment(desc).define("asyncBiomeSearch", true);
 
 			desc = "The maximum amount of time in milliseconds that a search may spend on the server thread during a single tick. Sampling a location can be expensive, so this caps how much of each tick a search is allowed to consume. Lower values keep the game responsive while a search is running, higher values complete searches sooner.";
 			maxSearchTimePerTick = builder.comment(desc).defineInRange("maxSearchTimePerTick", 10, 1, 50);

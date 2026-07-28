@@ -1,8 +1,10 @@
 package com.chaosthedude.explorerscompass.network;
 
 import com.chaosthedude.explorerscompass.ExplorersCompass;
+import com.chaosthedude.explorerscompass.worker.SearchExecutor;
 
 import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod.EventBusSubscriber;
 
@@ -19,6 +21,16 @@ public class ServerEventHandler {
 			// it had sampled its way to the configured limits
 			ExplorersCompass.explorersCompass.forgetPlayer(event.getEntity().getUUID());
 		}
+	}
+
+	@SubscribeEvent
+	public static void onServerStopping(ServerStoppingEvent event) {
+		// A biome search runs on a thread of its own, which would otherwise go on sampling a world
+		// that is no longer there. Stopping the searches first is what lets those threads notice.
+		if (ExplorersCompass.explorersCompass != null) {
+			ExplorersCompass.explorersCompass.forgetAllPlayers();
+		}
+		SearchExecutor.shutdown();
 	}
 
 }

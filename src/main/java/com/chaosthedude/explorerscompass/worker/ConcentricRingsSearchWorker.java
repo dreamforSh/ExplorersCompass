@@ -28,12 +28,18 @@ public class ConcentricRingsSearchWorker extends StructureSearchWorker<Concentri
 	}
 
 	@Override
-	public boolean hasWork() {
+	protected boolean hasMoreToSample() {
 		// Every location is known up front and the list is already limited to the configured radius, so
-		// the only radius left to respect is the one the manager narrows this worker down to once
-		// another has located something nearer. The locations are sorted by distance, so the one
-		// sampled last is how far this worker has covered.
-		return !finished && samples < maxSamples && getRadius() < getRadiusLimit() && (potentialChunks == null || chunkIndex < potentialChunks.size());
+		// the only radius left to respect is the one the manager sets. The locations are sorted by
+		// distance, so the one sampled last is how far this worker has covered.
+		return !finished && samples < maxSamples && getRadius() < getEffectiveRadiusLimit() && (potentialChunks == null || chunkIndex < potentialChunks.size());
+	}
+
+	@Override
+	protected boolean isExhausted() {
+		// Once the last of the locations this placement can generate at has been sampled there is
+		// nothing a further turn could add
+		return super.isExhausted() || (potentialChunks != null && chunkIndex >= potentialChunks.size());
 	}
 
 	@Override
@@ -64,10 +70,11 @@ public class ConcentricRingsSearchWorker extends StructureSearchWorker<Concentri
 		}
 
 		if (!finished) {
-			fail();
+			endOfWork();
 		}
 
-		return false;
+		// Handing back can widen what this worker may search, in which case it carries straight on
+		return hasWork();
 	}
 
 	/**

@@ -79,10 +79,11 @@ public class GenericSearchWorker extends StructureSearchWorker<StructurePlacemen
 		}
 
 		if (!finished) {
-			fail();
+			endOfWork();
 		}
 
-		return false;
+		// Handing back can widen what this worker may search, in which case it carries straight on
+		return hasWork();
 	}
 
 	/**
