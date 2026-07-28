@@ -29,8 +29,8 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> extend
 	protected List<Structure> structureSet;
 	protected long seed;
 
-	public StructureSearchWorker(ServerLevel level, Player player, ItemStack stack, BlockPos startPos, T placement, List<Structure> structureSet, List<BlockPos> prevPos, boolean isGroup, boolean ignoreNearStart, String managerId) {
-		super(level, player, stack, startPos, prevPos, isGroup, ignoreNearStart, ConfigHandler.GENERAL.maxSamples.get(), managerId);
+	public StructureSearchWorker(ServerLevel level, Player player, ItemStack stack, BlockPos startPos, T placement, List<Structure> structureSet, List<BlockPos> prevPos, boolean isGroup, boolean ignoreNearStart, SearchWorkerManager manager) {
+		super(level, player, stack, startPos, prevPos, isGroup, ignoreNearStart, ConfigHandler.GENERAL.maxSamples.get(), manager);
 		this.structureSet = structureSet;
 		this.placement = placement;
 
@@ -52,6 +52,16 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> extend
 			return null;
 		}
 
+		// Every structure in a chunk is reported at the position the placement gives for that chunk,
+		// and a start always belongs to the chunk it was read from, so where this chunk would answer
+		// with is known before anything has been read for it. A location an earlier search already
+		// found is therefore passed over without asking whether a structure is present, which on that
+		// path can read the chunk from storage and run structure generation to answer.
+		final BlockPos locatePos = placement.getLocatePos(chunkPos);
+		if (shouldIgnore(locatePos)) {
+			return null;
+		}
+
 		ChunkAccess chunkAccess = null;
 		SectionPos sectionPos = null;
 		for (Structure structure : structureSet) {
@@ -61,12 +71,8 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> extend
 					continue;
 				}
 				if (result == StructureCheckResult.START_PRESENT) {
-					BlockPos pos = placement.getLocatePos(chunkPos);
-					if (!shouldIgnore(pos)) {
-						// The start itself was not loaded on this path, so the height is unknown
-						return Pair.of(new BlockPos(pos.getX(), ExplorersCompassItem.UNKNOWN_Y, pos.getZ()), structure);
-					}
-					continue;
+					// The start itself was not loaded on this path, so the height is unknown
+					return Pair.of(new BlockPos(locatePos.getX(), ExplorersCompassItem.UNKNOWN_Y, locatePos.getZ()), structure);
 				}
 
 				chunkAccess = level.getChunk(chunkPos.x, chunkPos.z, ChunkStatus.STRUCTURE_STARTS);
@@ -75,11 +81,8 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> extend
 
 			StructureStart structureStart = level.structureManager().getStartForStructure(sectionPos, structure, chunkAccess);
 			if (structureStart != null && structureStart.isValid()) {
-				BlockPos pos = placement.getLocatePos(structureStart.getChunkPos());
-				if (!shouldIgnore(pos)) {
-					// The loaded start knows where it generates, so record its height as well
-					return Pair.of(new BlockPos(pos.getX(), structureStart.getBoundingBox().getCenter().getY(), pos.getZ()), structure);
-				}
+				// The loaded start knows where it generates, so record its height as well
+				return Pair.of(new BlockPos(locatePos.getX(), structureStart.getBoundingBox().getCenter().getY(), locatePos.getZ()), structure);
 			}
 		}
 

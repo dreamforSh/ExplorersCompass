@@ -29,6 +29,7 @@ public class ConfigHandler {
 		public final ForgeConfigSpec.IntValue maxBiomeSamples;
 		public final ForgeConfigSpec.IntValue biomeSampleSpacing;
 		public final ForgeConfigSpec.IntValue biomeVerticalSampleSpacing;
+		public final ForgeConfigSpec.IntValue biomeDepthSampleInterval;
 		public final ForgeConfigSpec.IntValue maxSearchTimePerTick;
 		public final ForgeConfigSpec.IntValue searchRequestCooldownMillis;
 		public final ForgeConfigSpec.IntValue maxBookmarks;
@@ -66,8 +67,11 @@ public class ConfigHandler {
 			desc = "How far apart in blocks the locations sampled by a biome search are. Lower values make the search less likely to step over a small biome entirely, higher values let it cover the same area in fewer samples.";
 			biomeSampleSpacing = builder.comment(desc).defineInRange("biomeSampleSpacing", 32, 4, 512);
 
-			desc = "How far apart in blocks the heights sampled by a biome search are. Sampling the whole height of a dimension is what makes the biomes that fill the caves findable from the surface, and costs a search as many samples per location as there are heights to sample. Set to 0 to sample only the height the search was started at, which searches several times faster but only finds the biomes reaching it.";
+			desc = "How far apart in blocks the heights sampled by a biome search are. Sampling the whole height of a dimension is what makes the biomes that fill the caves findable from the surface. Set to 0 to sample only the height the search was started at, which searches several times faster but only finds the biomes reaching it.";
 			biomeVerticalSampleSpacing = builder.comment(desc).defineInRange("biomeVerticalSampleSpacing", 64, 0, 512);
+
+			desc = "How many locations apart, along each axis, a biome search looks at the heights other than the one it was started at. The height a search starts at is sampled everywhere, since that is where the biome being looked for usually is; the rest of the dimension is sampled on a coarser grid, since a biome that fills the caves covers far more ground than the spacing between two locations. Raising this searches faster but can step over a small cave biome, and 1 samples every height at every location.";
+			biomeDepthSampleInterval = builder.comment(desc).defineInRange("biomeDepthSampleInterval", 4, 1, 64);
 
 			desc = "The maximum amount of time in milliseconds that a search may spend on the server thread during a single tick. Sampling a location can be expensive, so this caps how much of each tick a search is allowed to consume. Lower values keep the game responsive while a search is running, higher values complete searches sooner.";
 			maxSearchTimePerTick = builder.comment(desc).defineInRange("maxSearchTimePerTick", 10, 1, 50);

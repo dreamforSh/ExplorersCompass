@@ -25,8 +25,8 @@ public class GenericSearchWorker extends StructureSearchWorker<StructurePlacemen
 	private int startChunkX;
 	private int startChunkZ;
 
-	public GenericSearchWorker(ServerLevel level, Player player, ItemStack stack, BlockPos startPos, StructurePlacement placement, List<Structure> structureSet, List<BlockPos> prevPos, boolean isGroup, boolean ignoreNearStart, String managerId) {
-		super(level, player, stack, startPos, placement, structureSet, prevPos, isGroup, ignoreNearStart, managerId);
+	public GenericSearchWorker(ServerLevel level, Player player, ItemStack stack, BlockPos startPos, StructurePlacement placement, List<Structure> structureSet, List<BlockPos> prevPos, boolean isGroup, boolean ignoreNearStart, SearchWorkerManager manager) {
+		super(level, player, stack, startPos, placement, structureSet, prevPos, isGroup, ignoreNearStart, manager);
 		startChunkX = SectionPos.blockToSectionCoord(startPos.getX());
 		startChunkZ = SectionPos.blockToSectionCoord(startPos.getZ());
 		chunkX = startChunkX;

@@ -29,6 +29,7 @@ public abstract class SearchWorker implements WorldWorkerManager.IWorker {
 	// structure and searching again does not just point at the one being stood in.
 	private static final int SAME_LOCATION_DISTANCE = 32;
 
+	protected final SearchWorkerManager manager;
 	protected String managerId;
 	protected ServerLevel level;
 	protected Player player;
@@ -40,7 +41,6 @@ public abstract class SearchWorker implements WorldWorkerManager.IWorker {
 	protected boolean ignoreNearStart;
 	protected int samples;
 	protected boolean finished;
-	protected int lastRadiusThreshold;
 
 	// Snapshots of the limits this search runs under. The sampling loop reads them for every
 	// location, and a config lookup walks the config tree on every call, which is far too slow for
@@ -49,10 +49,15 @@ public abstract class SearchWorker implements WorldWorkerManager.IWorker {
 	protected final int maxSamples;
 	private final int maxSearchTimePerTick;
 
+	// How far this worker is allowed to search. It starts out as the configured maximum and is
+	// narrowed down by the manager once something has been located, since a worker that has covered
+	// that far can no longer improve on it.
+	private int radiusLimit;
+
 	// When this worker started working during the current tick, or -1 if it is not currently working
 	private long sliceStartTime;
 
-	public SearchWorker(ServerLevel level, Player player, ItemStack stack, BlockPos startPos, List<BlockPos> prevPos, boolean isGroup, boolean ignoreNearStart, int maxSamples, String managerId) {
+	public SearchWorker(ServerLevel level, Player player, ItemStack stack, BlockPos startPos, List<BlockPos> prevPos, boolean isGroup, boolean ignoreNearStart, int maxSamples, SearchWorkerManager manager) {
 		this.level = level;
 		this.player = player;
 		this.stack = stack;
@@ -61,7 +66,8 @@ public abstract class SearchWorker implements WorldWorkerManager.IWorker {
 		this.isGroup = isGroup;
 		this.ignoreNearStart = ignoreNearStart;
 		this.maxSamples = maxSamples;
-		this.managerId = managerId;
+		this.manager = manager;
+		managerId = manager.getId();
 
 		currentPos = startPos;
 		samples = 0;
@@ -69,25 +75,37 @@ public abstract class SearchWorker implements WorldWorkerManager.IWorker {
 
 		maxRadius = ConfigHandler.GENERAL.maxRadius.get();
 		maxSearchTimePerTick = ConfigHandler.GENERAL.maxSearchTimePerTick.get();
+		radiusLimit = maxRadius;
 	}
 
 	public void start() {
-		if (!stack.isEmpty() && stack.getItem() == ExplorersCompass.explorersCompass) {
-			// A worker with nothing to do is dropped by Forge without ever being called, so a search
-			// that cannot sample anything at all has to report that here rather than leaving the
-			// compass searching for a result that will never arrive
-			if (maxRadius > 0 && hasWork()) {
-				ExplorersCompass.LOGGER.info("SearchWorkerManager " + managerId + ": " + getName() + " starting with " + (shouldLogRadius() ? maxRadius + " max radius, " : "") + maxSamples + " max samples");
-				WorldWorkerManager.addWorker(this);
-			} else {
-				fail();
-			}
+		// A worker with nothing to do is dropped by Forge without ever being called, so one that
+		// cannot sample anything at all has to hand straight back to the manager rather than leaving
+		// the search waiting for a result that will never arrive
+		if (!stack.isEmpty() && stack.getItem() == ExplorersCompass.explorersCompass && hasWork()) {
+			ExplorersCompass.LOGGER.info("SearchWorkerManager " + managerId + ": " + getName() + " starting with " + (shouldLogRadius() ? radiusLimit + " max radius, " : "") + maxSamples + " max samples");
+			WorldWorkerManager.addWorker(this);
+		} else {
+			fail();
 		}
+	}
+
+	/**
+	 * Cuts this worker down to the given radius. Called by the manager once another worker has
+	 * located something, since anything this one turns up beyond that distance cannot be the answer.
+	 */
+	void setRadiusLimit(int limit) {
+		radiusLimit = Math.min(radiusLimit, limit);
+	}
+
+	/** How far this worker is allowed to search, which is at most the configured maximum. */
+	protected int getRadiusLimit() {
+		return radiusLimit;
 	}
 
 	@Override
 	public boolean hasWork() {
-		return !finished && getRadius() < maxRadius && samples < maxSamples;
+		return !finished && getRadius() < radiusLimit && samples < maxSamples;
 	}
 
 	@Override
@@ -172,26 +190,45 @@ public abstract class SearchWorker implements WorldWorkerManager.IWorker {
 		return distanceSqr <= (long) maxRadius * maxRadius;
 	}
 
+	/**
+	 * Hands what this worker located to the manager. It is not the answer yet: a worker that has not
+	 * run is searching a different placement and may hold a nearer one.
+	 */
 	protected void succeed(BlockPos pos, ResourceLocation key) {
-		ExplorersCompass.LOGGER.info("SearchWorkerManager " + managerId + ": " + getName() + " succeeded with " + (shouldLogRadius() ? getRadius() + " radius, " : "") + samples + " samples, " + prevPos.size() + " previously located");
+		ExplorersCompass.LOGGER.info("SearchWorkerManager " + managerId + ": " + getName() + " located " + key + " with " + (shouldLogRadius() ? getRadius() + " radius, " : "") + samples + " samples, " + prevPos.size() + " previously located");
+		// Mark this worker as finished before handing off: the manager starts the next worker of this
+		// search, and this one must not be considered live anymore if anything there goes wrong
 		finished = true;
-		// Remember this location, so that searching again looks for a different instance
+		manager.onLocated(this, pos, key, samples);
+	}
+
+	/** Tells the manager this worker has nothing left to search. */
+	protected void fail() {
+		ExplorersCompass.LOGGER.info("SearchWorkerManager " + managerId + ": " + getName() + " located nothing with " + (shouldLogRadius() ? getRadius() + " radius, " : "") + samples + " samples");
+		finished = true;
+		manager.onExhausted(this, roundRadius(getRadius(), RADIUS_REPORT_INTERVAL), samples);
+	}
+
+	/**
+	 * Puts the location the whole search settled on onto the compass. Only ever called on the worker
+	 * that located it, and only once every other worker has finished.
+	 */
+	void reportLocated(BlockPos pos, ResourceLocation key, int totalSamples) {
+		// Remember this location, so that searching again looks for a different instance. Only the
+		// location the search answers with is remembered: one a worker turned up and another beat is
+		// not somewhere the compass ever pointed.
 		prevPos.add(pos);
 		if (!stack.isEmpty() && stack.getItem() == ExplorersCompass.explorersCompass) {
-			((ExplorersCompassItem) stack.getItem()).succeed(player, stack, key, isGroup, pos.getX(), pos.getZ(), pos.getY(), level.dimension().location(), prevPos, samples, ConfigHandler.GENERAL.displayCoordinates.get());
+			((ExplorersCompassItem) stack.getItem()).succeed(player, stack, key, isGroup, pos.getX(), pos.getZ(), pos.getY(), level.dimension().location(), prevPos, totalSamples, ConfigHandler.GENERAL.displayCoordinates.get());
 		} else {
 			ExplorersCompass.LOGGER.error("SearchWorkerManager " + managerId + ": " + getName() + " found invalid compass after successful search");
 		}
 	}
 
-	protected void fail() {
-		ExplorersCompass.LOGGER.info("SearchWorkerManager " + managerId + ": " + getName() + " failed with " + (shouldLogRadius() ? getRadius() + " radius, " : "") + samples + " samples");
-		// Mark this worker as finished before handing off to the compass: notifying it starts the next
-		// worker for this search, and this one must not be considered live anymore if anything there
-		// goes wrong.
-		finished = true;
+	/** Tells the compass the whole search located nothing. */
+	void reportNotFound(int radius, int totalSamples) {
 		if (!stack.isEmpty() && stack.getItem() == ExplorersCompass.explorersCompass) {
-			((ExplorersCompassItem) stack.getItem()).fail(player, stack, roundRadius(getRadius(), RADIUS_REPORT_INTERVAL), samples);
+			((ExplorersCompassItem) stack.getItem()).fail(player, stack, radius, totalSamples);
 		} else {
 			ExplorersCompass.LOGGER.error("SearchWorkerManager " + managerId + ": " + getName() + " found invalid compass after failed search");
 		}
@@ -210,13 +247,19 @@ public abstract class SearchWorker implements WorldWorkerManager.IWorker {
 		}
 	}
 
+	/**
+	 * Keeps the radius the compass reports in step with how far the search has looked. The threshold
+	 * it is measured against belongs to the manager rather than to this worker, so that the readout
+	 * only ever grows: the workers of one search each start over from where the player is standing,
+	 * and a radius dropping back to nothing partway through would read as the search having
+	 * restarted.
+	 */
 	protected void updateSearchRadius() {
-		int radius = getRadius();
-		if (radius > RADIUS_REPORT_INTERVAL && radius / RADIUS_REPORT_INTERVAL > lastRadiusThreshold) {
+		final int radius = getRadius();
+		if (radius > RADIUS_REPORT_INTERVAL && manager.tryReportRadius(radius / RADIUS_REPORT_INTERVAL)) {
 			if (!stack.isEmpty() && stack.getItem() == ExplorersCompass.explorersCompass) {
 				((ExplorersCompassItem) stack.getItem()).setSearchRadius(stack, roundRadius(radius, RADIUS_REPORT_INTERVAL), player);
 			}
-			lastRadiusThreshold = radius / RADIUS_REPORT_INTERVAL;
 		}
 	}
 

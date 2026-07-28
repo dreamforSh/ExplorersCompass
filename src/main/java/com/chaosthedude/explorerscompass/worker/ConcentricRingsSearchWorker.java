@@ -21,8 +21,8 @@ public class ConcentricRingsSearchWorker extends StructureSearchWorker<Concentri
 	private List<ChunkPos> potentialChunks;
 	private int chunkIndex;
 
-	public ConcentricRingsSearchWorker(ServerLevel level, Player player, ItemStack stack, BlockPos startPos, ConcentricRingsStructurePlacement placement, List<Structure> structureSet, List<BlockPos> prevPos, boolean isGroup, boolean ignoreNearStart, String managerId) {
-		super(level, player, stack, startPos, placement, structureSet, prevPos, isGroup, ignoreNearStart, managerId);
+	public ConcentricRingsSearchWorker(ServerLevel level, Player player, ItemStack stack, BlockPos startPos, ConcentricRingsStructurePlacement placement, List<Structure> structureSet, List<BlockPos> prevPos, boolean isGroup, boolean ignoreNearStart, SearchWorkerManager manager) {
+		super(level, player, stack, startPos, placement, structureSet, prevPos, isGroup, ignoreNearStart, manager);
 
 		chunkIndex = 0;
 	}
@@ -30,8 +30,10 @@ public class ConcentricRingsSearchWorker extends StructureSearchWorker<Concentri
 	@Override
 	public boolean hasWork() {
 		// Every location is known up front and the list is already limited to the configured radius, so
-		// there is nothing for a radius bound to do here
-		return !finished && samples < maxSamples && (potentialChunks == null || chunkIndex < potentialChunks.size());
+		// the only radius left to respect is the one the manager narrows this worker down to once
+		// another has located something nearer. The locations are sorted by distance, so the one
+		// sampled last is how far this worker has covered.
+		return !finished && samples < maxSamples && getRadius() < getRadiusLimit() && (potentialChunks == null || chunkIndex < potentialChunks.size());
 	}
 
 	@Override

@@ -352,14 +352,11 @@ public class ExplorersCompassItem extends Item {
 		notifySearchResult(player, Component.translatable("string.explorerscompass.found").append(Component.literal(displayCoordinates ? ": " + name + " (" + coordinates + ")" : ": " + name)));
 	}
 
+	/** Reports that the search is over and located nothing. */
 	public void fail(Player player, ItemStack stack, int radius, int samples) {
-		final SearchWorkerManager workerManager = getWorkerManager(player);
-		workerManager.pop();
-		boolean started = workerManager.start();
-		if (!started) {
-			setNotFound(stack, radius, samples);
-			notifySearchResult(player, Component.translatable("string.explorerscompass.notFound").append(Component.literal(": " + getSearchTarget(stack).getBasicName(getTargetKey(stack)))));
-		}
+		setNotFound(stack, radius, samples);
+		getWorkerManager(player).clear();
+		notifySearchResult(player, Component.translatable("string.explorerscompass.notFound").append(Component.literal(": " + getSearchTarget(stack).getBasicName(getTargetKey(stack)))));
 	}
 
 	/**
