@@ -6,7 +6,6 @@ import com.chaosthedude.explorerscompass.ExplorersCompass;
 import com.chaosthedude.explorerscompass.items.ExplorersCompassItem;
 import com.chaosthedude.explorerscompass.util.ItemUtils;
 
-import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
@@ -15,27 +14,11 @@ import net.minecraftforge.network.NetworkEvent;
 /** Asks for another instance of whatever the compass has already located. */
 public class CompassSearchForNextPacket {
 
-	private int x;
-	private int y;
-	private int z;
+	public CompassSearchForNextPacket() {}
 
-	public CompassSearchForNextPacket(BlockPos pos) {
-		this.x = pos.getX();
-		this.y = pos.getY();
-		this.z = pos.getZ();
-	}
+	public CompassSearchForNextPacket(FriendlyByteBuf buf) {}
 
-	public CompassSearchForNextPacket(FriendlyByteBuf buf) {
-		x = buf.readInt();
-		y = buf.readInt();
-		z = buf.readInt();
-	}
-
-	public void toBytes(FriendlyByteBuf buf) {
-		buf.writeInt(x);
-		buf.writeInt(y);
-		buf.writeInt(z);
-	}
+	public void toBytes(FriendlyByteBuf buf) {}
 
 	public void handle(Supplier<NetworkEvent.Context> ctx) {
 		ctx.get().enqueueWork(() -> {
@@ -48,7 +31,9 @@ public class CompassSearchForNextPacket {
 			if (!stack.isEmpty()) {
 				final ExplorersCompassItem explorersCompass = (ExplorersCompassItem) stack.getItem();
 				try {
-					explorersCompass.searchForNext(player.getLevel(), player, new BlockPos(x, y, z), stack);
+					// Where the search starts is taken from the player rather than from the packet, so that
+					// a modified client cannot search around coordinates it is nowhere near
+					explorersCompass.searchForNext(player.getLevel(), player, player.blockPosition(), stack);
 				} catch (Throwable t) {
 					// This runs on the server thread, so an exception here would take down the server
 					ExplorersCompass.LOGGER.error("Failed to start a search for a further instance", t);

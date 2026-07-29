@@ -186,6 +186,21 @@ public class StructureUtils {
 	}
 
 	/**
+	 * Drops the cached structure data. Called when the server stops: what is cached here is derived
+	 * from that server's registries, and holding on to it would keep the whole server alive for as
+	 * long as the game runs.
+	 */
+	public static void invalidateCache() {
+		cachedServer = null;
+		cachedSyncBlacklist = null;
+		cachedAllowedStructureKeys = null;
+		cachedDimensionKeys = null;
+		cachedStructureKeysToTypeKeys = null;
+		cachedBlacklist = null;
+		cachedBlacklistPatterns = null;
+	}
+
+	/**
 	 * Identifies the current contents of the cached structure data. A client that was already sent
 	 * data of this version has the current list and does not need it re-sent.
 	 */

@@ -6,9 +6,6 @@ import com.mojang.datafixers.util.Pair;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.levelgen.structure.placement.RandomSpreadStructurePlacement;
@@ -16,12 +13,12 @@ import net.minecraft.world.level.levelgen.structure.placement.RandomSpreadStruct
 public class RandomSpreadSearchWorker extends StructureSearchWorker<RandomSpreadStructurePlacement> {
 
 	private final RingWalker ring = new RingWalker();
-	private int spacing;
-	private int startSectionPosX;
-	private int startSectionPosZ;
+	private final int spacing;
+	private final int startSectionPosX;
+	private final int startSectionPosZ;
 
-	public RandomSpreadSearchWorker(ServerLevel level, Player player, ItemStack stack, BlockPos startPos, RandomSpreadStructurePlacement placement, List<Structure> structureSet, List<BlockPos> prevPos, boolean isGroup, boolean ignoreNearStart, SearchWorkerManager manager) {
-		super(level, player, stack, startPos, placement, structureSet, prevPos, isGroup, ignoreNearStart, manager);
+	public RandomSpreadSearchWorker(SearchContext context, RandomSpreadStructurePlacement placement, List<Structure> structureSet) {
+		super(context, placement, structureSet);
 
 		spacing = placement.spacing();
 		startSectionPosX = SectionPos.blockToSectionCoord(startPos.getX());
@@ -30,35 +27,23 @@ public class RandomSpreadSearchWorker extends StructureSearchWorker<RandomSpread
 
 	@Override
 	protected boolean doSample() {
-		if (hasWork()) {
-			int sampleX = startSectionPosX + (spacing * ring.getX());
-			int sampleZ = startSectionPosZ + (spacing * ring.getZ());
+		final int sampleX = startSectionPosX + (spacing * ring.getX());
+		final int sampleZ = startSectionPosZ + (spacing * ring.getZ());
 
-			ChunkPos chunkPos = placement.getPotentialStructureChunk(seed, sampleX, sampleZ);
-			// The corners of a ring reach past its edges, so part of the outer rings lies beyond the
-			// configured radius
-			if (isWithinMaxRadius(chunkPos)) {
-				currentPos = chunkPos.getMiddleBlockPosition(0);
+		final ChunkPos chunkPos = placement.getPotentialStructureChunk(seed, sampleX, sampleZ);
+		// The corners of a ring reach past its edges, so part of the outer rings lies beyond the
+		// configured radius, and beyond anything already located
+		if (isWorthSampling(chunkPos)) {
+			currentPos = chunkPos.getMiddleBlockPosition(0);
 
-				Pair<BlockPos, Structure> pair = getStructureGeneratingAt(chunkPos);
-				samples++;
-				if (pair != null) {
-					succeed(pair.getFirst(), pair.getSecond());
-				}
+			final Pair<BlockPos, Structure> pair = getStructureGeneratingAt(chunkPos);
+			samples++;
+			if (pair != null) {
+				found(pair.getFirst(), pair.getSecond());
 			}
-
-			ring.advance();
 		}
 
-		if (hasWork()) {
-			return true;
-		}
-
-		if (!finished) {
-			endOfWork();
-		}
-
-		// Handing back can widen what this worker may search, in which case it carries straight on
+		ring.advance();
 		return hasWork();
 	}
 

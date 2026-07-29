@@ -26,6 +26,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.event.TickEvent.ClientTickEvent;
 import net.minecraftforge.event.TickEvent.Phase;
 import net.minecraftforge.event.TickEvent.RenderTickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -95,6 +96,7 @@ public class ClientEventHandler {
 	// so by picking itself out for a moment afterwards
 	private CompassState lastState;
 	private long announceUntil;
+	private HudData hudData;
 
 	/** One labelled value in the panel of compass information. */
 	private static class HudRow {
@@ -111,6 +113,83 @@ public class ClientEventHandler {
 
 	}
 
+	/** Everything the HUD can resolve once per client tick rather than once per rendered frame. */
+	private static class HudData {
+
+		private final CompassState state;
+		private final String headline;
+		private final String target;
+		private final int dotColor;
+		private final float progress;
+		private final List<HudRow> rows;
+		private final boolean inFoundDimension;
+		private final boolean displayCoordinates;
+		private final int targetX;
+		private final int targetY;
+		private final int targetZ;
+		private final List<BlockPos> previousLocations;
+
+		private HudData(CompassState state, String headline, String target, int dotColor,
+				float progress, List<HudRow> rows, boolean inFoundDimension,
+				boolean displayCoordinates, int targetX, int targetY, int targetZ,
+				List<BlockPos> previousLocations) {
+			this.state = state;
+			this.headline = headline;
+			this.target = target;
+			this.dotColor = dotColor;
+			this.progress = progress;
+			this.rows = rows;
+			this.inFoundDimension = inFoundDimension;
+			this.displayCoordinates = displayCoordinates;
+			this.targetX = targetX;
+			this.targetY = targetY;
+			this.targetZ = targetZ;
+			this.previousLocations = previousLocations;
+		}
+
+	}
+
+	@SubscribeEvent
+	public void onClientTick(ClientTickEvent event) {
+		if (event.phase != Phase.END) {
+			return;
+		}
+		if (mc.player == null || mc.level == null) {
+			hudData = null;
+			lastState = null;
+			lastPrevPosTag = null;
+			cachedPrevPos = List.of();
+			return;
+		}
+
+		final Player player = mc.player;
+		final ItemStack stack = ItemUtils.getHeldItem(player, ExplorersCompass.explorersCompass);
+		if (stack == null || !(stack.getItem() instanceof ExplorersCompassItem compass)) {
+			hudData = null;
+			return;
+		}
+
+		final CompassState state = compass.getState(stack);
+		if (state != lastState) {
+			if (lastState == CompassState.SEARCHING
+					&& (state == CompassState.FOUND || state == CompassState.NOT_FOUND)) {
+				announceUntil = Util.getMillis() + ANNOUNCE_MILLIS;
+			}
+			lastState = state;
+		}
+		if (state == null || state == CompassState.INACTIVE) {
+			hudData = null;
+			return;
+		}
+
+		if (state == CompassState.SEARCHING) {
+			XaeroMinimapIntegration.reset();
+		} else if (state == CompassState.FOUND && isInFoundDimension(player, compass, stack)) {
+			XaeroMinimapIntegration.createWaypointForLocation(player, compass, stack);
+		}
+		hudData = createHudData(player, compass, stack, state);
+	}
+
 	@SubscribeEvent
 	public void onRenderTick(RenderTickEvent event) {
 		if (event.phase != Phase.END || mc.player == null || mc.level == null || mc.options.hideGui || mc.options.renderDebug) {
@@ -121,38 +200,19 @@ public class ClientEventHandler {
 		}
 
 		final Player player = mc.player;
-		final ItemStack stack = ItemUtils.getHeldItem(player, ExplorersCompass.explorersCompass);
-		if (stack == null || !(stack.getItem() instanceof ExplorersCompassItem)) {
-			return;
-		}
-
-		final ExplorersCompassItem compass = (ExplorersCompassItem) stack.getItem();
-		final CompassState state = compass.getState(stack);
-		if (state != lastState) {
-			// Only a search ending is worth announcing: putting the compass away and taking it out again
-			// runs through the same states without anything having happened
-			if (lastState == CompassState.SEARCHING && (state == CompassState.FOUND || state == CompassState.NOT_FOUND)) {
-				announceUntil = Util.getMillis() + ANNOUNCE_MILLIS;
-			}
-			lastState = state;
-		}
-		if (state == null || state == CompassState.INACTIVE) {
+		final HudData data = hudData;
+		if (data == null) {
 			return;
 		}
 
 		final PoseStack poseStack = new PoseStack();
-		if (state == CompassState.SEARCHING) {
-			// Let the next result create a waypoint, even if it is the same location as the last one
-			XaeroMinimapIntegration.reset();
-		} else if (state == CompassState.FOUND && isInFoundDimension(player, compass, stack)) {
-			// A waypoint in another dimension's coordinates would point at the wrong place
-			XaeroMinimapIntegration.createWaypointForLocation(player, compass, stack);
+		if (data.state == CompassState.FOUND && data.inFoundDimension) {
 			if (ConfigHandler.CLIENT.showDirectionBar.get()) {
-				renderDirectionBar(poseStack, player, compass, stack);
+				renderDirectionBar(poseStack, player, data);
 			}
 		}
 
-		renderInfoPanel(poseStack, player, compass, stack, state);
+		renderInfoPanel(poseStack, data);
 	}
 
 	/**
@@ -160,67 +220,20 @@ public class ClientEventHandler {
 	 * and what it is aimed at, then a column of labelled values under it. Reading a value takes
 	 * finding its label on the same line, rather than counting lines between two columns of text.
 	 */
-	private void renderInfoPanel(PoseStack poseStack, Player player, ExplorersCompassItem compass, ItemStack stack, CompassState state) {
-		final List<HudRow> rows = new ArrayList<HudRow>();
-		final String headline;
+	private void renderInfoPanel(PoseStack poseStack, HudData data) {
 		final int dotColor;
-		String target;
-		float progress = -1.0F;
-
-		if (state == CompassState.SEARCHING) {
-			headline = I18n.get("string.explorerscompass.searching");
+		if (data.state == CompassState.SEARCHING) {
 			// Fading the marker in and out is what says the search is still running, on a readout where
 			// only the radius changes and only every so often
 			final float pulse = (Mth.sin(Util.getMillis() / 200.0F) + 1.0F) / 2.0F;
 			dotColor = (GuiTheme.ACCENT & 0xFFFFFF) | ((int) (110 + 145 * pulse) << 24);
-			target = searchTargetName(compass, stack);
-
-			final int radius = compass.getSearchRadius(stack);
-			final int maxRadius = ConfigHandler.GENERAL.maxRadius.get();
-			// Only claim to be a fraction of the whole while the search is still inside the radius it is
-			// allowed to reach: the search for a structure placed in rings can pass it
-			rows.add(new HudRow(I18n.get("string.explorerscompass.radius"), radius <= maxRadius && maxRadius > 0 ? String.format("%,d", radius) + " / " + String.format("%,d", maxRadius) : String.format("%,d", radius), GuiTheme.TEXT_PRIMARY));
-			if (maxRadius > 0) {
-				progress = (float) radius / maxRadius;
-			}
-		} else if (state == CompassState.FOUND) {
-			headline = I18n.get("string.explorerscompass.found");
-			target = compass.getSearchTarget(stack).getPrettyName(compass.getTargetKey(stack));
-			final boolean here = isInFoundDimension(player, compass, stack);
-			dotColor = here ? GuiTheme.TEXT_SUCCESS : GuiTheme.TEXT_WARNING;
-
-			if (!here) {
-				// The coordinates belong to another dimension, where the distance to them means nothing,
-				// so which dimension they are in takes their place
-				rows.add(new HudRow(I18n.get("string.explorerscompass.dimension"), StructureUtils.getDimensionName(compass.getFoundDimension(stack)), GuiTheme.TEXT_WARNING));
-			} else if (compass.shouldDisplayCoordinates(stack)) {
-				final int x = compass.getFoundStructureX(stack);
-				final int z = compass.getFoundStructureZ(stack);
-				final int y = compass.getFoundStructureY(stack);
-				rows.add(new HudRow(I18n.get("string.explorerscompass.coordinates"), y != ExplorersCompassItem.UNKNOWN_Y ? x + ", " + y + ", " + z : x + ", " + z, GuiTheme.TEXT_PRIMARY));
-				// Standing on the structure, the pointer spins and the direction it gives is worthless,
-				// so the distance is what has to say that there is nothing left to walk
-				final int distance = StructureUtils.getHorizontalDistanceToLocation(player, x, z);
-				rows.add(new HudRow(I18n.get("string.explorerscompass.distance"), String.format("%,d", distance) + " (" + compassDirection(player, x, z) + ")", distance <= ARRIVED_DISTANCE ? GuiTheme.TEXT_SUCCESS : GuiTheme.TEXT_PRIMARY));
-
-				final String previous = previousLocations(compass, stack);
-				if (!previous.isEmpty()) {
-					rows.add(new HudRow(I18n.get("string.explorerscompass.previousLocations"), previous, GuiTheme.TEXT_SECONDARY));
-				}
-			}
 		} else {
-			headline = I18n.get("string.explorerscompass.notFound");
-			dotColor = GuiTheme.TEXT_WARNING;
-			target = compass.getSearchTarget(stack).getPrettyName(compass.getTargetKey(stack));
-			rows.add(new HudRow(I18n.get("string.explorerscompass.radius"), String.format("%,d", compass.getSearchRadius(stack)), GuiTheme.TEXT_PRIMARY));
-			// A search can also end because it ran out of samples, in which case the radius alone is far
-			// below the configured maximum and looks like a premature stop
-			rows.add(new HudRow(I18n.get("string.explorerscompass.samples"), String.format("%,d", compass.getSamples(stack)), GuiTheme.TEXT_PRIMARY));
+			dotColor = data.dotColor;
 		}
 
 		int labelWidth = 0;
 		int valueWidth = 0;
-		for (HudRow row : rows) {
+		for (HudRow row : data.rows) {
 			labelWidth = Math.max(labelWidth, mc.font.width(row.label));
 			valueWidth = Math.max(valueWidth, mc.font.width(row.value));
 		}
@@ -231,11 +244,14 @@ public class ClientEventHandler {
 		final int screenWidth = mc.getWindow().getGuiScaledWidth();
 		final int maxHeadlineWidth = Math.max(80, screenWidth / 3);
 		final int maxContentWidth = Math.max(120, screenWidth / 2);
-		final int headlineFixedWidth = mc.font.width(DOT_GLYPH) + 4 + mc.font.width(headline) + 5;
-		target = RenderUtils.trimToWidth(target, maxHeadlineWidth - headlineFixedWidth);
+		final int headlineFixedWidth = mc.font.width(DOT_GLYPH) + 4
+				+ mc.font.width(data.headline) + 5;
+		final String target = RenderUtils.trimToWidth(data.target,
+				maxHeadlineWidth - headlineFixedWidth);
 
 		final int contentWidth = Math.min(maxContentWidth, Math.max(headlineFixedWidth + mc.font.width(target), labelWidth + HUD_LABEL_GAP + valueWidth));
-		final int contentHeight = HUD_ROW_HEIGHT + rows.size() * HUD_ROW_HEIGHT + (progress >= 0.0F ? HUD_PROGRESS_HEIGHT + 2 : 0);
+		final int contentHeight = HUD_ROW_HEIGHT + data.rows.size() * HUD_ROW_HEIGHT
+				+ (data.progress >= 0.0F ? HUD_PROGRESS_HEIGHT + 2 : 0);
 		final int panelLeft = ConfigHandler.CLIENT.overlaySide.get() == OverlaySide.LEFT ? HUD_MARGIN : screenWidth - HUD_MARGIN - contentWidth - HUD_PADDING * 2;
 		final int panelTop = HUD_MARGIN + ConfigHandler.CLIENT.overlayLineOffset.get() * 9;
 
@@ -254,27 +270,108 @@ public class ClientEventHandler {
 		final int textLeft = panelLeft + HUD_PADDING;
 		int y = panelTop + HUD_PADDING;
 		mc.font.drawShadow(poseStack, DOT_GLYPH, textLeft, y, dotColor);
-		mc.font.drawShadow(poseStack, headline, textLeft + mc.font.width(DOT_GLYPH) + 4, y, GuiTheme.TEXT_PRIMARY);
+		mc.font.drawShadow(poseStack, data.headline,
+				textLeft + mc.font.width(DOT_GLYPH) + 4, y, GuiTheme.TEXT_PRIMARY);
 		mc.font.drawShadow(poseStack, target, textLeft + headlineFixedWidth, y, GuiTheme.TEXT_SECONDARY);
 		y += HUD_ROW_HEIGHT;
 
-		for (HudRow row : rows) {
+		for (HudRow row : data.rows) {
 			mc.font.drawShadow(poseStack, row.label, textLeft, y, GuiTheme.TEXT_MUTED);
 			mc.font.drawShadow(poseStack, RenderUtils.trimToWidth(row.value, contentWidth - labelWidth - HUD_LABEL_GAP), textLeft + labelWidth + HUD_LABEL_GAP, y, row.color);
 			y += HUD_ROW_HEIGHT;
 		}
 
-		if (progress >= 0.0F) {
-			RenderUtils.drawProgressBar(textLeft, y + 1, textLeft + contentWidth, y + 1 + HUD_PROGRESS_HEIGHT, progress, background ? HUD_PROGRESS_BACKGROUND : HUD_PROGRESS_BACKGROUND_PLAIN, MARKER_COLOR);
+		if (data.progress >= 0.0F) {
+			RenderUtils.drawProgressBar(textLeft, y + 1, textLeft + contentWidth,
+					y + 1 + HUD_PROGRESS_HEIGHT, data.progress,
+					background ? HUD_PROGRESS_BACKGROUND : HUD_PROGRESS_BACKGROUND_PLAIN,
+					MARKER_COLOR);
 		}
+	}
+
+	private HudData createHudData(Player player, ExplorersCompassItem compass, ItemStack stack,
+			CompassState state) {
+		final List<HudRow> rows = new ArrayList<HudRow>();
+		final String headline;
+		final String target;
+		int dotColor = GuiTheme.TEXT_WARNING;
+		float progress = -1.0F;
+		boolean inFoundDimension = false;
+		boolean displayCoordinates = false;
+		int targetX = 0;
+		int targetY = ExplorersCompassItem.UNKNOWN_Y;
+		int targetZ = 0;
+		List<BlockPos> previousLocations = List.of();
+
+		if (state == CompassState.SEARCHING) {
+			headline = I18n.get("string.explorerscompass.searching");
+			target = searchTargetName(compass, stack);
+			final int radius = compass.getSearchRadius(stack);
+			final int maxRadius = ConfigHandler.GENERAL.maxRadius.get();
+			final String radiusText = radius <= maxRadius && maxRadius > 0
+					? String.format("%,d", radius) + " / " + String.format("%,d", maxRadius)
+					: String.format("%,d", radius);
+			rows.add(new HudRow(I18n.get("string.explorerscompass.radius"), radiusText,
+					GuiTheme.TEXT_PRIMARY));
+			if (maxRadius > 0) {
+				progress = (float) radius / maxRadius;
+			}
+		} else if (state == CompassState.FOUND) {
+			headline = I18n.get("string.explorerscompass.found");
+			target = compass.getSearchTarget(stack).getPrettyName(compass.getTargetKey(stack));
+			inFoundDimension = isInFoundDimension(player, compass, stack);
+			dotColor = inFoundDimension ? GuiTheme.TEXT_SUCCESS : GuiTheme.TEXT_WARNING;
+			targetX = compass.getFoundStructureX(stack);
+			targetY = compass.getFoundStructureY(stack);
+			targetZ = compass.getFoundStructureZ(stack);
+			displayCoordinates = compass.shouldDisplayCoordinates(stack);
+			previousLocations = List.copyOf(getPrevPosCached(compass, stack));
+
+			if (!inFoundDimension) {
+				rows.add(new HudRow(I18n.get("string.explorerscompass.dimension"),
+						StructureUtils.getDimensionName(compass.getFoundDimension(stack)),
+						GuiTheme.TEXT_WARNING));
+			} else if (displayCoordinates) {
+				final String coordinates = targetY != ExplorersCompassItem.UNKNOWN_Y
+						? targetX + ", " + targetY + ", " + targetZ
+						: targetX + ", " + targetZ;
+				rows.add(new HudRow(I18n.get("string.explorerscompass.coordinates"), coordinates,
+						GuiTheme.TEXT_PRIMARY));
+
+				final int distance = StructureUtils.getHorizontalDistanceToLocation(
+						player, targetX, targetZ);
+				rows.add(new HudRow(I18n.get("string.explorerscompass.distance"),
+						String.format("%,d", distance) + " ("
+								+ compassDirection(player, targetX, targetZ) + ")",
+						distance <= ARRIVED_DISTANCE
+								? GuiTheme.TEXT_SUCCESS : GuiTheme.TEXT_PRIMARY));
+
+				final String previous = previousLocations(previousLocations);
+				if (!previous.isEmpty()) {
+					rows.add(new HudRow(I18n.get("string.explorerscompass.previousLocations"),
+							previous, GuiTheme.TEXT_SECONDARY));
+				}
+			}
+		} else {
+			headline = I18n.get("string.explorerscompass.notFound");
+			target = compass.getSearchTarget(stack).getPrettyName(compass.getTargetKey(stack));
+			rows.add(new HudRow(I18n.get("string.explorerscompass.radius"),
+					String.format("%,d", compass.getSearchRadius(stack)),
+					GuiTheme.TEXT_PRIMARY));
+			rows.add(new HudRow(I18n.get("string.explorerscompass.samples"),
+					String.format("%,d", compass.getSamples(stack)), GuiTheme.TEXT_PRIMARY));
+		}
+
+		return new HudData(state, headline, target, dotColor, progress, List.copyOf(rows),
+				inFoundDimension, displayCoordinates, targetX, targetY, targetZ,
+				previousLocations);
 	}
 
 	/**
 	 * The locations found before the current one, most recent first, so that a player searching for
 	 * further instances can still see where the last ones were.
 	 */
-	private String previousLocations(ExplorersCompassItem compass, ItemStack stack) {
-		final List<BlockPos> prevPos = getPrevPosCached(compass, stack);
+	private String previousLocations(List<BlockPos> prevPos) {
 		// The last entry is the location the compass currently points at, already shown above
 		final int newest = prevPos.size() - 2;
 		final StringBuilder locations = new StringBuilder();
@@ -341,10 +438,10 @@ public class ClientEventHandler {
 	 * structure lies. Reading a direction off it takes a glance, where the pointer on the item has
 	 * to be studied and the coordinates have to be worked out.
 	 */
-	private void renderDirectionBar(PoseStack poseStack, Player player, ExplorersCompassItem compass, ItemStack stack) {
-		final int targetX = compass.getFoundStructureX(stack);
-		final int targetY = compass.getFoundStructureY(stack);
-		final int targetZ = compass.getFoundStructureZ(stack);
+	private void renderDirectionBar(PoseStack poseStack, Player player, HudData data) {
+		final int targetX = data.targetX;
+		final int targetY = data.targetY;
+		final int targetZ = data.targetZ;
 		final BarLayout bar = new BarLayout(mc.getWindow().getGuiScaledWidth(), player.getYRot());
 
 		if (bar.background) {
@@ -354,7 +451,7 @@ public class ClientEventHandler {
 		}
 
 		// Drawn first, so that the marks of the horizon and their names stay crisp over them
-		drawPreviousMarkers(player, compass, stack, bar);
+		drawPreviousMarkers(player, data.previousLocations, bar);
 		drawBarTicks(bar);
 		drawBarLabels(poseStack, bar);
 
@@ -381,7 +478,8 @@ public class ClientEventHandler {
 			drawEdgeArrow(bar, relative > 0.0D ? bar.right - 2 : bar.left + 1, relative > 0.0D, markerColor);
 		}
 
-		drawBarReadout(poseStack, player, compass, stack, bar.centerX, bar.bottom, targetX, targetY, targetZ, relative, inSpan, markerColor & 0xFFFFFF);
+		drawBarReadout(poseStack, player, data.displayCoordinates, bar.centerX, bar.bottom,
+				targetX, targetY, targetZ, relative, inSpan, markerColor & 0xFFFFFF);
 	}
 
 	/**
@@ -475,8 +573,7 @@ public class ClientEventHandler {
 	 * before the ends of the strip are faded, so that the structure being pointed at stays the one
 	 * mark that stands out.
 	 */
-	private void drawPreviousMarkers(Player player, ExplorersCompassItem compass, ItemStack stack, BarLayout bar) {
-		final List<BlockPos> prevPos = getPrevPosCached(compass, stack);
+	private void drawPreviousMarkers(Player player, List<BlockPos> prevPos, BarLayout bar) {
 		// The last entry is the location the strip already marks
 		int drawn = 0;
 		for (int i = prevPos.size() - 2; i >= 0 && drawn < MAX_PREVIOUS_MARKERS; i--) {
@@ -549,11 +646,13 @@ public class ClientEventHandler {
 	 * What is left to travel, under the strip: the distance, how far up or down the structure sits
 	 * when that is known, and how far there is left to turn while it lies off the strip altogether.
 	 */
-	private void drawBarReadout(PoseStack poseStack, Player player, ExplorersCompassItem compass, ItemStack stack, int centerX, int bottom, int targetX, int targetY, int targetZ, double relative, boolean inSpan, int color) {
+	private void drawBarReadout(PoseStack poseStack, Player player,
+			boolean displayCoordinates, int centerX, int bottom, int targetX, int targetY,
+			int targetZ, double relative, boolean inSpan, int color) {
 		final StringBuilder readout = new StringBuilder();
 		// The distance is as much of a coordinate as the coordinates themselves, so it is held back
 		// wherever they are. Which way to turn is not: that is what the strip is for.
-		if (compass.shouldDisplayCoordinates(stack)) {
+		if (displayCoordinates) {
 			readout.append(String.format("%,d", StructureUtils.getHorizontalDistanceToLocation(player, targetX, targetZ)));
 			if (targetY != ExplorersCompassItem.UNKNOWN_Y) {
 				final int climb = targetY - player.getBlockY();

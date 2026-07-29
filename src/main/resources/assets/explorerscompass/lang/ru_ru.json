@@ -49,7 +49,7 @@
     "string.explorerscompass.copyCoordinates": "Нажмите, чтобы скопировать координаты",
     "string.explorerscompass.noBookmarks": "Пока ничего не найдено",
     "string.explorerscompass.sharedLocation": "%1$s: найдено %2$s — %3$s (%4$s)",
-    "string.explorerscompass.searchHint": "Поиск (@мод)",
+    "string.explorerscompass.searchHint": "Поиск по имени или ID",
     "string.explorerscompass.wrongDimension": "Найденная структура находится в другом измерении",
     "string.explorerscompass.modFilter": "Мод",
     "string.explorerscompass.allMods": "Все моды",

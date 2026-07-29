@@ -152,6 +152,15 @@ public class SyncPacket {
 	}
 
 	/**
+	 * Forgets what was synced to everyone. Called when the server stops, so that nothing about the
+	 * world it was running is kept for whichever one is loaded next.
+	 */
+	public static void forgetAllPlayers() {
+		lastSyncedVersions.clear();
+		clearReceived();
+	}
+
+	/**
 	 * Splits the lists into as many packets as it takes for each one to stay below the custom
 	 * payload size limit. Always returns at least one packet, so that a client is still updated when
 	 * there is nothing to send. The group to member mapping is not sent: it is the inverse of the
@@ -228,6 +237,7 @@ public class SyncPacket {
 			ExplorersCompass.allowedBiomeKeys = new ArrayList<ResourceLocation>(receivedBiomeKeys);
 			ExplorersCompass.dimensionKeysForAllowedBiomeKeys = ArrayListMultimap.create(receivedBiomeDimensionKeys);
 			ExplorersCompass.biomeKeysToGroupKeys = new HashMap<ResourceLocation, ResourceLocation>(receivedBiomeGroupKeys);
+			ExplorersCompass.clientSearchDataRevision++;
 			clearReceived();
 		}
 	}

@@ -4,10 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.commons.lang3.RandomStringUtils;
-
 import com.chaosthedude.explorerscompass.ExplorersCompass;
-import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
 
 import it.unimi.dsi.fastutil.objects.Object2ObjectLinkedOpenHashMap;
@@ -15,9 +12,6 @@ import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.levelgen.structure.placement.ConcentricRingsStructurePlacement;
@@ -27,11 +21,14 @@ import net.minecraft.world.level.levelgen.structure.placement.StructurePlacement
 /**
  * Runs the workers one search is made of, and settles on what the search answers with.
  *
+ * <p>One of these is kept per player and reused, so it is the slot a player's search runs in rather
+ * than the search itself; what identifies a search is its {@link SearchContext}.
+ *
  * <p>A search for several structures at once is split into a worker per placement, since which
  * locations are worth sampling follows from the placement rather than from the structure. Each of
- * them walks outwards from the player, so the first thing any of them finds is the nearest one
- * <em>of its own placement</em> and says nothing about the others. The manager therefore keeps
- * running the remaining workers and answers with the nearest of everything they turn up.
+ * them walks outwards from the player and answers with the nearest location <em>of its own
+ * placement</em>, which says nothing about the others. The manager therefore keeps running the
+ * remaining workers and answers with the nearest of everything they turn up.
  *
  * <p>What keeps that from costing several full searches is that a location bounds the ones still to
  * come: a worker that has covered as far as the nearest location found so far cannot improve on it,
@@ -45,24 +42,29 @@ import net.minecraft.world.level.levelgen.structure.placement.StructurePlacement
  * running them in order does — it only changes which of them spends them first. Without it, a
  * search whose first placement holds nothing at all would pay the whole radius for it before the
  * one with the answer had sampled anything.
+ *
+ * <p>The manager is what the server thread schedules, not the workers: it is registered with
+ * {@link SearchScheduler} as one search, and hands the turn on internally. A worker therefore only
+ * ever runs while its search holds the turn, and one belonging to a search that has been stopped or
+ * replaced can no longer reach anything.
  */
-public class SearchWorkerManager {
+public class SearchWorkerManager implements SearchScheduler.SearchSlice {
 
 	// How far the first turn round the workers searches. It doubles from here, so this only decides
 	// how fine grained the early turns are, not how far the search reaches.
 	private static final int INITIAL_BAND_RADIUS = 1000;
 
-	private final String id = RandomStringUtils.random(8, "0123456789abcdef");
+	// Granularity in blocks of the search radius reported to the compass while a search is running
+	private static final int RADIUS_REPORT_INTERVAL = 250;
 
-	// The workers still to run, in the order they were created. Each is dropped as it finishes, and
-	// the search is over once none are left.
+	// The workers still to run, in the order they were created. The one at the front holds the turn,
+	// each is dropped as it finishes, and the search is over once none are left.
 	private final List<SearchWorker> workers = new ArrayList<SearchWorker>();
 
-	// Where the current search started, which the located positions are measured from
-	private BlockPos startPos;
+	// What the search currently running is fixed by, and what identifies it
+	private SearchContext context;
 
-	// The nearest location any worker has turned up so far, and the worker that turned it up
-	private SearchWorker locatedBy;
+	// The nearest location any worker has turned up so far
 	private BlockPos locatedPos;
 	private ResourceLocation locatedKey;
 	private long locatedDistanceSqr;
@@ -76,32 +78,36 @@ public class SearchWorkerManager {
 	private int radius;
 	private int lastRadiusThreshold;
 
-	// Whether a worker is being started from inside the loop that advances the search. A worker can
-	// finish the moment it is started, which comes straight back here; the loop then carries on with
-	// the next one, rather than this recursing once for every worker the search is made of.
-	private boolean advancing;
-
-	// The worker that finished last, which is the one that reports a search that located nothing
-	private SearchWorker lastFinished;
+	// Whether the worker at the front has already been given the limits for the turn it is holding.
+	// They are set once, when it takes the turn: setting them again after it has covered the band
+	// would widen that band and hand it the next turn as well, when the whole point of reaching the
+	// band is that the turn passes to someone else.
+	private boolean turnGranted;
 
 	public String getId() {
-		return id;
+		return context != null ? context.getId() : "none";
 	}
 
-	public void createStructureWorkers(ServerLevel level, Player player, ItemStack stack, List<Structure> structures, BlockPos startPos, List<BlockPos> prevPos, boolean isGroup, boolean ignoreNearStart) {
-		reset(startPos);
+	/** Sets up a search out of the workers it is made of. */
+	void createWorkers(SearchContext context, List<SearchWorker> created) {
+		reset(context);
+		workers.addAll(created);
+	}
+
+	public void createStructureWorkers(SearchContext context, List<Structure> structures) {
+		final List<SearchWorker> created = new ArrayList<SearchWorker>();
 
 		// Linked so that placements stay in the order the structures were requested in
-		Map<StructurePlacement, List<Structure>> placementToStructuresMap = new Object2ObjectLinkedOpenHashMap<>();
+		final Map<StructurePlacement, List<Structure>> placementToStructuresMap = new Object2ObjectLinkedOpenHashMap<>();
 
 		for (Structure structure : structures) {
-			Holder<Structure> holder = StructureUtils.getHolderForStructure(level, structure);
+			final Holder<Structure> holder = StructureUtils.getHolderForStructure(context.getLevel(), structure);
 			if (holder == null) {
-				ExplorersCompass.LOGGER.warn("SearchWorkerManager " + id + ": skipping a structure that is not registered in this world");
+				ExplorersCompass.LOGGER.warn("Search " + context.getId() + ": skipping a structure that is not registered in this world");
 				continue;
 			}
 
-			for (StructurePlacement structureplacement : level.getChunkSource().getGenerator().getPlacementsForStructure(holder, level.getChunkSource().randomState())) {
+			for (StructurePlacement structureplacement : context.getLevel().getChunkSource().getGenerator().getPlacementsForStructure(holder, context.getLevel().getChunkSource().randomState())) {
 				placementToStructuresMap.computeIfAbsent(structureplacement, (holderSet) -> {
 					return new ObjectArrayList<Structure>();
 				}).add(structure);
@@ -109,15 +115,17 @@ public class SearchWorkerManager {
 		}
 
 		for (Map.Entry<StructurePlacement, List<Structure>> entry : placementToStructuresMap.entrySet()) {
-			StructurePlacement placement = entry.getKey();
+			final StructurePlacement placement = entry.getKey();
 			if (placement instanceof ConcentricRingsStructurePlacement) {
-				workers.add(new ConcentricRingsSearchWorker(level, player, stack, startPos, (ConcentricRingsStructurePlacement) placement, entry.getValue(), prevPos, isGroup, ignoreNearStart, this));
+				created.add(new ConcentricRingsSearchWorker(context, (ConcentricRingsStructurePlacement) placement, entry.getValue()));
 			} else if (placement instanceof RandomSpreadStructurePlacement) {
-				workers.add(new RandomSpreadSearchWorker(level, player, stack, startPos, (RandomSpreadStructurePlacement) placement, entry.getValue(), prevPos, isGroup, ignoreNearStart, this));
+				created.add(new RandomSpreadSearchWorker(context, (RandomSpreadStructurePlacement) placement, entry.getValue()));
 			} else {
-				workers.add(new GenericSearchWorker(level, player, stack, startPos, placement, entry.getValue(), prevPos, isGroup, ignoreNearStart, this));
+				created.add(new GenericSearchWorker(context, placement, entry.getValue()));
 			}
 		}
+
+		createWorkers(context, created);
 	}
 
 	/**
@@ -125,15 +133,13 @@ public class SearchWorkerManager {
 	 * that puts them in the world, every biome of a dimension comes out of the one biome source, so
 	 * looking for several of them at once costs no more than looking for one.
 	 */
-	public void createBiomeWorker(ServerLevel level, Player player, ItemStack stack, List<Holder<Biome>> biomes, BlockPos startPos, List<BlockPos> prevPos, boolean isGroup, boolean ignoreNearStart) {
-		reset(startPos);
-		workers.add(new BiomeSearchWorker(level, player, stack, startPos, biomes, prevPos, isGroup, ignoreNearStart, this));
+	public void createBiomeWorker(SearchContext context, List<Holder<Biome>> biomes) {
+		createWorkers(context, List.<SearchWorker>of(new BiomeSearchWorker(context, biomes)));
 	}
 
-	private void reset(BlockPos startPos) {
+	private void reset(SearchContext context) {
 		workers.clear();
-		this.startPos = startPos;
-		locatedBy = null;
+		this.context = context;
 		locatedPos = null;
 		locatedKey = null;
 		locatedDistanceSqr = 0L;
@@ -142,8 +148,7 @@ public class SearchWorkerManager {
 		lastRadiusThreshold = 0;
 		bandRadius = 0;
 		maxRadius = 0;
-		advancing = false;
-		lastFinished = null;
+		turnGranted = false;
 	}
 
 	/** Starts the search. Returns false when there is nothing for it to run. */
@@ -152,105 +157,113 @@ public class SearchWorkerManager {
 			return false;
 		}
 
-		maxRadius = ConfigHandler.GENERAL.maxRadius.get();
+		maxRadius = context.getMaxRadius();
 		// Taking turns only means anything when there is someone to take turns with; a search made of
 		// one worker simply runs it to the end
 		bandRadius = workers.size() > 1 ? Math.min(INITIAL_BAND_RADIUS, maxRadius) : maxRadius;
 
-		final SearchWorker first = workers.get(0);
-		applyLimits(first);
-		first.start();
+		SearchScheduler.add(this);
 		return true;
 	}
 
-	/** Takes what a worker located and moves on to the next one. */
-	void onLocated(SearchWorker worker, BlockPos pos, ResourceLocation key, int workerSamples) {
-		final long distanceSqr = StructureUtils.getHorizontalDistanceSqrToLocation(startPos, pos.getX(), pos.getZ());
-		if (locatedPos == null || distanceSqr < locatedDistanceSqr) {
-			locatedBy = worker;
-			locatedPos = pos;
-			locatedKey = key;
-			locatedDistanceSqr = distanceSqr;
-		}
-		samples += workerSamples;
-		finishWorker(worker);
+	@Override
+	public boolean hasWork() {
+		return !workers.isEmpty();
 	}
 
-	/** Takes note of a worker that has nothing left to search and moves on to the next one. */
-	void onExhausted(SearchWorker worker, int workerRadius, int workerSamples) {
-		samples += workerSamples;
-		radius = Math.max(radius, workerRadius);
-		finishWorker(worker);
-	}
-
-	/** Puts a worker that has reached the end of its turn at the back of the queue. */
-	void onYielded(SearchWorker worker) {
-		if (!workers.remove(worker)) {
-			// No longer part of a live search
-			return;
-		}
-		workers.add(worker);
-		advance(worker);
-	}
-
-	/**
-	 * Whether the search has looked further than the last radius it reported, which is what decides
-	 * if the compass is told about it. Shared by every worker of a search, so that the readout only
-	 * ever grows as the search moves from one placement to the next.
-	 */
-	boolean tryReportRadius(int threshold) {
-		if (threshold <= lastRadiusThreshold) {
+	@Override
+	public boolean doWork() {
+		if (!context.holdsCompass()) {
+			// There is nowhere left to report to, so there is nothing this search could still be for
+			ExplorersCompass.LOGGER.error("Search " + context.getId() + ": the compass it was started on is gone");
+			stop();
+			clear();
 			return false;
 		}
-		lastRadiusThreshold = threshold;
-		return true;
-	}
 
-	/** Drops a worker that is finished for good, and hands the turn on. */
-	private void finishWorker(SearchWorker finishedWorker) {
-		if (!workers.remove(finishedWorker)) {
-			// This worker no longer belongs to a live search: it was stopped, or the search it was part
-			// of has already been replaced by another one
-			return;
+		// Every pass either hands the turn to a worker, drops one that has finished, or moves one that
+		// cannot use the turn to the back of the queue. Moving them all round widens the band, which
+		// gives the worker that comes back to the front something to do, so this always ends; the
+		// count is a backstop rather than the reason it does.
+		int notReady = 0;
+		for (int pass = workers.size() + 1; pass > 0 && !workers.isEmpty(); pass--) {
+			final SearchWorker worker = workers.get(0);
+
+			if (!worker.isReady()) {
+				// Waiting for something of its own, such as the positions a placement is still computing.
+				// Another worker of this search can have the turn in the meantime, instead of everything
+				// else it is looking for standing still until this one is ready.
+				if (++notReady >= workers.size()) {
+					// Every worker of the search is waiting, so there is nothing to spend the turn on
+					return false;
+				}
+				moveToBack();
+				continue;
+			}
+
+			notReady = 0;
+			if (!turnGranted) {
+				applyLimits(worker);
+				turnGranted = true;
+			}
+			if (!worker.hasWork()) {
+				endTurn(worker);
+				continue;
+			}
+
+			worker.begin();
+			reportRadius(worker.getRadius());
+			return worker.doWork();
 		}
 
-		lastFinished = finishedWorker;
-		advance(null);
+		if (workers.isEmpty()) {
+			report();
+		}
+		return false;
 	}
 
 	/**
-	 * Gives the turn to the worker at the front of the queue, or reports the outcome when none is
-	 * left.
-	 *
-	 * @param current the worker whose call this is running inside, if any. It is already being
-	 *     called, so widening what it may search is all it needs to carry straight on.
+	 * Takes the worker holding the turn off it: to the back of the queue when it has only reached the
+	 * end of the band the search has covered, and out of the search for good when it is finished.
 	 */
-	private void advance(SearchWorker current) {
-		if (advancing) {
-			// Started from the loop below, which carries on with the next worker itself
+	private void endTurn(SearchWorker worker) {
+		// Whatever it turned up bounds the workers that have not run, whether it is done or not
+		onCandidate(worker);
+
+		if (!worker.isExhausted()) {
+			moveToBack();
 			return;
 		}
 
-		advancing = true;
-		try {
-			while (!workers.isEmpty()) {
-				final SearchWorker next = workers.get(0);
-				applyLimits(next);
-				if (next == current) {
-					return;
-				}
+		workers.remove(0);
+		turnGranted = false;
+		worker.finish();
+		samples += worker.getSamples();
+		radius = Math.max(radius, roundRadius(worker.getRadius()));
+	}
 
-				next.start();
-				if (!workers.isEmpty() && workers.get(0) == next) {
-					// It has taken itself on and is running now, so the rest of the search waits for it
-					return;
-				}
-			}
-		} finally {
-			advancing = false;
+	private void moveToBack() {
+		workers.add(workers.remove(0));
+		turnGranted = false;
+	}
+
+	/**
+	 * Takes note of the nearest location a worker has turned up so far. The worker carries on: what
+	 * is left of the ring it found something on may hold a nearer one. Knowing about it already is
+	 * what lets the workers that have not run be cut down to it.
+	 */
+	private void onCandidate(SearchWorker worker) {
+		final BlockPos pos = worker.getBestPos();
+		if (pos == null) {
+			return;
 		}
 
-		report(lastFinished);
+		final long distanceSqr = worker.getBestDistanceSqr();
+		if (locatedPos == null || distanceSqr < locatedDistanceSqr) {
+			locatedPos = pos;
+			locatedKey = worker.getBestKey();
+			locatedDistanceSqr = distanceSqr;
+		}
 	}
 
 	/**
@@ -261,7 +274,7 @@ public class SearchWorkerManager {
 	private void applyLimits(SearchWorker next) {
 		if (locatedPos != null) {
 			// Anything further out than what has already been located cannot be the answer
-			next.setRadiusLimit((int) Math.sqrt(locatedDistanceSqr));
+			next.setRadiusLimit(SearchWorker.ceilSqrt(locatedDistanceSqr));
 		}
 		while (bandRadius < maxRadius && next.getRadius() >= bandRadius) {
 			bandRadius = Math.min(bandRadius * 2, maxRadius);
@@ -269,14 +282,33 @@ public class SearchWorkerManager {
 		next.setBandLimit(bandRadius);
 	}
 
-	/** Hands the outcome of the whole search to the compass. */
-	private void report(SearchWorker lastWorker) {
-		if (locatedBy != null) {
-			locatedBy.reportLocated(locatedPos, locatedKey, samples);
-		} else {
-			// Any worker can say the search found nothing; they all hold the same compass
-			lastWorker.reportNotFound(radius, samples);
+	/**
+	 * Tells the compass how far the search has looked, when it has passed the last radius reported.
+	 * The threshold is the search's rather than each worker's, so that the readout only ever grows:
+	 * the workers of one search each start over from where the player is standing, and a radius
+	 * dropping back to nothing partway through would read as the search having restarted.
+	 */
+	private void reportRadius(int workerRadius) {
+		final int threshold = workerRadius / RADIUS_REPORT_INTERVAL;
+		if (threshold <= lastRadiusThreshold) {
+			return;
 		}
+
+		lastRadiusThreshold = threshold;
+		context.reportRadius(threshold * RADIUS_REPORT_INTERVAL);
+	}
+
+	/** Hands the outcome of the whole search to the compass. */
+	private void report() {
+		if (locatedPos != null) {
+			context.reportLocated(locatedPos, locatedKey, samples);
+		} else {
+			context.reportNotFound(radius, samples);
+		}
+	}
+
+	private static int roundRadius(int radius) {
+		return (radius / RADIUS_REPORT_INTERVAL) * RADIUS_REPORT_INTERVAL;
 	}
 
 	public void stop() {

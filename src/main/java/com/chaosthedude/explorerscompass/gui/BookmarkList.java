@@ -64,7 +64,11 @@ public class BookmarkList extends ObjectSelectionList<BookmarkListEntry> {
 		final int bandRight = getRowLeft() + getRowWidth() + 3;
 		final boolean overList = isMouseOver((double) mouseX, (double) mouseY);
 
-		for (int j = 0; j < getItemCount(); ++j) {
+		final int firstRow = Math.max(0,
+				(int) Math.floor(getScrollAmount() / itemHeight) - 1);
+		final int visibleRowCount = (int) Math.ceil((double) (y1 - y0) / itemHeight) + 3;
+		final int lastRow = Math.min(getItemCount(), firstRow + visibleRowCount);
+		for (int j = firstRow; j < lastRow; ++j) {
 			final int rowTop = getRowTop(j);
 			final int bandTop = rowTop - 2;
 			final int bandBottom = bandTop + itemHeight;

@@ -31,6 +31,7 @@ import net.minecraft.client.renderer.item.ItemProperties;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.packs.resources.ResourceManagerReloadListener;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
@@ -38,6 +39,7 @@ import net.minecraft.world.entity.decoration.ItemFrame;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.client.event.RegisterClientReloadListenersEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.fml.ModLoadingContext;
@@ -57,7 +59,7 @@ public class ExplorersCompass {
 	// Bump this whenever the packets change. Both sides have to declare the same version: a mismatch
 	// is then refused during the handshake with a clear message, instead of connecting and failing
 	// to decode later.
-	public static final String PROTOCOL_VERSION = "2.2";
+	public static final String PROTOCOL_VERSION = "2.3";
 
 	public static final Logger LOGGER = LogManager.getLogger(MODID);
 
@@ -72,11 +74,15 @@ public class ExplorersCompass {
 	public static List<ResourceLocation> allowedBiomeKeys;
 	public static ListMultimap<ResourceLocation, ResourceLocation> dimensionKeysForAllowedBiomeKeys;
 	public static Map<ResourceLocation, ResourceLocation> biomeKeysToGroupKeys;
+	/** Changes whenever a complete set of searchable client data is published. */
+	public static volatile int clientSearchDataRevision;
 
 	public ExplorersCompass() {
 		FMLJavaModLoadingContext.get().getModEventBus().addListener(this::commonSetup);
 		DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> {
 			FMLJavaModLoadingContext.get().getModEventBus().addListener(this::clientSetup);
+			FMLJavaModLoadingContext.get().getModEventBus()
+					.addListener(this::registerClientReloadListeners);
 		});
 		
 		ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, ConfigHandler.GENERAL_SPEC);
@@ -110,6 +116,7 @@ public class ExplorersCompass {
 		allowedBiomeKeys = new ArrayList<ResourceLocation>();
 		dimensionKeysForAllowedBiomeKeys = ArrayListMultimap.create();
 		biomeKeysToGroupKeys = new HashMap<ResourceLocation, ResourceLocation>();
+		clientSearchDataRevision = 0;
 	}
 	
 	@OnlyIn(Dist.CLIENT)
@@ -187,6 +194,13 @@ public class ExplorersCompass {
 					return 0.0D;
 				}
 			});
+		});
+	}
+
+	@OnlyIn(Dist.CLIENT)
+	private void registerClientReloadListeners(RegisterClientReloadListenersEvent event) {
+		event.registerReloadListener((ResourceManagerReloadListener) (resourceManager) -> {
+			clientSearchDataRevision++;
 		});
 	}
 

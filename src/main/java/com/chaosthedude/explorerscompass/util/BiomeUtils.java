@@ -115,6 +115,21 @@ public class BiomeUtils {
 		return cachedDataVersion;
 	}
 
+	/**
+	 * Drops the cached biome data. Called when the server stops: what is cached here is derived from
+	 * that server's registries and chunk generators, and holding on to it would keep the whole server
+	 * alive for as long as the game runs.
+	 */
+	public static void invalidateCache() {
+		cachedServer = null;
+		cachedSyncBlacklist = null;
+		cachedAllowedBiomeKeys = null;
+		cachedDimensionKeys = null;
+		cachedBiomeKeysToGroupKeys = null;
+		cachedBlacklist = null;
+		cachedBlacklistPatterns = null;
+	}
+
 	/** The biome the given key names in this world, or null when it names none. */
 	public static Holder<Biome> getHolderForKey(ServerLevel level, ResourceLocation key) {
 		return getBiomeRegistry(level).getHolder(ResourceKey.create(Registry.BIOME_REGISTRY, key)).orElse(null);

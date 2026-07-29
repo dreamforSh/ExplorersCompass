@@ -3,8 +3,9 @@ package com.chaosthedude.explorerscompass.worker;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
-import java.util.Optional;
+import java.util.Map;
 import java.util.Set;
 
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
@@ -14,12 +15,9 @@ import com.mojang.datafixers.util.Pair;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.QuartPos;
-import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
-import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.biome.Climate;
@@ -42,9 +40,16 @@ public class BiomeSearchWorker extends SearchWorker {
 	// along, still inside the biome it was told to look past.
 	private static final int SAME_BIOME_DISTANCE = 512;
 
+	// How many locations a turn covers when the sampling runs on the server thread. A single sample
+	// costs a fraction of a microsecond, so handing the turn back after each of them would spend more
+	// of the tick on passing it round than on the search; a batch this size is still a small part of
+	// the time one turn is given.
+	private static final int SYNC_SAMPLE_BATCH = 64;
+
 	private final BiomeSource biomeSource;
 	private final Climate.Sampler sampler;
-	private final Set<Holder<Biome>> targets;
+	// The biomes being searched for that this dimension can actually produce, against their keys
+	private final Map<Biome, ResourceLocation> targets;
 	private final int spacing;
 	// The height the search was started at, sampled at every location
 	private final int surfaceQuartY;
@@ -57,17 +62,20 @@ public class BiomeSearchWorker extends SearchWorker {
 	// Whether the sampling is running on a thread of its own. Set before either side starts.
 	private volatile boolean background;
 
-	// What the search thread turned up. Publishing this last is what makes everything the search
+	// How far the search has covered. Written by whichever thread is sampling and read by the server
+	// thread for the readout on the compass, so it is published rather than derived from the walker.
+	private volatile int coveredRadius;
+
+	// That the search thread is done. Publishing this last is what makes everything the search
 	// thread wrote before it visible to the server thread that sees it set.
 	private volatile boolean backgroundDone;
-	private Pair<BlockPos, ResourceLocation> backgroundLocated;
 	private Throwable backgroundError;
 
 	// Whether the server thread has already acted on that. Only ever touched on the server thread.
 	private boolean applied;
 
-	public BiomeSearchWorker(ServerLevel level, Player player, ItemStack stack, BlockPos startPos, List<Holder<Biome>> biomes, List<BlockPos> prevPos, boolean isGroup, boolean ignoreNearStart, SearchWorkerManager manager) {
-		super(level, player, stack, startPos, prevPos, isGroup, ignoreNearStart, ConfigHandler.GENERAL.maxBiomeSamples.get(), manager);
+	public BiomeSearchWorker(SearchContext context, List<Holder<Biome>> biomes) {
+		super(context, ConfigHandler.GENERAL.maxBiomeSamples.get());
 
 		biomeSource = level.getChunkSource().getGenerator().getBiomeSource();
 		sampler = level.getChunkSource().randomState().sampler();
@@ -76,35 +84,34 @@ public class BiomeSearchWorker extends SearchWorker {
 		surfaceQuartY = QuartPos.fromBlock(Mth.clamp(startPos.getY(), level.getMinBuildHeight(), level.getMaxBuildHeight() - 1));
 		depthQuartYLevels = computeDepthQuartYLevels(level, surfaceQuartY);
 
-		// A biome source names the biomes it produces outright, so a target it does not name cannot be
-		// here and would otherwise be searched for until the configured limits ran out. The holders
-		// kept are the source's own rather than the ones that were asked for, so that the sampling
-		// loop can compare what it is handed against them directly.
 		final Set<ResourceLocation> targetKeys = new HashSet<ResourceLocation>();
 		for (Holder<Biome> biome : biomes) {
 			biome.unwrapKey().ifPresent((biomeKey) -> targetKeys.add(biomeKey.location()));
 		}
-		targets = new HashSet<Holder<Biome>>();
+
+		// A biome source names the biomes it produces outright, so a target it does not name cannot be
+		// here and would otherwise be searched for until the configured limits ran out. What is kept is
+		// the biome itself rather than the holder wrapping it: the holder a source hands back while
+		// sampling need not be the one it listed, and comparing holders would then take every sample
+		// for a miss and quietly find nothing at all.
+		targets = new IdentityHashMap<Biome, ResourceLocation>();
 		for (Holder<Biome> possibleBiome : biomeSource.possibleBiomes()) {
-			final Optional<ResourceKey<Biome>> biomeKey = possibleBiome.unwrapKey();
-			if (biomeKey.isPresent() && targetKeys.contains(biomeKey.get().location())) {
-				targets.add(possibleBiome);
-			}
+			possibleBiome.unwrapKey().ifPresent((biomeKey) -> {
+				if (targetKeys.contains(biomeKey.location())) {
+					targets.put(possibleBiome.value(), biomeKey.location());
+				}
+			});
 		}
 		finished = targets.isEmpty();
 	}
 
 	@Override
-	protected void run() {
+	protected void onBegin() {
 		if (!ConfigHandler.GENERAL.asyncBiomeSearch.get()) {
-			super.run();
 			return;
 		}
 
 		background = true;
-		// The server thread stays registered so that it notices the search finishing and puts what it
-		// turned up onto the compass; the sampling itself happens on the thread taken below
-		super.run();
 		try {
 			SearchExecutor.execute(this::searchInBackground);
 		} catch (Throwable t) {
@@ -115,15 +122,11 @@ public class BiomeSearchWorker extends SearchWorker {
 		}
 	}
 
-	/** Samples until something is found or there is nothing left, off the server thread. */
+	/** Samples until there is nothing left to look at, off the server thread. */
 	private void searchInBackground() {
 		try {
 			while (!Thread.currentThread().isInterrupted() && hasMoreToSample()) {
-				final Pair<BlockPos, ResourceLocation> located = sampleNext();
-				if (located != null) {
-					backgroundLocated = located;
-					break;
-				}
+				sampleNext();
 			}
 		} catch (Throwable t) {
 			backgroundError = t;
@@ -133,8 +136,8 @@ public class BiomeSearchWorker extends SearchWorker {
 	}
 
 	@Override
-	public boolean hasWork() {
-		// While the search runs on a thread of its own, the server thread stays registered until it has
+	boolean hasWork() {
+		// While the search runs on a thread of its own, this stays true until the server thread has
 		// acted on the outcome, however far the search has got: what is left to sample is the search
 		// thread's business, and reading it from here would be a race
 		return background ? !applied : super.hasWork();
@@ -146,27 +149,17 @@ public class BiomeSearchWorker extends SearchWorker {
 			return applyBackgroundResult();
 		}
 
-		if (hasWork()) {
-			final Pair<BlockPos, ResourceLocation> located = sampleNext();
-			if (located != null) {
-				succeed(located.getFirst(), located.getSecond());
-			}
-		}
-
-		if (hasWork()) {
-			return true;
-		}
-
-		if (!finished) {
-			endOfWork();
+		for (int i = 0; i < SYNC_SAMPLE_BATCH && hasMoreToSample(); i++) {
+			sampleNext();
 		}
 
 		return hasWork();
 	}
 
 	/**
-	 * Puts what the search thread turned up onto the compass, once it has finished. Runs on the
-	 * server thread, which is where everything a result touches belongs.
+	 * Notes that the search thread has finished, so that the manager takes this worker off the search
+	 * and reports what it turned up. Runs on the server thread, which is where everything a result
+	 * touches belongs.
 	 */
 	private boolean applyBackgroundResult() {
 		if (!backgroundDone || applied) {
@@ -174,44 +167,32 @@ public class BiomeSearchWorker extends SearchWorker {
 		}
 
 		applied = true;
-		if (finished) {
-			// The search was stopped, or replaced by another one, while this was running
-			return false;
-		}
-
-		if (backgroundError != null) {
+		if (backgroundError != null && !finished) {
 			abort(backgroundError);
-		} else if (backgroundLocated != null) {
-			succeed(backgroundLocated.getFirst(), backgroundLocated.getSecond());
-		} else {
-			endOfWork();
 		}
 		return false;
 	}
 
 	/**
-	 * Samples the location the search has reached and moves on to the next one, answering with what
-	 * it found there. Touches nothing outside this worker, which is what lets it run off the server
-	 * thread.
+	 * Samples the location the search has reached and moves on to the next one, taking note of
+	 * anything it found there. Touches nothing outside this worker, which is what lets it run off the
+	 * server thread.
 	 */
-	private Pair<BlockPos, ResourceLocation> sampleNext() {
+	private void sampleNext() {
 		final int sampleX = startPos.getX() + spacing * ring.getX();
 		final int sampleZ = startPos.getZ() + spacing * ring.getZ();
 
-		Pair<BlockPos, ResourceLocation> located = null;
 		// The corners of a ring reach past its edges, so part of the outer rings lies beyond the
-		// configured radius
-		if (isWithinMaxRadius(sampleX, sampleZ)) {
-			currentPos = new BlockPos(sampleX, startPos.getY(), sampleZ);
-
+		// configured radius, and beyond anything already located
+		if (isWorthSampling(sampleX, sampleZ)) {
 			final Pair<BlockPos, ResourceLocation> pair = getTargetBiomeAt(sampleX, sampleZ, isDepthSampleLocation());
 			if (pair != null && !shouldIgnore(pair.getFirst())) {
-				located = pair;
+				found(pair.getFirst(), pair.getSecond());
 			}
 		}
 
 		ring.advance();
-		return located;
+		coveredRadius = Math.min(ring.getCoveredLength() * spacing, maxRadius);
 	}
 
 	/**
@@ -260,11 +241,7 @@ public class BiomeSearchWorker extends SearchWorker {
 	private ResourceLocation targetBiomeKeyAt(int quartX, int quartY, int quartZ) {
 		final Holder<Biome> biome = biomeSource.getNoiseBiome(quartX, quartY, quartZ, sampler);
 		samples++;
-		if (!targets.contains(biome)) {
-			return null;
-		}
-		final Optional<ResourceKey<Biome>> biomeKey = biome.unwrapKey();
-		return biomeKey.isPresent() ? biomeKey.get().location() : null;
+		return targets.get(biome.value());
 	}
 
 	/**
@@ -326,7 +303,7 @@ public class BiomeSearchWorker extends SearchWorker {
 	 */
 	@Override
 	protected int getRadius() {
-		return Math.min(ring.getCoveredLength() * spacing, maxRadius);
+		return coveredRadius;
 	}
 
 	@Override

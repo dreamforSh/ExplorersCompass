@@ -5,6 +5,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -33,6 +34,7 @@ import com.chaosthedude.explorerscompass.util.StructureUtils;
 import com.mojang.blaze3d.vertex.PoseStack;
 
 import net.minecraft.Util;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.resources.language.I18n;
@@ -68,6 +70,9 @@ public class ExplorersCompassScreen extends Screen {
 	private SearchTarget searchTarget;
 	private List<ResourceLocation> allowedKeys;
 	private List<ResourceLocation> keysMatchingSearch;
+	private Map<ResourceLocation, SearchDocument> searchDocuments;
+	private int searchDataRevision;
+	private String languageCode;
 	private ItemStack stack;
 	private ExplorersCompassItem explorersCompass;
 	private TransparentButton targetButton;
@@ -97,10 +102,12 @@ public class ExplorersCompassScreen extends Screen {
 	// Where the sidebar has room for the next control, and where the status text has to stop
 	private int sidebarY;
 	private int statusTextRight;
+	private ButtonState lastButtonState;
 	// The entries picked with Ctrl-click, to search for the nearest of them all at once
 	private final Set<ResourceLocation> multiSelectedKeys = new LinkedHashSet<ResourceLocation>();
 	// Where the chips that lift a filter were last drawn, rebuilt on every frame
 	private final List<FilterChip> filterChips = new ArrayList<FilterChip>();
+	private FilterChipState lastFilterChipState;
 
 	/** A filter that is in force, drawn as a chip that lifts it again when clicked. */
 	private static class FilterChip {
@@ -119,6 +126,25 @@ public class ExplorersCompassScreen extends Screen {
 
 	}
 
+	/** Everything that can change how the action buttons look or whether they can be used. */
+	private record ButtonState(
+			boolean hasSelection,
+			int multiSelected,
+			CompassState compassState,
+			int cachedLocations,
+			boolean canTeleport,
+			boolean allowSharing,
+			ResourceLocation foundDimension,
+			ResourceLocation currentDimension) {
+	}
+
+	private record FilterChipState(
+			String modFilter,
+			boolean filterByCurrentDimension,
+			int multiSelected,
+			int dataRevision) {
+	}
+
 	public ExplorersCompassScreen(Level level, Player player, ItemStack stack, ExplorersCompassItem explorersCompass) {
 		super(Component.translatable("string.explorerscompass.selectStructure"));
 		this.level = level;
@@ -131,8 +157,13 @@ public class ExplorersCompassScreen extends Screen {
 		searchTarget = explorersCompass.getSearchTarget(stack);
 		allowedKeys = new ArrayList<ResourceLocation>(searchTarget.getAllowedKeys());
 		keysMatchingSearch = new ArrayList<ResourceLocation>(allowedKeys);
+		searchDocuments = createSearchDocuments();
+		searchDataRevision = ExplorersCompass.clientSearchDataRevision;
+		// Recorded along with the documents that were resolved under it, so that opening the screen
+		// does not rebuild all of them again on its very first tick
+		languageCode = Minecraft.getInstance().getLanguageManager().getSelected().getCode();
 		sortingCategory = new NameSorting();
-		cachedLocations = explorersCompass.getPrevPos(stack).size();
+		cachedLocations = explorersCompass.getPrevPosCount(stack);
 	}
 
 	/** Whether the list is showing structures or biomes. */
@@ -185,13 +216,12 @@ public class ExplorersCompassScreen extends Screen {
 		if (!heldStack.isEmpty()) {
 			stack = heldStack;
 		}
-		cachedLocations = explorersCompass.getPrevPos(stack).size();
+		cachedLocations = explorersCompass.getPrevPosCount(stack);
 		updateButtons();
 
-		// Check if the allowed list has synced. Comparing contents rather than sizes matters when
-		// opening the compass in a world whose list differs from the one synced last: searching for
-		// something that does not exist here would be rejected by the server.
-		if (!allowedKeys.equals(searchTarget.getAllowedKeys())) {
+		final String currentLanguage = minecraft.getLanguageManager().getSelected().getCode();
+		if (searchDataRevision != ExplorersCompass.clientSearchDataRevision
+				|| !currentLanguage.equals(languageCode)) {
 			rebuildList();
 		}
 	}
@@ -224,16 +254,7 @@ public class ExplorersCompassScreen extends Screen {
 		// than the one this screen was opened on
 		GuiTheme.drawTitle(poseStack, font, I18n.get(searchTarget.getSelectTranslationKey()), keysMatchingSearch.size() + " / " + allowedKeys.size(), GuiTheme.SIDEBAR_CONTENT_X, 10);
 
-		filterChips.clear();
-		if (modFilter != null) {
-			filterChips.add(new FilterChip(I18n.get("string.explorerscompass.modFilter") + ": " + StructureUtils.getPrettySourceName(new ResourceLocation(modFilter, "any")), () -> setModFilter(null)));
-		}
-		if (filterByCurrentDimension) {
-			filterChips.add(new FilterChip(I18n.get("string.explorerscompass.currentDimension"), () -> toggleDimensionFilter()));
-		}
-		if (!multiSelectedKeys.isEmpty()) {
-			filterChips.add(new FilterChip(I18n.get("string.explorerscompass.multiSelected", multiSelectedKeys.size()), () -> clearMultiSelect()));
-		}
+		updateFilterChips();
 
 		final int chipsY = 28;
 		final int chipsLeft = columnLeft();
@@ -259,6 +280,35 @@ public class ExplorersCompassScreen extends Screen {
 			final boolean hovered = mouseX >= chip.left && mouseX < chip.right && mouseY >= chip.top && mouseY < chip.bottom;
 			RenderUtils.drawChip(poseStack, label, chipX, chipsY, GuiTheme.CHIP_ACCENT_BACKGROUND, hovered ? GuiTheme.TEXT_PRIMARY : GuiTheme.ACCENT);
 			chipX += chipWidth + 4;
+		}
+	}
+
+	private void updateFilterChips() {
+		final FilterChipState filterChipState = new FilterChipState(modFilter,
+				filterByCurrentDimension, multiSelectedKeys.size(),
+				ExplorersCompass.clientSearchDataRevision);
+		if (filterChipState.equals(lastFilterChipState)) {
+			return;
+		}
+		lastFilterChipState = filterChipState;
+		filterChips.clear();
+		if (modFilter != null) {
+			filterChips.add(new FilterChip(
+					I18n.get("string.explorerscompass.modFilter") + ": "
+							+ StructureUtils.getPrettySourceName(
+									new ResourceLocation(modFilter, "any")),
+					() -> setModFilter(null)));
+		}
+		if (filterByCurrentDimension) {
+			filterChips.add(new FilterChip(
+					I18n.get("string.explorerscompass.currentDimension"),
+					() -> toggleDimensionFilter()));
+		}
+		if (!multiSelectedKeys.isEmpty()) {
+			filterChips.add(new FilterChip(
+					I18n.get("string.explorerscompass.multiSelected",
+							multiSelectedKeys.size()),
+					() -> clearMultiSelect()));
 		}
 	}
 
@@ -346,11 +396,23 @@ public class ExplorersCompassScreen extends Screen {
 		if (modFilterPanel.isOver(mouseX, mouseY)) {
 			return;
 		}
+		if (searchTextField.isMouseOver(mouseX, mouseY)) {
+			renderComponentTooltip(poseStack, List.of(
+					Component.translatable("string.explorerscompass.searchSyntax.fields"),
+					Component.translatable("string.explorerscompass.searchSyntax.combine"),
+					Component.translatable("string.explorerscompass.searchSyntax.example")),
+					mouseX, mouseY);
+			return;
+		}
 		for (Object widget : renderables) {
 			if (widget instanceof TransparentButton button && button.visible && button.isHoveredOrFocused() && !button.getTooltipLines().isEmpty()) {
 				renderComponentTooltip(poseStack, button.getTooltipLines(), mouseX, mouseY);
 				return;
 			}
+		}
+		final StructureSearchEntry hovered = selectionList.getHoveredEntry(mouseX, mouseY);
+		if (hovered != null) {
+			renderComponentTooltip(poseStack, List.of(hovered.getIdTooltip()), mouseX, mouseY);
 		}
 	}
 
@@ -475,6 +537,9 @@ public class ExplorersCompassScreen extends Screen {
 	private void rebuildList() {
 		removeWidget(selectionList);
 		allowedKeys = new ArrayList<ResourceLocation>(searchTarget.getAllowedKeys());
+		searchDocuments = createSearchDocuments();
+		searchDataRevision = ExplorersCompass.clientSearchDataRevision;
+		languageCode = minecraft.getLanguageManager().getSelected().getCode();
 		multiSelectedKeys.retainAll(allowedKeys);
 		// A mod that contributes nothing to the list now showing is no longer something to filter by
 		if (modFilter != null && allowedKeys.stream().noneMatch((key) -> key.getNamespace().equals(modFilter))) {
@@ -530,7 +595,7 @@ public class ExplorersCompassScreen extends Screen {
 
 	public void searchForTarget(ResourceLocation key) {
 		SearchHistory.pushRecent(searchTarget, key);
-		ExplorersCompass.network.sendToServer(CompassSearchPacket.forTargets(searchTarget, List.of(key), player.blockPosition()));
+		ExplorersCompass.network.sendToServer(CompassSearchPacket.forTargets(searchTarget, List.of(key)));
 		minecraft.setScreen(null);
 	}
 
@@ -540,7 +605,7 @@ public class ExplorersCompassScreen extends Screen {
 		for (ResourceLocation key : keys) {
 			SearchHistory.pushRecent(searchTarget, key);
 		}
-		ExplorersCompass.network.sendToServer(CompassSearchPacket.forTargets(searchTarget, keys, player.blockPosition()));
+		ExplorersCompass.network.sendToServer(CompassSearchPacket.forTargets(searchTarget, keys));
 		minecraft.setScreen(null);
 	}
 
@@ -548,12 +613,12 @@ public class ExplorersCompassScreen extends Screen {
 		if (key == null) {
 			return;
 		}
-		ExplorersCompass.network.sendToServer(CompassSearchPacket.forGroup(searchTarget, key, player.blockPosition()));
+		ExplorersCompass.network.sendToServer(CompassSearchPacket.forGroup(searchTarget, key));
 		minecraft.setScreen(null);
 	}
 
 	public void searchForNext() {
-		ExplorersCompass.network.sendToServer(new CompassSearchForNextPacket(player.blockPosition()));
+		ExplorersCompass.network.sendToServer(new CompassSearchForNextPacket());
 		minecraft.setScreen(null);
 	}
 
@@ -590,10 +655,12 @@ public class ExplorersCompassScreen extends Screen {
 	}
 
 	public void processSearchTerm() {
-		final String[] tokens = searchTextField.getValue().toLowerCase().split("\\s+");
+		final SearchQuery query = SearchQuery.parse(searchTextField.getValue());
 		keysMatchingSearch = new ArrayList<ResourceLocation>();
 		for (ResourceLocation key : allowedKeys) {
-			if (matchesModFilter(key) && matchesDimensionFilter(key) && matchesSearchTokens(key, tokens)) {
+			final SearchDocument document = searchDocuments.get(key);
+			if (document != null && matchesModFilter(key)
+					&& matchesDimensionFilter(document) && query.matches(document)) {
 				keysMatchingSearch.add(key);
 			}
 		}
@@ -606,45 +673,39 @@ public class ExplorersCompassScreen extends Screen {
 		return modFilter == null || key.getNamespace().equals(modFilter);
 	}
 
-	private boolean matchesDimensionFilter(ResourceLocation key) {
+	private boolean matchesDimensionFilter(SearchDocument document) {
 		if (!filterByCurrentDimension) {
 			return true;
 		}
 		// Entries with no known dimensions are kept: absent data is not proof they cannot generate here
-		final List<ResourceLocation> dimensionKeys = searchTarget.getDimensionKeys(key);
+		final List<ResourceLocation> dimensionKeys = document.getDimensionKeys();
 		return dimensionKeys.isEmpty() || dimensionKeys.contains(player.level.dimension().location());
 	}
 
-	/**
-	 * Matches the typed filter. Every whitespace-separated token has to match: plain tokens against
-	 * the name, and tokens starting with {@code @} against the source, by mod id or by mod name. A
-	 * lone {@code @} matches everything, so nothing vanishes while the id is being typed.
-	 */
-	private boolean matchesSearchTokens(ResourceLocation key, String[] tokens) {
-		for (String token : tokens) {
-			if (token.isEmpty()) {
-				continue;
-			}
-			if (token.charAt(0) == '@') {
-				final String source = token.substring(1);
-				if (!source.isEmpty() && !key.getNamespace().toLowerCase().contains(source) && !StructureUtils.getPrettySourceName(key).toLowerCase().contains(source)) {
-					return false;
-				}
-			} else if (!searchTarget.getPrettyName(key).toLowerCase().contains(token)) {
-				return false;
-			}
+	/** The cached searchable and displayable text belonging to the given key. */
+	SearchDocument getSearchDocument(ResourceLocation key) {
+		return searchDocuments.get(key);
+	}
+
+	private Map<ResourceLocation, SearchDocument> createSearchDocuments() {
+		final Map<ResourceLocation, SearchDocument> documents =
+				new LinkedHashMap<ResourceLocation, SearchDocument>();
+		for (ResourceLocation key : allowedKeys) {
+			documents.put(key, new SearchDocument(searchTarget, key));
 		}
-		return true;
+		return documents;
 	}
 
 	public List<ResourceLocation> sortKeys() {
-		final List<ResourceLocation> keys = keysMatchingSearch;
+		// Sorted on a copy: the filtered list is what the header counts, and its order is not the
+		// order the rows end up in
+		final List<ResourceLocation> keys = new ArrayList<ResourceLocation>(keysMatchingSearch);
 		// Sort on values computed once per entry instead of once per comparison: the names and sources
 		// behind them do translation and mod list lookups, and O(n log n) comparisons would repeat
 		// them thousands of times on every refresh while typing in the filter
 		final Map<ResourceLocation, String> names = new HashMap<ResourceLocation, String>();
 		for (ResourceLocation key : keys) {
-			names.put(key, searchTarget.getPrettyName(key));
+			names.put(key, searchDocuments.get(key).getDisplayName());
 		}
 		keys.sort(Comparator.comparing(names::get));
 		if (!(sortingCategory instanceof NameSorting)) {
@@ -701,6 +762,7 @@ public class ExplorersCompassScreen extends Screen {
 
 	private void setupWidgets() {
 		clearWidgets();
+		lastButtonState = null;
 		searchNextButton = null;
 		clearCacheButton = null;
 		bookmarksButton = null;
@@ -866,6 +928,15 @@ public class ExplorersCompassScreen extends Screen {
 		final int multiSelected = multiSelectedKeys.size();
 		final CompassState state = explorersCompass.getState(stack);
 		final boolean located = state == CompassState.FOUND;
+		final ResourceLocation foundDimension = explorersCompass.getFoundDimension(stack);
+		final ResourceLocation currentDimension = player.level.dimension().location();
+		final ButtonState buttonState = new ButtonState(hasSelection, multiSelected, state,
+				cachedLocations, ExplorersCompass.canTeleport,
+				ConfigHandler.GENERAL.allowSharing.get(), foundDimension, currentDimension);
+		if (buttonState.equals(lastButtonState)) {
+			return;
+		}
+		lastButtonState = buttonState;
 
 		searchButton.active = hasSelection || multiSelected > 0;
 		searchButton.setMessage(multiSelected > 1 ? Component.translatable("string.explorerscompass.search").append(Component.literal(" (" + multiSelected + ")")) : Component.translatable("string.explorerscompass.search"));
@@ -881,11 +952,11 @@ public class ExplorersCompassScreen extends Screen {
 
 		// canTeleport arrives with the first sync, which may be after this screen was opened. The
 		// located coordinates only mean something in the dimension the search ran in.
-		final ResourceLocation foundDimension = explorersCompass.getFoundDimension(stack);
-		final boolean inFoundDimension = foundDimension == null || foundDimension.equals(player.level.dimension().location());
+		final boolean inFoundDimension = foundDimension == null
+				|| foundDimension.equals(currentDimension);
 		teleportButton.visible = ExplorersCompass.canTeleport;
 		teleportButton.active = located && inFoundDimension;
-		shareButton.visible = ConfigHandler.GENERAL.allowSharing.get();
+		shareButton.visible = buttonState.allowSharing();
 		shareButton.active = located;
 
 		// A compass that is doing nothing has nothing to stop, and nothing aimed at it to take back off

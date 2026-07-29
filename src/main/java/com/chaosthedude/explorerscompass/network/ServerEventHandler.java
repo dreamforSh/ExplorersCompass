@@ -1,7 +1,10 @@
 package com.chaosthedude.explorerscompass.network;
 
 import com.chaosthedude.explorerscompass.ExplorersCompass;
+import com.chaosthedude.explorerscompass.util.BiomeUtils;
+import com.chaosthedude.explorerscompass.util.StructureUtils;
 import com.chaosthedude.explorerscompass.worker.SearchExecutor;
+import com.chaosthedude.explorerscompass.worker.SearchScheduler;
 
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
@@ -31,6 +34,14 @@ public class ServerEventHandler {
 			ExplorersCompass.explorersCompass.forgetAllPlayers();
 		}
 		SearchExecutor.shutdown();
+		// Forge empties its own list of workers here without asking the scheduler, which has to know
+		// so that it registers again for the next world
+		SearchScheduler.shutdown();
+		// Everything else derived from this server: its structure and biome data, and the record of
+		// what was synced to each client
+		StructureUtils.invalidateCache();
+		BiomeUtils.invalidateCache();
+		SyncPacket.forgetAllPlayers();
 	}
 
 }

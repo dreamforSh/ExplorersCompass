@@ -23,6 +23,8 @@ import com.chaosthedude.explorerscompass.util.ItemUtils;
 import com.chaosthedude.explorerscompass.util.PlayerUtils;
 import com.chaosthedude.explorerscompass.util.SearchTarget;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
+import com.chaosthedude.explorerscompass.worker.SearchContext;
+import com.chaosthedude.explorerscompass.worker.SearchService;
 import com.chaosthedude.explorerscompass.worker.SearchWorkerManager;
 
 import net.minecraft.ChatFormatting;
@@ -58,13 +60,13 @@ public class ExplorersCompassItem extends Item {
 	/** Marks a structure height the search could not determine. */
 	public static final int UNKNOWN_Y = Integer.MIN_VALUE;
 
-	// One worker manager per player, so that one player starting, finishing, or cancelling a search
-	// cannot stop another's: this item is a singleton, and a single manager here would be shared by
-	// every player on the server. Only ever touched on the server thread.
-	private final Map<UUID, SearchWorkerManager> workerManagers = new HashMap<UUID, SearchWorkerManager>();
-
-	// When each player last started a search, for rate limiting. Only ever touched on the server thread.
-	private final Map<UUID, Long> lastSearchStartTimes = new HashMap<UUID, Long>();
+	// How many of a multi-selection's keys are kept on the compass. They are only there so that
+	// searching for a further instance keeps considering the whole selection, and everything written
+	// to a stack rides along on every sync of it — of which a running search causes one each time it
+	// reports how far it has looked. A selection past this costs more to carry around than searching
+	// for the ones beyond it is worth; the search itself is never cut down, only what is remembered
+	// for the next one.
+	private static final int MAX_PERSISTED_TARGET_KEYS = 256;
 
 	// When each player last shared a location, so that sharing cannot be used to flood chat. Only
 	// ever touched on the server thread.
@@ -143,7 +145,7 @@ public class ExplorersCompassItem extends Item {
 	 * locations any earlier search had collected.
 	 */
 	public void searchForTargets(Level level, Player player, SearchTarget searchTarget, List<ResourceLocation> keys, BlockPos pos, ItemStack stack) {
-		if (!(level instanceof ServerLevel) || keys.isEmpty() || !tryAcquireSearchSlot(player)) {
+		if (!(level instanceof ServerLevel) || keys.isEmpty() || SearchService.isOnCooldown(player)) {
 			return;
 		}
 
@@ -157,7 +159,7 @@ public class ExplorersCompassItem extends Item {
 	 * earlier search had collected.
 	 */
 	public void searchForGroup(Level level, Player player, SearchTarget searchTarget, ResourceLocation groupKey, BlockPos pos, ItemStack stack) {
-		if (!(level instanceof ServerLevel) || !tryAcquireSearchSlot(player)) {
+		if (!(level instanceof ServerLevel) || SearchService.isOnCooldown(player)) {
 			return;
 		}
 
@@ -172,7 +174,7 @@ public class ExplorersCompassItem extends Item {
 	 * is dropped and the search starts over from the closest one again.
 	 */
 	public void searchForNext(Level level, Player player, BlockPos pos, ItemStack stack) {
-		if (!(level instanceof ServerLevel) || ConfigHandler.GENERAL.maxNextSearches.get() <= 0 || !tryAcquireSearchSlot(player)) {
+		if (!(level instanceof ServerLevel) || ConfigHandler.GENERAL.maxNextSearches.get() <= 0 || SearchService.isOnCooldown(player)) {
 			return;
 		}
 
@@ -219,15 +221,17 @@ public class ExplorersCompassItem extends Item {
 	public void cancelSearch(Level level, Player player, ItemStack stack) {
 		// Only the server runs searches; the client-side use of this item has no workers
 		if (!level.isClientSide()) {
-			final SearchWorkerManager workerManager = getWorkerManager(player);
-			workerManager.stop();
-			workerManager.clear();
+			SearchService.stopSearch(player);
 		}
 		setState(stack, null, CompassState.INACTIVE, player);
 		clearPrevPos(stack);
 	}
 
 	private void search(ServerLevel level, Player player, SearchTarget searchTarget, List<ResourceLocation> keys, ResourceLocation displayKey, boolean isGroup, BlockPos pos, ItemStack stack, List<BlockPos> prevPos, boolean ignoreNearStart) {
+		// Everything a request has to be for it to search at all has been checked by now, so this is
+		// where the cooldown starts: resolving the keys below is itself worth rate limiting
+		SearchService.recordSearchStart(player);
+
 		// The keys arrive over the network, so they may be stale (the client keeps the list from the
 		// last world it synced with), duplicated, or simply made up. Resolve them against this world
 		// and drop anything that does not belong, rather than handing nulls to world generation.
@@ -268,21 +272,23 @@ public class ExplorersCompassItem extends Item {
 		setTargetKeys(stack, isGroup ? List.<ResourceLocation>of() : validKeys);
 		setSearchRadius(stack, 0, player);
 
-		final SearchWorkerManager workerManager = getWorkerManager(player);
+		final SearchWorkerManager workerManager = SearchService.getWorkerManager(player);
 		workerManager.stop();
 		if (validKeys.isEmpty()) {
-			setNotFound(stack, 0, 0);
+			// Reported the same way a search that ran and turned up nothing is, so that the compass, the
+			// remaining workers and the player are all left in the state every other ending leaves them
+			fail(player, stack, 0, 0);
 			return;
 		}
 
+		final SearchContext context = new SearchContext(level, player, stack, pos, prevPos, isGroup, ignoreNearStart);
 		if (searchTarget == SearchTarget.BIOME) {
-			workerManager.createBiomeWorker(level, player, stack, biomes, pos, prevPos, isGroup, ignoreNearStart);
+			workerManager.createBiomeWorker(context, biomes);
 		} else {
-			workerManager.createStructureWorkers(level, player, stack, structures, pos, prevPos, isGroup, ignoreNearStart);
+			workerManager.createStructureWorkers(context, structures);
 		}
-		boolean started = workerManager.start();
-		if (!started) {
-			setNotFound(stack, 0, 0);
+		if (!workerManager.start()) {
+			fail(player, stack, 0, 0);
 		}
 	}
 
@@ -296,16 +302,10 @@ public class ExplorersCompassItem extends Item {
 		return searchTarget == SearchTarget.BIOME ? BiomeUtils.getBiomeKeysToGroupKeys(level).get(key) : StructureUtils.getStructureKeysToTypeKeys(level).get(key);
 	}
 
-	/** The worker manager running the given player's searches. */
-	private SearchWorkerManager getWorkerManager(Player player) {
-		return workerManagers.computeIfAbsent(player.getUUID(), (uuid) -> new SearchWorkerManager());
-	}
-
 	/** Stops every search on this server, and forgets who they belonged to. */
 	public void forgetAllPlayers() {
-		for (UUID playerId : new ArrayList<UUID>(workerManagers.keySet())) {
-			forgetPlayer(playerId);
-		}
+		SearchService.forgetAllPlayers();
+		lastShareTimes.clear();
 	}
 
 	/**
@@ -313,36 +313,8 @@ public class ExplorersCompassItem extends Item {
 	 * for the rest of the server's life.
 	 */
 	public void forgetPlayer(UUID playerId) {
-		final SearchWorkerManager workerManager = workerManagers.remove(playerId);
-		if (workerManager != null) {
-			// Stop before dropping the manager: its workers are registered with the world worker
-			// manager, and would otherwise keep sampling for a player who is no longer here, with
-			// nothing left that could stop them
-			workerManager.stop();
-			workerManager.clear();
-		}
-		lastSearchStartTimes.remove(playerId);
+		SearchService.forgetPlayer(playerId);
 		lastShareTimes.remove(playerId);
-	}
-
-	/**
-	 * Whether the given player may start a search now, and records the attempt when they may.
-	 * Search packets cost a client nothing to send, so without this a modified client could restart
-	 * expensive searches as fast as it can spam them.
-	 */
-	private boolean tryAcquireSearchSlot(Player player) {
-		final int cooldown = ConfigHandler.GENERAL.searchRequestCooldownMillis.get();
-		if (cooldown <= 0) {
-			return true;
-		}
-
-		final long now = System.currentTimeMillis();
-		final Long lastStart = lastSearchStartTimes.get(player.getUUID());
-		if (lastStart != null && now - lastStart < cooldown) {
-			return false;
-		}
-		lastSearchStartTimes.put(player.getUUID(), now);
-		return true;
 	}
 
 	public void succeed(Player player, ItemStack stack, ResourceLocation targetKey, boolean isGroup, int x, int z, int y, ResourceLocation dimensionKey, List<BlockPos> prevPos, int samples, boolean displayCoordinates) {
@@ -352,7 +324,7 @@ public class ExplorersCompassItem extends Item {
 		setPrevPos(stack, prevPos);
 		setDisplayCoordinates(stack, displayCoordinates);
 		addBookmark(stack, new BookmarkEntry(searchTarget, targetKey, x, y, z, dimensionKey));
-		getWorkerManager(player).clear();
+		SearchService.getWorkerManager(player).clear();
 
 		final String name = searchTarget.getBasicName(targetKey);
 		final String coordinates = y != UNKNOWN_Y ? x + ", " + y + ", " + z : x + ", " + z;
@@ -362,7 +334,7 @@ public class ExplorersCompassItem extends Item {
 	/** Reports that the search is over and located nothing. */
 	public void fail(Player player, ItemStack stack, int radius, int samples) {
 		setNotFound(stack, radius, samples);
-		getWorkerManager(player).clear();
+		SearchService.getWorkerManager(player).clear();
 		notifySearchResult(player, Component.translatable("string.explorerscompass.notFound").append(Component.literal(": " + getSearchTarget(stack).getBasicName(getTargetKey(stack)))));
 	}
 
@@ -503,6 +475,10 @@ public class ExplorersCompassItem extends Item {
 
 			final ListTag listTag = new ListTag();
 			for (ResourceLocation key : targetKeys) {
+				if (listTag.size() >= MAX_PERSISTED_TARGET_KEYS) {
+					ExplorersCompass.LOGGER.warn("Remembering only the first " + MAX_PERSISTED_TARGET_KEYS + " of " + targetKeys.size() + " selected targets; searching for a further instance will consider those alone");
+					break;
+				}
 				listTag.add(StringTag.valueOf(key.toString()));
 			}
 			stack.getTag().put("TargetKeys", listTag);
@@ -692,6 +668,13 @@ public class ExplorersCompassItem extends Item {
 			}
 		}
 		return prevPos;
+	}
+
+	/** Number of remembered locations, without constructing a position for every list entry. */
+	public int getPrevPosCount(ItemStack stack) {
+		return ItemUtils.verifyNBT(stack) && stack.getTag().contains("PrevPos", Tag.TAG_LIST)
+				? stack.getTag().getList("PrevPos", Tag.TAG_COMPOUND).size()
+				: 0;
 	}
 
 	/**

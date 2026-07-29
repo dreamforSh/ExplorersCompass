@@ -12,9 +12,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerChunkCache;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkStatus;
@@ -25,12 +22,12 @@ import net.minecraft.world.level.levelgen.structure.placement.StructurePlacement
 
 public abstract class StructureSearchWorker<T extends StructurePlacement> extends SearchWorker {
 
-	protected T placement;
-	protected List<Structure> structureSet;
-	protected long seed;
+	protected final T placement;
+	protected final List<Structure> structureSet;
+	protected final long seed;
 
-	public StructureSearchWorker(ServerLevel level, Player player, ItemStack stack, BlockPos startPos, T placement, List<Structure> structureSet, List<BlockPos> prevPos, boolean isGroup, boolean ignoreNearStart, SearchWorkerManager manager) {
-		super(level, player, stack, startPos, prevPos, isGroup, ignoreNearStart, ConfigHandler.GENERAL.maxSamples.get(), manager);
+	public StructureSearchWorker(SearchContext context, T placement, List<Structure> structureSet) {
+		super(context, ConfigHandler.GENERAL.maxSamples.get());
 		this.structureSet = structureSet;
 		this.placement = placement;
 
@@ -97,6 +94,11 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> extend
 		return isWithinMaxRadius(chunkPos.getMiddleBlockX(), chunkPos.getMiddleBlockZ());
 	}
 
+	/** Whether a chunk is worth sampling: inside the radius, and nearer than what was located. */
+	protected boolean isWorthSampling(ChunkPos chunkPos) {
+		return isWorthSampling(chunkPos.getMiddleBlockX(), chunkPos.getMiddleBlockZ());
+	}
+
 	/**
 	 * Whether this placement is allowed to put a structure in the given chunk. This is the same
 	 * condition the chunk generator applies when it generates structures, so a chunk it rejects
@@ -109,15 +111,15 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> extend
 				chunkPos.x, chunkPos.z);
 	}
 
-	protected void succeed(BlockPos pos, Structure structure) {
+	protected void found(BlockPos pos, Structure structure) {
 		final ResourceLocation structureKey = StructureUtils.getKeyForStructure(level, structure);
 		if (structureKey == null) {
-			ExplorersCompass.LOGGER.error("SearchWorkerManager " + managerId + ": " + getName() + " located a structure that is not registered in this world");
-			fail();
+			// Nothing could be reported for it, so carry on searching rather than ending here
+			ExplorersCompass.LOGGER.error("Search " + context.getId() + ": " + getName() + " located a structure that is not registered in this world");
 			return;
 		}
 
-		succeed(pos, structureKey);
+		found(pos, structureKey);
 	}
 
 }

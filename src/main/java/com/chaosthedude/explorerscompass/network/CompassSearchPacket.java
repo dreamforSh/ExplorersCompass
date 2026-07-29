@@ -30,29 +30,22 @@ public class CompassSearchPacket {
 	private boolean isGroup;
 	private ResourceLocation groupKey;
 	private List<ResourceLocation> targetKeys;
-	private int x;
-	private int y;
-	private int z;
 
-	private CompassSearchPacket(SearchTarget searchTarget, boolean isGroup, ResourceLocation groupKey, List<ResourceLocation> targetKeys, BlockPos pos) {
+	private CompassSearchPacket(SearchTarget searchTarget, boolean isGroup, ResourceLocation groupKey, List<ResourceLocation> targetKeys) {
 		this.searchTarget = searchTarget;
 		this.isGroup = isGroup;
 		this.groupKey = groupKey;
 		this.targetKeys = targetKeys;
-
-		x = pos.getX();
-		y = pos.getY();
-		z = pos.getZ();
 	}
 
 	/** A search for the nearest of the given structures or biomes. */
-	public static CompassSearchPacket forTargets(SearchTarget searchTarget, List<ResourceLocation> targetKeys, BlockPos pos) {
-		return new CompassSearchPacket(searchTarget, false, null, targetKeys, pos);
+	public static CompassSearchPacket forTargets(SearchTarget searchTarget, List<ResourceLocation> targetKeys) {
+		return new CompassSearchPacket(searchTarget, false, null, targetKeys);
 	}
 
 	/** A search for the nearest member of the given group. */
-	public static CompassSearchPacket forGroup(SearchTarget searchTarget, ResourceLocation groupKey, BlockPos pos) {
-		return new CompassSearchPacket(searchTarget, true, groupKey, List.of(), pos);
+	public static CompassSearchPacket forGroup(SearchTarget searchTarget, ResourceLocation groupKey) {
+		return new CompassSearchPacket(searchTarget, true, groupKey, List.of());
 	}
 
 	public CompassSearchPacket(FriendlyByteBuf buf) {
@@ -71,10 +64,6 @@ public class CompassSearchPacket {
 				targetKeys.add(buf.readResourceLocation());
 			}
 		}
-
-		x = buf.readInt();
-		y = buf.readInt();
-		z = buf.readInt();
 	}
 
 	public void toBytes(FriendlyByteBuf buf) {
@@ -88,10 +77,6 @@ public class CompassSearchPacket {
 				buf.writeResourceLocation(targetKey);
 			}
 		}
-
-		buf.writeInt(x);
-		buf.writeInt(y);
-		buf.writeInt(z);
 	}
 
 	public void handle(Supplier<NetworkEvent.Context> ctx) {
@@ -104,11 +89,15 @@ public class CompassSearchPacket {
 			final ItemStack stack = ItemUtils.getHeldItem(player, ExplorersCompass.explorersCompass);
 			if (!stack.isEmpty()) {
 				final ExplorersCompassItem explorersCompass = (ExplorersCompassItem) stack.getItem();
+				// Where the search starts is taken from the player rather than from the packet. A client
+				// has nothing to say about it that the server does not already know, and one that has been
+				// modified could otherwise search around any coordinates it likes.
+				final BlockPos startPos = player.blockPosition();
 				try {
 					if (isGroup) {
-						explorersCompass.searchForGroup(player.getLevel(), player, searchTarget, groupKey, new BlockPos(x, y, z), stack);
+						explorersCompass.searchForGroup(player.getLevel(), player, searchTarget, groupKey, startPos, stack);
 					} else {
-						explorersCompass.searchForTargets(player.getLevel(), player, searchTarget, targetKeys, new BlockPos(x, y, z), stack);
+						explorersCompass.searchForTargets(player.getLevel(), player, searchTarget, targetKeys, startPos, stack);
 					}
 				} catch (Throwable t) {
 					// This runs on the server thread, so an exception here would take down the server

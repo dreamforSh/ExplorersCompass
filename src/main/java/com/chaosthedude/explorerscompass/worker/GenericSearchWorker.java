@@ -7,26 +7,27 @@ import com.mojang.datafixers.util.Pair;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.SectionPos;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.levelgen.structure.placement.StructurePlacement;
 
 public class GenericSearchWorker extends StructureSearchWorker<StructurePlacement> {
 
-	public int chunkX;
-	public int chunkZ;
-	public int length;
-	public double nextLength;
-	public Direction direction;
+	private final int startChunkX;
+	private final int startChunkZ;
 
-	private int startChunkX;
-	private int startChunkZ;
+	// Where the spiral has reached, and how far along the side of it the next step is. Unlike the
+	// placements that only put a structure on a grid of their own, any chunk here can hold one, so
+	// this walks every chunk rather than only the ones on each ring.
+	private int chunkX;
+	private int chunkZ;
+	private int length;
+	private double nextLength;
+	private Direction direction;
 
-	public GenericSearchWorker(ServerLevel level, Player player, ItemStack stack, BlockPos startPos, StructurePlacement placement, List<Structure> structureSet, List<BlockPos> prevPos, boolean isGroup, boolean ignoreNearStart, SearchWorkerManager manager) {
-		super(level, player, stack, startPos, placement, structureSet, prevPos, isGroup, ignoreNearStart, manager);
+	public GenericSearchWorker(SearchContext context, StructurePlacement placement, List<Structure> structureSet) {
+		super(context, placement, structureSet);
+
 		startChunkX = SectionPos.blockToSectionCoord(startPos.getX());
 		startChunkZ = SectionPos.blockToSectionCoord(startPos.getZ());
 		chunkX = startChunkX;
@@ -38,51 +39,40 @@ public class GenericSearchWorker extends StructureSearchWorker<StructurePlacemen
 
 	@Override
 	protected boolean doSample() {
-		if (hasWork()) {
-			if (direction == Direction.NORTH) {
-				chunkZ--;
-			} else if (direction == Direction.EAST) {
-				chunkX++;
-			} else if (direction == Direction.SOUTH) {
-				chunkZ++;
-			} else if (direction == Direction.WEST) {
-				chunkX--;
-			}
+		if (direction == Direction.NORTH) {
+			chunkZ--;
+		} else if (direction == Direction.EAST) {
+			chunkX++;
+		} else if (direction == Direction.SOUTH) {
+			chunkZ++;
+		} else if (direction == Direction.WEST) {
+			chunkX--;
+		}
 
-			ChunkPos chunkPos = new ChunkPos(chunkX, chunkZ);
-			// The corners of the spiral reach past its edges, so part of the outer rings lies beyond
-			// the configured radius
-			if (isWithinMaxRadius(chunkPos)) {
-				currentPos = chunkPos.getMiddleBlockPosition(0);
+		final ChunkPos chunkPos = new ChunkPos(chunkX, chunkZ);
+		// The corners of the spiral reach past its edges, so part of the outer rings lies beyond the
+		// configured radius, and beyond anything already located
+		if (isWorthSampling(chunkPos)) {
+			currentPos = chunkPos.getMiddleBlockPosition(0);
 
-				Pair<BlockPos, Structure> pair = getStructureGeneratingAt(chunkPos);
-				samples++;
-				if (pair != null) {
-					succeed(pair.getFirst(), pair.getSecond());
-				}
-			}
-
-			length++;
-			if (length >= (int)nextLength) {
-				if (direction != Direction.UP) {
-					nextLength += 0.5;
-					direction = direction.getClockWise();
-				} else {
-					direction = Direction.NORTH;
-				}
-				length = 0;
+			final Pair<BlockPos, Structure> pair = getStructureGeneratingAt(chunkPos);
+			samples++;
+			if (pair != null) {
+				found(pair.getFirst(), pair.getSecond());
 			}
 		}
 
-		if (hasWork()) {
-			return true;
+		length++;
+		if (length >= (int) nextLength) {
+			if (direction != Direction.UP) {
+				nextLength += 0.5;
+				direction = direction.getClockWise();
+			} else {
+				direction = Direction.NORTH;
+			}
+			length = 0;
 		}
 
-		if (!finished) {
-			endOfWork();
-		}
-
-		// Handing back can widen what this worker may search, in which case it carries straight on
 		return hasWork();
 	}
 

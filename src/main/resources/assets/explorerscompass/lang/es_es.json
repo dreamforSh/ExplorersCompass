@@ -49,7 +49,7 @@
     "string.explorerscompass.copyCoordinates": "Haz clic para copiar las coordenadas",
     "string.explorerscompass.noBookmarks": "Aún no se ha localizado nada",
     "string.explorerscompass.sharedLocation": "%1$s localizó %2$s en %3$s (%4$s)",
-    "string.explorerscompass.searchHint": "Buscar (@mod)",
+    "string.explorerscompass.searchHint": "Buscar nombre o ID",
     "string.explorerscompass.wrongDimension": "La estructura localizada está en otra dimensión",
     "string.explorerscompass.modFilter": "Mod",
     "string.explorerscompass.allMods": "Todos los mods",

@@ -25,9 +25,20 @@ public class BookmarkListEntry extends ObjectSelectionList.Entry<BookmarkListEnt
 	private final BookmarksScreen parentScreen;
 	private final BookmarkList bookmarkList;
 	private final BookmarkEntry bookmark;
+	private final Component narration;
+	private final String displayName;
+	private final String coordinateLine;
 	// Where this entry sits in the compass's own list, which is what the packets refer to
 	private final int index;
 	private long lastClickTime;
+	private int cachedPlayerX = Integer.MIN_VALUE;
+	private int cachedPlayerZ = Integer.MIN_VALUE;
+	private float cachedPlayerYaw = Float.NaN;
+	private String cachedBadgeText;
+	private boolean cachedBadgeHere;
+	private int cachedRowWidth = -1;
+	private String cachedBadge;
+	private String cachedName;
 
 	public BookmarkListEntry(BookmarkList bookmarkList, BookmarkEntry bookmark, int index) {
 		this.bookmarkList = bookmarkList;
@@ -35,6 +46,13 @@ public class BookmarkListEntry extends ObjectSelectionList.Entry<BookmarkListEnt
 		this.index = index;
 		parentScreen = bookmarkList.getParentScreen();
 		mc = Minecraft.getInstance();
+		displayName = bookmark.getSearchTarget().getPrettyName(bookmark.getTargetKey());
+		narration = Component.literal(displayName + " (" + bookmark.getTargetKey() + ")");
+		final int y = bookmark.getY();
+		final String coordinates = y != ExplorersCompassItem.UNKNOWN_Y
+				? bookmark.getX() + ", " + y + ", " + bookmark.getZ()
+				: bookmark.getX() + ", " + bookmark.getZ();
+		coordinateLine = I18n.get("string.explorerscompass.coordinates") + ": " + coordinates;
 	}
 
 	public int getIndex() {
@@ -58,22 +76,16 @@ public class BookmarkListEntry extends ObjectSelectionList.Entry<BookmarkListEnt
 		// In another dimension the distance means nothing, so the dimension takes the place of the
 		// badge that would otherwise say how far away this location is
 		final boolean here = isInCurrentDimension();
-		final String badgeText;
-		if (here) {
-			badgeText = String.format("%,d", StructureUtils.getHorizontalDistanceToLocation(parentScreen.getPlayer(), bookmark.getX(), bookmark.getZ())) + " " + ClientEventHandler.compassDirection(parentScreen.getPlayer(), bookmark.getX(), bookmark.getZ());
-		} else {
-			badgeText = StructureUtils.getDimensionName(bookmark.getDimensionKey());
-		}
-		final String badge = RenderUtils.trimToWidth(badgeText, Math.min(110, par4 / 2));
-		final int badgeLeft = right - mc.font.width(badge) - 8;
-		RenderUtils.drawChip(poseStack, badge, badgeLeft, par2, here ? GuiTheme.CHIP_BACKGROUND : GuiTheme.CHIP_ACCENT_BACKGROUND, here ? GuiTheme.TEXT_SECONDARY : GuiTheme.TEXT_WARNING);
+		updateDynamicBadge(here);
+		updateLayout(par4, left);
+		final int badgeLeft = right - mc.font.width(cachedBadge) - 8;
+		RenderUtils.drawChip(poseStack, cachedBadge, badgeLeft, par2,
+				here ? GuiTheme.CHIP_BACKGROUND : GuiTheme.CHIP_ACCENT_BACKGROUND,
+				here ? GuiTheme.TEXT_SECONDARY : GuiTheme.TEXT_WARNING);
 
-		final String name = RenderUtils.trimToWidth(bookmark.getSearchTarget().getPrettyName(bookmark.getTargetKey()), badgeLeft - left - 6);
-		mc.font.draw(poseStack, name, left, par2 + 2, GuiTheme.TEXT_PRIMARY);
+		mc.font.draw(poseStack, cachedName, left, par2 + 2, GuiTheme.TEXT_PRIMARY);
 
-		final int y = bookmark.getY();
-		final String coordinates = y != ExplorersCompassItem.UNKNOWN_Y ? bookmark.getX() + ", " + y + ", " + bookmark.getZ() : bookmark.getX() + ", " + bookmark.getZ();
-		mc.font.draw(poseStack, I18n.get("string.explorerscompass.coordinates") + ": " + coordinates, left, par2 + 14, GuiTheme.TEXT_MUTED);
+		mc.font.draw(poseStack, coordinateLine, left, par2 + 14, GuiTheme.TEXT_MUTED);
 
 		RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
 	}
@@ -94,12 +106,50 @@ public class BookmarkListEntry extends ObjectSelectionList.Entry<BookmarkListEnt
 
 	@Override
 	public Component getNarration() {
-		return Component.literal(bookmark.getSearchTarget().getPrettyName(bookmark.getTargetKey()));
+		return narration;
 	}
 
 	public void pointAt() {
 		mc.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.0F));
 		parentScreen.pointAt(index);
+	}
+
+	private void updateDynamicBadge(boolean here) {
+		if (!here) {
+			if (cachedBadgeText == null || cachedBadgeHere) {
+				cachedBadgeText = StructureUtils.getDimensionName(bookmark.getDimensionKey());
+				cachedBadgeHere = false;
+				cachedRowWidth = -1;
+			}
+			return;
+		}
+
+		final int playerX = parentScreen.getPlayer().getBlockX();
+		final int playerZ = parentScreen.getPlayer().getBlockZ();
+		final float playerYaw = parentScreen.getPlayer().getYRot();
+		if (cachedBadgeHere && cachedPlayerX == playerX && cachedPlayerZ == playerZ
+				&& cachedPlayerYaw == playerYaw) {
+			return;
+		}
+		cachedBadgeHere = true;
+		cachedPlayerX = playerX;
+		cachedPlayerZ = playerZ;
+		cachedPlayerYaw = playerYaw;
+		cachedBadgeText = String.format("%,d", StructureUtils.getHorizontalDistanceToLocation(
+				parentScreen.getPlayer(), bookmark.getX(), bookmark.getZ()))
+				+ " " + ClientEventHandler.compassDirection(parentScreen.getPlayer(),
+						bookmark.getX(), bookmark.getZ());
+		cachedRowWidth = -1;
+	}
+
+	private void updateLayout(int rowWidth, int left) {
+		if (cachedRowWidth == rowWidth) {
+			return;
+		}
+		cachedRowWidth = rowWidth;
+		cachedBadge = RenderUtils.trimToWidth(cachedBadgeText, Math.min(110, rowWidth / 2));
+		final int badgeLeft = left + rowWidth - 2 - mc.font.width(cachedBadge) - 8;
+		cachedName = RenderUtils.trimToWidth(displayName, badgeLeft - left - 6);
 	}
 
 }

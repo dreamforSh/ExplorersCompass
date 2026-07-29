@@ -1,112 +1,143 @@
 package com.chaosthedude.explorerscompass.worker;
 
-import java.util.List;
-
 import com.chaosthedude.explorerscompass.ExplorersCompass;
-import com.chaosthedude.explorerscompass.config.ConfigHandler;
-import com.chaosthedude.explorerscompass.items.ExplorersCompassItem;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.common.WorldWorkerManager;
 
 /**
  * Everything a search does apart from deciding where to look and what counts as a find: it walks
- * outwards from where it was started, a slice of a tick at a time, until it locates something, runs
- * out of the radius or the samples it was allowed, or is stopped.
+ * outwards from where the search started, a location at a time, until it has covered as far as the
+ * nearest location it turned up, runs out of the radius or the samples it was allowed, or is
+ * stopped.
+ *
+ * <p>A worker only ever samples. It is given its turns by {@link SearchWorkerManager}, which is
+ * what the server thread schedules, and everything the outcome of a search touches — the compass,
+ * the locations already found — belongs to {@link SearchContext} and is written to from there. A
+ * worker therefore holds nothing of its own that another thread could not read.
  */
-public abstract class SearchWorker implements WorldWorkerManager.IWorker {
-
-	// Granularity in blocks of the search radius reported to the compass while a search is running
-	private static final int RADIUS_REPORT_INTERVAL = 250;
+public abstract class SearchWorker {
 
 	// How close a location has to be to an already located one, or to where a search for a further
 	// instance started, to count as the same find. Two chunks, so that walking around inside a
 	// structure and searching again does not just point at the one being stood in.
 	private static final int SAME_LOCATION_DISTANCE = 32;
 
-	protected final SearchWorkerManager manager;
-	protected String managerId;
-	protected ServerLevel level;
-	protected Player player;
-	protected ItemStack stack;
-	protected BlockPos startPos;
+	protected final SearchContext context;
+
+	// Read straight off the context for the sampling loop, which reaches for them constantly
+	protected final ServerLevel level;
+	protected final BlockPos startPos;
+	protected final int maxRadius;
+	protected final int maxSamples;
+
 	protected BlockPos currentPos;
-	protected List<BlockPos> prevPos;
-	protected boolean isGroup;
-	protected boolean ignoreNearStart;
 	protected int samples;
 	// Set by the server thread to stop a search, and read by whichever thread is sampling
 	protected volatile boolean finished;
 
-	// Snapshots of the limits this search runs under. The sampling loop reads them for every
-	// location, and a config lookup walks the config tree on every call, which is far too slow for
-	// that; a search also ought to finish under the limits it was started with.
-	protected final int maxRadius;
-	protected final int maxSamples;
-	private final int maxSearchTimePerTick;
+	// The nearest location this worker has turned up so far. A worker carries on sampling after a
+	// find until it has covered as far as that location: the cells of a ring are walked row by row,
+	// so the first cell of a ring to hold something is not necessarily the nearest one on it.
+	private volatile BlockPos bestPos;
+	private volatile ResourceLocation bestKey;
+	private volatile long bestDistanceSqr;
 
 	// How far this worker may ever search. It starts out as the configured maximum and is narrowed
-	// down by the manager once something has been located, since a worker that has covered that far
-	// can no longer improve on it. Reaching this is the end of the worker.
+	// down once something has been located, by this worker or by another one of the same search,
+	// since a worker that has covered that far can no longer improve on it. Reaching this is the end
+	// of the worker.
 	private volatile int radiusLimit;
 
 	// How far the turn this worker is currently taking searches. The manager widens this once every
 	// worker of the search has reached it; reaching it only ends the turn, not the worker.
 	private volatile int bandLimit;
 
-	// When this worker started working during the current tick, or -1 if it is not currently working
-	private long sliceStartTime;
+	// Whether this worker has been given its first turn yet
+	private boolean begun;
 
-	public SearchWorker(ServerLevel level, Player player, ItemStack stack, BlockPos startPos, List<BlockPos> prevPos, boolean isGroup, boolean ignoreNearStart, int maxSamples, SearchWorkerManager manager) {
-		this.level = level;
-		this.player = player;
-		this.stack = stack;
-		this.startPos = startPos;
-		this.prevPos = prevPos;
-		this.isGroup = isGroup;
-		this.ignoreNearStart = ignoreNearStart;
+	public SearchWorker(SearchContext context, int maxSamples) {
+		this.context = context;
 		this.maxSamples = maxSamples;
-		this.manager = manager;
-		managerId = manager.getId();
+
+		level = context.getLevel();
+		startPos = context.getStartPos();
+		maxRadius = context.getMaxRadius();
 
 		currentPos = startPos;
 		samples = 0;
-		sliceStartTime = -1L;
 
-		maxRadius = ConfigHandler.GENERAL.maxRadius.get();
-		maxSearchTimePerTick = ConfigHandler.GENERAL.maxSearchTimePerTick.get();
 		radiusLimit = maxRadius;
 		bandLimit = maxRadius;
 	}
 
-	public void start() {
-		// A worker with nothing to do is dropped by Forge without ever being called, so one that
-		// cannot sample anything at all has to hand straight back to the manager rather than leaving
-		// the search waiting for a result that will never arrive
-		if (!stack.isEmpty() && stack.getItem() == ExplorersCompass.explorersCompass && hasWork()) {
-			ExplorersCompass.LOGGER.info("SearchWorkerManager " + managerId + ": " + getName() + " starting with " + (shouldLogRadius() ? getEffectiveRadiusLimit() + " max radius, " : "") + maxSamples + " max samples");
-			run();
-		} else {
-			fail();
+	/**
+	 * Puts this worker to work, the first time it is given a turn. Does nothing on the turns after
+	 * that, so the manager can call it whenever the turn comes round.
+	 */
+	final void begin() {
+		if (begun) {
+			return;
+		}
+
+		begun = true;
+		ExplorersCompass.LOGGER.info("Search " + context.getId() + ": " + getName() + " starting with " + (shouldLogRadius() ? getEffectiveRadiusLimit() + " max radius, " : "") + maxSamples + " max samples");
+		onBegin();
+	}
+
+	/** Whatever this kind of worker has to set going before it can sample. */
+	protected void onBegin() {
+	}
+
+	/**
+	 * Whether this worker can sample right now. One that is waiting for something of its own, such
+	 * as the positions a placement is still computing, cannot, and the manager gives the turn to
+	 * another worker of the search rather than letting it hold everything else up.
+	 */
+	boolean isReady() {
+		return true;
+	}
+
+	/** Whether there is anything left for this worker to sample under the limits it currently has. */
+	boolean hasWork() {
+		return hasMoreToSample();
+	}
+
+	protected boolean hasMoreToSample() {
+		return !finished && getRadius() < getEffectiveRadiusLimit() && samples < maxSamples;
+	}
+
+	/**
+	 * Whether this worker is finished for good, rather than having only reached the end of the turn
+	 * it was taking.
+	 */
+	protected boolean isExhausted() {
+		return finished || getRadius() >= radiusLimit || samples >= maxSamples;
+	}
+
+	final boolean doWork() {
+		try {
+			return doSample();
+		} catch (Throwable t) {
+			// Sampling touches world generation and chunk storage, both of which can fail for a single
+			// structure or chunk. Report the search as over instead of letting the exception escape into
+			// the server tick, where it would take down the server.
+			abort(t);
+			return false;
 		}
 	}
 
 	/**
-	 * Puts this worker to work. By default that hands it to Forge, which calls it back for a slice
-	 * of every server tick until it has nothing left to do.
+	 * Samples a single location. Only called when this worker is ready and has work, and returns
+	 * true if it could carry straight on to the next one.
 	 */
-	protected void run() {
-		WorldWorkerManager.addWorker(this);
-	}
+	protected abstract boolean doSample();
 
 	/**
-	 * Cuts this worker down to the given radius for good. Called by the manager once something has
-	 * been located, since anything this one turns up beyond that distance cannot be the answer.
+	 * Cuts this worker down to the given radius for good. Called when something has been located,
+	 * since anything this one turns up beyond that distance cannot be the answer.
 	 */
 	void setRadiusLimit(int limit) {
 		radiusLimit = Math.min(radiusLimit, limit);
@@ -122,97 +153,12 @@ public abstract class SearchWorker implements WorldWorkerManager.IWorker {
 		return Math.min(radiusLimit, bandLimit);
 	}
 
-	@Override
-	public boolean hasWork() {
-		return hasMoreToSample();
-	}
-
-	/** Whether there is anything left for this worker to sample under the limits it currently has. */
-	protected boolean hasMoreToSample() {
-		return !finished && getRadius() < getEffectiveRadiusLimit() && samples < maxSamples;
-	}
-
-	/**
-	 * Whether this worker is finished for good, rather than having only reached the end of the turn
-	 * it was taking.
-	 */
-	protected boolean isExhausted() {
-		return finished || getRadius() >= radiusLimit || samples >= maxSamples;
-	}
-
-	/**
-	 * Hands back once there is nothing left to sample: to the compass when this worker is finished
-	 * for good, and to the manager for the next turn when it has only reached the end of this one.
-	 */
-	protected void endOfWork() {
-		if (isExhausted()) {
-			fail();
-		} else {
-			manager.onYielded(this);
-		}
-	}
-
-	@Override
-	public final boolean doWork() {
-		final long now = System.currentTimeMillis();
-		if (sliceStartTime < 0L || now - sliceStartTime >= maxSearchTimePerTick) {
-			// Either this is the first call of a new tick, or the previous slice ran over because a single
-			// sample took longer than the whole budget. Start a fresh slice either way.
-			sliceStartTime = now;
-		}
-
-		boolean callAgain;
-		try {
-			updateSearchRadius();
-			callAgain = doSample();
-		} catch (Throwable t) {
-			// Sampling touches world generation and chunk storage, both of which can fail for a single
-			// structure or chunk. Report the search as failed instead of letting the exception escape into
-			// the server tick, where it would take down the server.
-			abort(t);
-			return false;
-		}
-
-		// Forge hands a worker the remainder of the tick and only checks the clock between calls, so a
-		// search that samples expensive locations can stall the server for as long as it likes. Give up
-		// the rest of the tick once this worker has used its slice.
-		if (!callAgain || System.currentTimeMillis() - sliceStartTime >= maxSearchTimePerTick) {
-			sliceStartTime = -1L;
-			return false;
-		}
-
-		return true;
-	}
-
-	/**
-	 * Samples a single location. Returns true if this worker should be called again, false if it is
-	 * done.
-	 */
-	protected abstract boolean doSample();
-
 	/**
 	 * Whether a location has already been located by an earlier search, and should be passed over so
-	 * that searching again finds a different instance. Locations right where this search started
-	 * count as well, so that a search for a further instance does not answer with what is being
-	 * stood in.
+	 * that searching again finds a different instance.
 	 */
 	protected boolean shouldIgnore(BlockPos pos) {
-		if (ignoreNearStart && isSameLocation(pos, startPos)) {
-			return true;
-		}
-
-		for (BlockPos prev : prevPos) {
-			if (isSameLocation(pos, prev)) {
-				return true;
-			}
-		}
-
-		return false;
-	}
-
-	private boolean isSameLocation(BlockPos pos, BlockPos other) {
-		final int distance = getSameLocationDistance();
-		return StructureUtils.getHorizontalDistanceSqrToLocation(other, pos.getX(), pos.getZ()) <= (long) distance * distance;
+		return context.isAlreadyLocated(pos, getSameLocationDistance());
 	}
 
 	/**
@@ -230,89 +176,87 @@ public abstract class SearchWorker implements WorldWorkerManager.IWorker {
 	 * reported.
 	 */
 	protected boolean isWithinMaxRadius(int x, int z) {
-		final long distanceSqr = StructureUtils.getHorizontalDistanceSqrToLocation(startPos, x, z);
-		return distanceSqr <= (long) maxRadius * maxRadius;
+		return context.distanceSqrFromStart(x, z) <= (long) maxRadius * maxRadius;
 	}
 
 	/**
-	 * Hands what this worker located to the manager. It is not the answer yet: a worker that has not
-	 * run is searching a different placement and may hold a nearer one.
+	 * Whether a location is worth sampling at all: no further out than this worker may search, and
+	 * nearer than whatever it has already turned up. The radius limit carries in what the rest of the
+	 * search has located as well, so a location another worker has already beaten is not sampled
+	 * either. Walking on past a find costs almost nothing this way, while what is left of the ring
+	 * the find was made on is still covered.
 	 */
-	protected void succeed(BlockPos pos, ResourceLocation key) {
-		ExplorersCompass.LOGGER.info("SearchWorkerManager " + managerId + ": " + getName() + " located " + key + " with " + (shouldLogRadius() ? getRadius() + " radius, " : "") + samples + " samples, " + prevPos.size() + " previously located");
-		// Mark this worker as finished before handing off: the manager starts the next worker of this
-		// search, and this one must not be considered live anymore if anything there goes wrong
-		finished = true;
-		manager.onLocated(this, pos, key, samples);
-	}
-
-	/** Tells the manager this worker has nothing left to search. */
-	protected void fail() {
-		ExplorersCompass.LOGGER.info("SearchWorkerManager " + managerId + ": " + getName() + " located nothing with " + (shouldLogRadius() ? getRadius() + " radius, " : "") + samples + " samples");
-		finished = true;
-		manager.onExhausted(this, roundRadius(getRadius(), RADIUS_REPORT_INTERVAL), samples);
+	protected boolean isWorthSampling(int x, int z) {
+		final long distanceSqr = context.distanceSqrFromStart(x, z);
+		if (distanceSqr > (long) radiusLimit * radiusLimit) {
+			return false;
+		}
+		return bestPos == null || distanceSqr < bestDistanceSqr;
 	}
 
 	/**
-	 * Puts the location the whole search settled on onto the compass. Only ever called on the worker
-	 * that located it, and only once every other worker has finished.
+	 * Takes note of a location this worker has turned up. It is not the answer yet: what is left of
+	 * the ring it was found on may hold a nearer one, and so may a worker searching a different
+	 * placement.
 	 */
-	void reportLocated(BlockPos pos, ResourceLocation key, int totalSamples) {
-		// Remember this location, so that searching again looks for a different instance. Only the
-		// location the search answers with is remembered: one a worker turned up and another beat is
-		// not somewhere the compass ever pointed.
-		prevPos.add(pos);
-		if (!stack.isEmpty() && stack.getItem() == ExplorersCompass.explorersCompass) {
-			((ExplorersCompassItem) stack.getItem()).succeed(player, stack, key, isGroup, pos.getX(), pos.getZ(), pos.getY(), level.dimension().location(), prevPos, totalSamples, ConfigHandler.GENERAL.displayCoordinates.get());
-		} else {
-			ExplorersCompass.LOGGER.error("SearchWorkerManager " + managerId + ": " + getName() + " found invalid compass after successful search");
+	protected void found(BlockPos pos, ResourceLocation key) {
+		final long distanceSqr = context.distanceSqrFromStart(pos.getX(), pos.getZ());
+		if (bestPos != null && distanceSqr >= bestDistanceSqr) {
+			return;
 		}
+
+		ExplorersCompass.LOGGER.info("Search " + context.getId() + ": " + getName() + " located " + key + " with " + (shouldLogRadius() ? getRadius() + " radius, " : "") + samples + " samples");
+		bestPos = pos;
+		bestKey = key;
+		bestDistanceSqr = distanceSqr;
+		// Nothing further out than this can be what this worker answers with, so the radius it was
+		// allowed beyond that is no longer worth covering
+		setRadiusLimit(ceilSqrt(distanceSqr));
 	}
 
-	/** Tells the compass the whole search located nothing. */
-	void reportNotFound(int radius, int totalSamples) {
-		if (!stack.isEmpty() && stack.getItem() == ExplorersCompass.explorersCompass) {
-			((ExplorersCompassItem) stack.getItem()).fail(player, stack, radius, totalSamples);
-		} else {
-			ExplorersCompass.LOGGER.error("SearchWorkerManager " + managerId + ": " + getName() + " found invalid compass after failed search");
-		}
+	BlockPos getBestPos() {
+		return bestPos;
 	}
 
-	public void stop() {
-		ExplorersCompass.LOGGER.info("SearchWorkerManager " + managerId + ": " + getName() + " stopped with " + (shouldLogRadius() ? getRadius() + " radius, " : "") + samples + " samples");
+	ResourceLocation getBestKey() {
+		return bestKey;
+	}
+
+	long getBestDistanceSqr() {
+		return bestDistanceSqr;
+	}
+
+	int getSamples() {
+		return samples;
+	}
+
+	/** Notes that this worker has nothing left to search. The manager reports the outcome. */
+	void finish() {
+		final BlockPos located = bestPos;
+		ExplorersCompass.LOGGER.info("Search " + context.getId() + ": " + getName() + (located == null ? " located nothing" : " finished on " + bestKey) + " with " + (shouldLogRadius() ? getRadius() + " radius, " : "") + samples + " samples");
+		finished = true;
+	}
+
+	void stop() {
+		ExplorersCompass.LOGGER.info("Search " + context.getId() + ": " + getName() + " stopped with " + (shouldLogRadius() ? getRadius() + " radius, " : "") + samples + " samples");
 		finished = true;
 	}
 
 	protected void abort(Throwable cause) {
-		ExplorersCompass.LOGGER.error("SearchWorkerManager " + managerId + ": " + getName() + " encountered an error while searching", cause);
-		sliceStartTime = -1L;
-		if (!finished) {
-			fail();
-		}
-	}
-
-	/**
-	 * Keeps the radius the compass reports in step with how far the search has looked. The threshold
-	 * it is measured against belongs to the manager rather than to this worker, so that the readout
-	 * only ever grows: the workers of one search each start over from where the player is standing,
-	 * and a radius dropping back to nothing partway through would read as the search having
-	 * restarted.
-	 */
-	protected void updateSearchRadius() {
-		final int radius = getRadius();
-		if (radius > RADIUS_REPORT_INTERVAL && manager.tryReportRadius(radius / RADIUS_REPORT_INTERVAL)) {
-			if (!stack.isEmpty() && stack.getItem() == ExplorersCompass.explorersCompass) {
-				((ExplorersCompassItem) stack.getItem()).setSearchRadius(stack, roundRadius(radius, RADIUS_REPORT_INTERVAL), player);
-			}
-		}
+		ExplorersCompass.LOGGER.error("Search " + context.getId() + ": " + getName() + " encountered an error while searching", cause);
+		finished = true;
 	}
 
 	protected int getRadius() {
 		return StructureUtils.getHorizontalDistanceToLocation(startPos, currentPos.getX(), currentPos.getZ());
 	}
 
-	protected int roundRadius(int radius, int roundTo) {
-		return ((int) radius / roundTo) * roundTo;
+	/**
+	 * The distance a squared distance stands for, rounded up. Rounding down would cut a worker off
+	 * just short of a location that is nearer than the one the limit came from.
+	 */
+	static int ceilSqrt(long distanceSqr) {
+		return (int) Math.ceil(Math.sqrt((double) distanceSqr));
 	}
 
 	protected abstract String getName();
