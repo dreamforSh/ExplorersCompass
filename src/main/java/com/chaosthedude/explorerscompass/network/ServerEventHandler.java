@@ -14,6 +14,9 @@ import net.minecraftforge.fml.common.Mod.EventBusSubscriber;
 @EventBusSubscriber(modid = ExplorersCompass.MODID)
 public class ServerEventHandler {
 
+	private ServerEventHandler() {
+	}
+
 	@SubscribeEvent
 	public static void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
 		// The record of what was synced to this client is per connection: after a relog the client

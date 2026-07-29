@@ -39,21 +39,30 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 @OnlyIn(Dist.CLIENT)
 public class CompassTooltip {
 
-	// The same mark the HUD panel and the status strip put in front of the state, so that all three
-	// read as one readout rather than three
+	/**
+	 * The same mark the HUD panel and the status strip put in front of the state, so that all three
+	 * read as one readout rather than three.
+	 */
 	private static final String DOT_GLYPH = "●";
 
-	// How many of a multi-target search are named before the tooltip only says how many there are.
-	// This is also what bounds how much of the stored selection is read back: a compass can carry
-	// hundreds of keys, and a tooltip is built again for every frame the pointer rests on the stack.
+	/**
+	 * How many of a multi-target search are named before the tooltip only says how many there are.
+	 * This is also what bounds how much of the stored selection is read back: a compass can carry
+	 * hundreds of keys, and a tooltip is built again for every frame the pointer rests on the stack.
+	 */
 	private static final int MAX_TARGETS_LISTED = 8;
 
 	/** How near the located place counts as having arrived at it, as the HUD reckons it. */
 	private static final int ARRIVED_DISTANCE = 32;
 
-	// A name long enough to push the tooltip off the screen is cut down. A name stays recognisable
-	// shortened, where the coordinates under it would not, so only the name is ever cut.
+	/**
+	 * A name long enough to push the tooltip off the screen is cut down. A name stays recognisable
+	 * shortened, where the coordinates under it would not, so only the name is ever cut.
+	 */
 	private static final int MAX_NAME_WIDTH = 160;
+
+	private CompassTooltip() {
+	}
 
 	public static void appendHoverText(ExplorersCompassItem compass, ItemStack stack, List<Component> tooltip, TooltipFlag flag) {
 		final TooltipDetail detail = ConfigHandler.CLIENT.tooltipDetail.get();

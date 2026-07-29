@@ -36,8 +36,10 @@ public class SearchContext {
 	private final ItemStack stack;
 	private final BlockPos startPos;
 
-	// The locations already located, which this search passes over, and which the location it settles
-	// on is added to
+	/**
+	 * The locations already located, which this search passes over, and which the location it settles
+	 * on is added to.
+	 */
 	private final List<BlockPos> prevPos;
 
 	private final boolean isGroup;

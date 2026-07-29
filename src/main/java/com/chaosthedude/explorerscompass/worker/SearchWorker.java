@@ -20,9 +20,11 @@ import net.minecraft.server.level.ServerLevel;
  */
 public abstract class SearchWorker {
 
-	// How close a location has to be to an already located one, or to where a search for a further
-	// instance started, to count as the same find. Two chunks, so that walking around inside a
-	// structure and searching again does not just point at the one being stood in.
+	/**
+	 * How close a location has to be to an already located one, or to where a search for a further
+	 * instance started, to count as the same find. Two chunks, so that walking around inside a
+	 * structure and searching again does not just point at the one being stood in.
+	 */
 	private static final int SAME_LOCATION_DISTANCE = 32;
 
 	protected final SearchContext context;
@@ -35,7 +37,7 @@ public abstract class SearchWorker {
 
 	protected BlockPos currentPos;
 	protected int samples;
-	// Set by the server thread to stop a search, and read by whichever thread is sampling
+	/** Set by the server thread to stop a search, and read by whichever thread is sampling. */
 	protected volatile boolean finished;
 
 	// The nearest location this worker has turned up so far. A worker carries on sampling after a
@@ -45,17 +47,21 @@ public abstract class SearchWorker {
 	private volatile ResourceLocation bestKey;
 	private volatile long bestDistanceSqr;
 
-	// How far this worker may ever search. It starts out as the configured maximum and is narrowed
-	// down once something has been located, by this worker or by another one of the same search,
-	// since a worker that has covered that far can no longer improve on it. Reaching this is the end
-	// of the worker.
+	/**
+	 * How far this worker may ever search. It starts out as the configured maximum and is narrowed
+	 * down once something has been located, by this worker or by another one of the same search,
+	 * since a worker that has covered that far can no longer improve on it. Reaching this is the end
+	 * of the worker.
+	 */
 	private volatile int radiusLimit;
 
-	// How far the turn this worker is currently taking searches. The manager widens this once every
-	// worker of the search has reached it; reaching it only ends the turn, not the worker.
+	/**
+	 * How far the turn this worker is currently taking searches. The manager widens this once every
+	 * worker of the search has reached it; reaching it only ends the turn, not the worker.
+	 */
 	private volatile int bandLimit;
 
-	// Whether this worker has been given its first turn yet
+	/** Whether this worker has been given its first turn yet. */
 	private boolean begun;
 
 	public SearchWorker(SearchContext context, int maxSamples) {

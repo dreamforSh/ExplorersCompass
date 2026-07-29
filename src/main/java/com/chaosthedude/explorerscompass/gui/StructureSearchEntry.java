@@ -37,9 +37,11 @@ public class StructureSearchEntry extends ObjectSelectionList.Entry<StructureSea
 	private final Component narration;
 	private final String groupLine;
 	private final String dimensionLine;
-	// Everything the row says and everything it has no room to, resolved once rather than for every
-	// frame the pointer rests on it. Only the warning about the dimension the player happens to be in
-	// is left out, since that one follows from where they are standing rather than from the entry.
+	/**
+	 * Everything the row says and everything it has no room to, resolved once rather than for every
+	 * frame the pointer rests on it. Only the warning about the dimension the player happens to be in
+	 * is left out, since that one follows from where they are standing rather than from the entry.
+	 */
 	private final List<Component> tooltipLines;
 	private long lastClickTime;
 	// Where the mod badge was last drawn, so that clicking it can narrow the list to that mod

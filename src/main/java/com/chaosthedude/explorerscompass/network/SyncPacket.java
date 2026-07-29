@@ -37,9 +37,11 @@ public class SyncPacket {
 	private static final ListMultimap<ResourceLocation, ResourceLocation> receivedBiomeDimensionKeys = ArrayListMultimap.create();
 	private static final Map<ResourceLocation, ResourceLocation> receivedBiomeGroupKeys = new HashMap<ResourceLocation, ResourceLocation>();
 
-	// The version of the data each connected player was last sent, so that using the compass again
-	// does not re-send an unchanged list. Entries are dropped when a player logs out: after a relog
-	// the client may have been on another server meanwhile.
+	/**
+	 * The version of the data each connected player was last sent, so that using the compass again
+	 * does not re-send an unchanged list. Entries are dropped when a player logs out: after a relog
+	 * the client may have been on another server meanwhile.
+	 */
 	private static final Map<UUID, Long> lastSyncedVersions = new HashMap<UUID, Long>();
 
 	private boolean canTeleport;

@@ -35,12 +35,16 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 public class ClientEventHandler {
 
 	private static final int MAX_PREVIOUS_LOCATIONS_SHOWN = 2;
-	// How many of the previously found instances the direction strip marks at once, before it stops
-	// saying anything and just looks busy
+	/**
+	 * How many of the previously found instances the direction strip marks at once, before it stops
+	 * saying anything and just looks busy.
+	 */
 	private static final int MAX_PREVIOUS_MARKERS = 6;
 
-	// The eight wind points, clockwise from north. They are named in the player's own language, since
-	// the letters that abbreviate them are not the same in every one.
+	/**
+	 * The eight wind points, clockwise from north. They are named in the player's own language, since
+	 * the letters that abbreviate them are not the same in every one.
+	 */
 	private static final String[] WIND_POINT_KEYS = {"north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest"};
 
 	private static final String DOT_GLYPH = "●";
@@ -52,30 +56,34 @@ public class ClientEventHandler {
 	private static final int HUD_LABEL_GAP = 8;
 	private static final int HUD_PROGRESS_HEIGHT = 3;
 	private static final int HUD_PROGRESS_BACKGROUND = 0x60000000;
-	// The track the progress runs along has to stay readable without being one more dark box, so with
-	// the panel turned off it is drawn as a light track rather than a dark one
+	/**
+	 * The track the progress runs along has to stay readable without being one more dark box, so with
+	 * the panel turned off it is drawn as a light track rather than a dark one.
+	 */
 	private static final int HUD_PROGRESS_BACKGROUND_PLAIN = 0x40FFFFFF;
 
 	private static final int DIRECTION_BAR_HEIGHT = 14;
-	// Marks are drawn this many degrees apart, with the ones at the eight wind points drawn taller
+	/** Marks are drawn this many degrees apart, with the ones at the eight wind points drawn taller. */
 	private static final int DIRECTION_BAR_TICK_DEGREES = 15;
-	// How far the strip fades out towards each end, so that marks appear and leave gradually
+	/** How far the strip fades out towards each end, so that marks appear and leave gradually. */
 	private static final int DIRECTION_BAR_FADE_WIDTH = 24;
-	// Faded below this, a mark is left out altogether: a colour carrying almost no transparency left
-	// is drawn as if it carried none at all
+	/**
+	 * Faded below this, a mark is left out altogether: a colour carrying almost no transparency left
+	 * is drawn as if it carried none at all.
+	 */
 	private static final float MINIMUM_FADE = 0.05F;
-	// How near the middle of the strip the target has to sit to count as being faced
+	/** How near the middle of the strip the target has to sit to count as being faced. */
 	private static final double ON_TARGET_DEGREES = 3.0D;
-	// How near the located structure counts as having arrived at it
+	/** How near the located structure counts as having arrived at it. */
 	private static final int ARRIVED_DISTANCE = 32;
-	// How long the panel picks itself out after a search finishes
+	/** How long the panel picks itself out after a search finishes. */
 	private static final long ANNOUNCE_MILLIS = 2500L;
 
 	// Filled shapes take their alpha from the top byte, where text has it added for it
 	private static final int MARKER_COLOR = 0xFF000000 | GuiTheme.ACCENT;
 	private static final int ON_TARGET_COLOR = 0xFF000000 | GuiTheme.TEXT_SUCCESS;
 	private static final int PREVIOUS_MARKER_COLOR = 0x59FFC24B;
-	// What the marks on the strip are shadowed with when there is no panel behind them
+	/** What the marks on the strip are shadowed with when there is no panel behind them. */
 	private static final int MARK_SHADOW_COLOR = 0xA0000000;
 	private static final int BAR_BORDER_COLOR = 0xB0000000;
 	private static final int BAR_BACKGROUND_COLOR = 0x90101010;

@@ -50,18 +50,22 @@ import net.minecraft.world.level.levelgen.structure.placement.StructurePlacement
  */
 public class SearchWorkerManager implements SearchScheduler.SearchSlice {
 
-	// How far the first turn round the workers searches. It doubles from here, so this only decides
-	// how fine grained the early turns are, not how far the search reaches.
+	/**
+	 * How far the first turn round the workers searches. It doubles from here, so this only decides
+	 * how fine grained the early turns are, not how far the search reaches.
+	 */
 	private static final int INITIAL_BAND_RADIUS = 1000;
 
-	// Granularity in blocks of the search radius reported to the compass while a search is running
+	/** Granularity in blocks of the search radius reported to the compass while a search is running. */
 	private static final int RADIUS_REPORT_INTERVAL = 250;
 
-	// The workers still to run, in the order they were created. The one at the front holds the turn,
-	// each is dropped as it finishes, and the search is over once none are left.
+	/**
+	 * The workers still to run, in the order they were created. The one at the front holds the turn,
+	 * each is dropped as it finishes, and the search is over once none are left.
+	 */
 	private final List<SearchWorker> workers = new ArrayList<SearchWorker>();
 
-	// What the search currently running is fixed by, and what identifies it
+	/** What the search currently running is fixed by, and what identifies it. */
 	private SearchContext context;
 
 	// The nearest location any worker has turned up so far
@@ -78,10 +82,12 @@ public class SearchWorkerManager implements SearchScheduler.SearchSlice {
 	private int radius;
 	private int lastRadiusThreshold;
 
-	// Whether the worker at the front has already been given the limits for the turn it is holding.
-	// They are set once, when it takes the turn: setting them again after it has covered the band
-	// would widen that band and hand it the next turn as well, when the whole point of reaching the
-	// band is that the turn passes to someone else.
+	/**
+	 * Whether the worker at the front has already been given the limits for the turn it is holding.
+	 * They are set once, when it takes the turn: setting them again after it has covered the band
+	 * would widen that band and hand it the next turn as well, when the whole point of reaching the
+	 * band is that the turn passes to someone else.
+	 */
 	private boolean turnGranted;
 
 	public String getId() {

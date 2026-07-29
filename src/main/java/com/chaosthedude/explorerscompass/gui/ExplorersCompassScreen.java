@@ -97,15 +97,15 @@ public class ExplorersCompassScreen extends Screen {
 	/** The mod the list is narrowed down to, or null while entries from every mod are listed. */
 	private String modFilter;
 	private int cachedLocations;
-	// How many rows the list is holding at its top rather than sorting into place
+	/** How many rows the list is holding at its top rather than sorting into place. */
 	private int pinnedCount;
 	// Where the sidebar has room for the next control, and where the status text has to stop
 	private int sidebarY;
 	private int statusTextRight;
 	private ButtonState lastButtonState;
-	// The entries picked with Ctrl-click, to search for the nearest of them all at once
+	/** The entries picked with Ctrl-click, to search for the nearest of them all at once. */
 	private final Set<ResourceLocation> multiSelectedKeys = new LinkedHashSet<ResourceLocation>();
-	// Where the chips that lift a filter were last drawn, rebuilt on every frame
+	/** Where the chips that lift a filter were last drawn, rebuilt on every frame. */
 	private final List<FilterChip> filterChips = new ArrayList<FilterChip>();
 	private FilterChipState lastFilterChipState;
 

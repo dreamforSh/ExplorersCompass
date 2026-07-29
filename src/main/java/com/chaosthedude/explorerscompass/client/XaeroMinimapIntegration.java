@@ -49,6 +49,9 @@ public class XaeroMinimapIntegration {
 	private static int lastZ;
 	private static boolean hasLast;
 
+	private XaeroMinimapIntegration() {
+	}
+
 	/**
 	 * Creates a waypoint for whatever the given compass is pointing at, unless one was already
 	 * created for that location.

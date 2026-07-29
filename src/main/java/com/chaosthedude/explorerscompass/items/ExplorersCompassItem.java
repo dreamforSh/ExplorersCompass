@@ -63,16 +63,20 @@ public class ExplorersCompassItem extends Item {
 	/** Marks a structure height the search could not determine. */
 	public static final int UNKNOWN_Y = Integer.MIN_VALUE;
 
-	// How many of a multi-selection's keys are kept on the compass. They are only there so that
-	// searching for a further instance keeps considering the whole selection, and everything written
-	// to a stack rides along on every sync of it — of which a running search causes one each time it
-	// reports how far it has looked. A selection past this costs more to carry around than searching
-	// for the ones beyond it is worth; the search itself is never cut down, only what is remembered
-	// for the next one.
+	/**
+	 * How many of a multi-selection's keys are kept on the compass. They are only there so that
+	 * searching for a further instance keeps considering the whole selection, and everything written
+	 * to a stack rides along on every sync of it — of which a running search causes one each time it
+	 * reports how far it has looked. A selection past this costs more to carry around than searching
+	 * for the ones beyond it is worth; the search itself is never cut down, only what is remembered
+	 * for the next one.
+	 */
 	private static final int MAX_PERSISTED_TARGET_KEYS = 256;
 
-	// When each player last shared a location, so that sharing cannot be used to flood chat. Only
-	// ever touched on the server thread.
+	/**
+	 * When each player last shared a location, so that sharing cannot be used to flood chat. Only
+	 * ever touched on the server thread.
+	 */
 	private final Map<UUID, Long> lastShareTimes = new HashMap<UUID, Long>();
 
 	public ExplorersCompassItem() {

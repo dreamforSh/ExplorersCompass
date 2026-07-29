@@ -40,6 +40,9 @@ public class CustomModelDataConfig {
 
 	private static Map<ResourceLocation, Integer> customModelData = new HashMap<ResourceLocation, Integer>();
 
+	private CustomModelDataConfig() {
+	}
+
 	/**
 	 * Reads the file, creating an empty one if it does not exist yet so that it can be found and
 	 * edited.

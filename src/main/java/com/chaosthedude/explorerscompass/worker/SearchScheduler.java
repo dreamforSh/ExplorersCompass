@@ -38,8 +38,10 @@ public class SearchScheduler implements WorldWorkerManager.IWorker {
 
 	}
 
-	// How long a search may hold the budget before the turn passes to the next one. Short enough
-	// that several searches share a tick, long enough that a turn is worth more than the switch.
+	/**
+	 * How long a search may hold the budget before the turn passes to the next one. Short enough
+	 * that several searches share a tick, long enough that a turn is worth more than the switch.
+	 */
 	private static final long QUANTUM_NANOS = TimeUnit.MILLISECONDS.toNanos(2L);
 
 	private static SearchScheduler instance;
@@ -55,24 +57,32 @@ public class SearchScheduler implements WorldWorkerManager.IWorker {
 
 	private final List<SearchSlice> slices = new ArrayList<SearchSlice>();
 
-	// Whose turn it is. Kept across ticks, which is what keeps the searches at the back of the list
-	// from being starved by the ones in front of them.
+	/**
+	 * Whose turn it is. Kept across ticks, which is what keeps the searches at the back of the list
+	 * from being starved by the ones in front of them.
+	 */
 	private int cursor;
 
 	private int lastTick = Integer.MIN_VALUE;
 	private long budgetStart;
 
-	// How long the search whose turn it is has had. Carried across ticks rather than reset with the
-	// budget, so that a search only ever given a moment of each tick still hands the turn on.
+	/**
+	 * How long the search whose turn it is has had. Carried across ticks rather than reset with the
+	 * budget, so that a search only ever given a moment of each tick still hands the turn on.
+	 */
 	private long turnNanos;
 
-	// How many turns in a row have been handed back without the search carrying on. A search waiting
-	// for something of its own, such as the positions a placement is still computing, cannot use the
-	// tick, and once every search has said so there is nothing to spend the rest of the budget on.
+	/**
+	 * How many turns in a row have been handed back without the search carrying on. A search waiting
+	 * for something of its own, such as the positions a placement is still computing, cannot use the
+	 * tick, and once every search has said so there is nothing to spend the rest of the budget on.
+	 */
 	private int idleTurns;
 
-	// Whether Forge is currently calling this. It drops a worker with nothing left to do, so the
-	// next search to be started has to register again.
+	/**
+	 * Whether Forge is currently calling this. It drops a worker with nothing left to do, so the
+	 * next search to be started has to register again.
+	 */
 	private boolean registered;
 
 	SearchScheduler(LongSupplier clock, IntSupplier tickCount, LongSupplier budgetNanos) {

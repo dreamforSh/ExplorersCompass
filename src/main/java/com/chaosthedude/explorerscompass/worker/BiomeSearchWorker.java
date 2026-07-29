@@ -34,16 +34,20 @@ import net.minecraft.world.level.biome.Climate;
  */
 public class BiomeSearchWorker extends SearchWorker {
 
-	// How far a location has to be from an already located one to count as a different patch of the
-	// same biome. A biome fills a region rather than sitting at a point, so the two chunks that tell
-	// two structures apart would have a search for a further instance answering with the next sample
-	// along, still inside the biome it was told to look past.
+	/**
+	 * How far a location has to be from an already located one to count as a different patch of the
+	 * same biome. A biome fills a region rather than sitting at a point, so the two chunks that tell
+	 * two structures apart would have a search for a further instance answering with the next sample
+	 * along, still inside the biome it was told to look past.
+	 */
 	private static final int SAME_BIOME_DISTANCE = 512;
 
-	// How many locations a turn covers when the sampling runs on the server thread. A single sample
-	// costs a fraction of a microsecond, so handing the turn back after each of them would spend more
-	// of the tick on passing it round than on the search; a batch this size is still a small part of
-	// the time one turn is given.
+	/**
+	 * How many locations a turn covers when the sampling runs on the server thread. A single sample
+	 * costs a fraction of a microsecond, so handing the turn back after each of them would spend more
+	 * of the tick on passing it round than on the search; a batch this size is still a small part of
+	 * the time one turn is given.
+	 */
 	private static final int SYNC_SAMPLE_BATCH = 64;
 
 	private final BiomeSource biomeSource;
@@ -51,7 +55,7 @@ public class BiomeSearchWorker extends SearchWorker {
 	// The biomes being searched for that this dimension can actually produce, against their keys
 	private final Map<Biome, ResourceLocation> targets;
 	private final int spacing;
-	// The height the search was started at, sampled at every location
+	/** The height the search was started at, sampled at every location. */
 	private final int surfaceQuartY;
 	// The rest of the heights of the dimension, sampled on a coarser grid and nearest the height the
 	// search started at first
@@ -59,11 +63,13 @@ public class BiomeSearchWorker extends SearchWorker {
 	private final int depthInterval;
 	private final RingWalker ring = new RingWalker();
 
-	// Whether the sampling is running on a thread of its own. Set before either side starts.
+	/** Whether the sampling is running on a thread of its own. Set before either side starts. */
 	private volatile boolean background;
 
-	// How far the search has covered. Written by whichever thread is sampling and read by the server
-	// thread for the readout on the compass, so it is published rather than derived from the walker.
+	/**
+	 * How far the search has covered. Written by whichever thread is sampling and read by the server
+	 * thread for the readout on the compass, so it is published rather than derived from the walker.
+	 */
 	private volatile int coveredRadius;
 
 	// That the search thread is done. Publishing this last is what makes everything the search
@@ -71,7 +77,7 @@ public class BiomeSearchWorker extends SearchWorker {
 	private volatile boolean backgroundDone;
 	private Throwable backgroundError;
 
-	// Whether the server thread has already acted on that. Only ever touched on the server thread.
+	/** Whether the server thread has already acted on that. Only ever touched on the server thread. */
 	private boolean applied;
 
 	public BiomeSearchWorker(SearchContext context, List<Holder<Biome>> biomes) {

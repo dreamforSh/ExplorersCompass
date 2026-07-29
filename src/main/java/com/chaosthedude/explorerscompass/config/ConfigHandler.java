@@ -19,6 +19,9 @@ public class ConfigHandler {
 	public static final ForgeConfigSpec GENERAL_SPEC = GENERAL_BUILDER.build();
 	public static final ForgeConfigSpec CLIENT_SPEC = CLIENT_BUILDER.build();
 
+	private ConfigHandler() {
+	}
+
 	public static class General {
 		public final ForgeConfigSpec.BooleanValue allowTeleport;
 		public final ForgeConfigSpec.IntValue maxNextSearches;

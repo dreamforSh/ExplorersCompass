@@ -32,7 +32,7 @@ public class BookmarkListEntry extends ObjectSelectionList.Entry<BookmarkListEnt
 	private final Component narration;
 	private final String displayName;
 	private final String coordinateLine;
-	// Where this entry sits in the compass's own list, which is what the packets refer to
+	/** Where this entry sits in the compass's own list, which is what the packets refer to. */
 	private final int index;
 	private long lastClickTime;
 	private int cachedPlayerX = Integer.MIN_VALUE;

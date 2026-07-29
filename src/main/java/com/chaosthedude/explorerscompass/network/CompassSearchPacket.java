@@ -23,7 +23,7 @@ import net.minecraftforge.network.NetworkEvent;
  */
 public class CompassSearchPacket {
 
-	// Far more keys than any real selection holds; a count past this is a malformed packet
+	/** Far more keys than any real selection holds; a count past this is a malformed packet. */
 	private static final int MAX_TARGET_KEYS = 4096;
 
 	private SearchTarget searchTarget;

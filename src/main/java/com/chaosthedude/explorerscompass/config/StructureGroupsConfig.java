@@ -51,11 +51,14 @@ public class StructureGroupsConfig {
 	private static final String NAME_FIELD = "name";
 	private static final String STRUCTURES_FIELD = "structures";
 
-	// Entry order decides which group wins when several match, so this is a list, not a map
+	/** Entry order decides which group wins when several match, so this is a list, not a map. */
 	private static List<GroupEntry> groups = new ArrayList<GroupEntry>();
 
-	// Display names for the groups that configured one, synced to clients alongside the groups
+	/** Display names for the groups that configured one, synced to clients alongside the groups. */
 	private static Map<ResourceLocation, String> groupNames = Map.of();
+
+	private StructureGroupsConfig() {
+	}
 
 	/**
 	 * Reads the file, creating an empty one if it does not exist yet so that it can be found and

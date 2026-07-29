@@ -34,7 +34,7 @@ public class BookmarksScreen extends Screen {
 	private final ExplorersCompassItem explorersCompass;
 	private ItemStack stack;
 	private List<BookmarkEntry> bookmarks;
-	// The tag the list was read from, so that it is only re-read once the server has changed it
+	/** The tag the list was read from, so that it is only re-read once the server has changed it. */
 	private CompoundTag lastTag;
 	private BookmarkList selectionList;
 	private TransparentButton pointAtButton;
@@ -43,7 +43,7 @@ public class BookmarksScreen extends Screen {
 	private TransparentButton removeButton;
 	private TransparentButton clearButton;
 	private TransparentButton backButton;
-	// Where the sidebar has room for the next control
+	/** Where the sidebar has room for the next control. */
 	private int sidebarY;
 
 	public BookmarksScreen(Screen parentScreen, Player player, ItemStack stack, ExplorersCompassItem explorersCompass) {

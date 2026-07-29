@@ -56,10 +56,15 @@ public class GuiTheme {
 	/** Where the column of controls in the sidebar begins. */
 	public static final int SIDEBAR_CONTENT_X = SIDEBAR_X + 4;
 	public static final int SIDEBAR_CONTENT_WIDTH = SIDEBAR_WIDTH - 8;
-	// Slightly shorter than a vanilla button, so that a full sidebar still clears the control at the
-	// bottom of it on the shortest screen the game scales itself down to
+	/**
+	 * Slightly shorter than a vanilla button, so that a full sidebar still clears the control at the
+	 * bottom of it on the shortest screen the game scales itself down to.
+	 */
 	public static final int BUTTON_HEIGHT = 18;
 	public static final int BUTTON_SPACING = 20;
+
+	private GuiTheme() {
+	}
 
 	/** Where the list, and everything else that is not the sidebar, begins. */
 	public static int contentLeft() {

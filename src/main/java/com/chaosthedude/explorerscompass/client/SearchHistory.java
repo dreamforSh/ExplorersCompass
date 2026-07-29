@@ -42,10 +42,12 @@ public class SearchHistory {
 
 	private static boolean loaded;
 	private static final Map<SearchTarget, History> histories = new EnumMap<SearchTarget, History>(SearchTarget.class);
-	// Which list the screen opens on. Named apart from the target every other method here takes as an
-	// argument, since those act on the history of whichever kind they are handed rather than on this
-	// one. Structures are what the compass is named for, so that is where a player who has never
-	// switched starts.
+	/**
+	 * Which list the screen opens on. Named apart from the target every other method here takes as an
+	 * argument, since those act on the history of whichever kind they are handed rather than on this
+	 * one. Structures are what the compass is named for, so that is where a player who has never
+	 * switched starts.
+	 */
 	private static SearchTarget openOnTarget = SearchTarget.STRUCTURE;
 
 	/** The favorites and recent searches of one kind of target, and what they are stored under. */
@@ -54,7 +56,7 @@ public class SearchHistory {
 		private final String favoritesField;
 		private final String recentsField;
 		private final Set<ResourceLocation> favorites = new LinkedHashSet<ResourceLocation>();
-		// Most recent first
+		/** Most recent first. */
 		private final List<ResourceLocation> recents = new ArrayList<ResourceLocation>();
 
 		private History(String favoritesField, String recentsField) {
@@ -69,6 +71,9 @@ public class SearchHistory {
 		// existing history file is read rather than started over
 		histories.put(SearchTarget.STRUCTURE, new History("favorites", "recents"));
 		histories.put(SearchTarget.BIOME, new History("biomeFavorites", "biomeRecents"));
+	}
+
+	private SearchHistory() {
 	}
 
 	/**

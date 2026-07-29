@@ -12,6 +12,9 @@ import net.minecraftforge.registries.RegisterEvent;
 @EventBusSubscriber(modid = ExplorersCompass.MODID, bus = EventBusSubscriber.Bus.MOD)
 public class ExplorersCompassRegistry {
 
+	private ExplorersCompassRegistry() {
+	}
+
 	@SubscribeEvent
 	public static void registerItems(RegisterEvent e) {
 		e.register(ForgeRegistries.Keys.ITEMS, helper -> {

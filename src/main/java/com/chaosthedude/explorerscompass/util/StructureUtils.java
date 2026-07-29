@@ -70,6 +70,9 @@ public class StructureUtils {
 	private static Map<ResourceLocation, ResourceLocation> cachedStructureKeysToTypeKeys;
 	private static int cachedDataVersion;
 
+	private StructureUtils() {
+	}
+
 	/**
 	 * Maps the key of every structure in the level to the key of the group it belongs to: the group
 	 * configured for it in {@code groups.json} when there is one, otherwise the structure set it

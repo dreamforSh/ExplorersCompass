@@ -19,7 +19,7 @@ public class SearchService {
 
 	private static final Map<UUID, SearchWorkerManager> workerManagers = new HashMap<UUID, SearchWorkerManager>();
 
-	// When each player last started a search, for rate limiting
+	/** When each player last started a search, for rate limiting. */
 	private static final Map<UUID, Long> lastSearchStartTimes = new HashMap<UUID, Long>();
 
 	private SearchService() {

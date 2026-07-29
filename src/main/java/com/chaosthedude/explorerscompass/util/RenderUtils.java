@@ -20,6 +20,9 @@ public class RenderUtils {
 	private static final Minecraft mc = Minecraft.getInstance();
 	private static final Font font = mc.font;
 
+	private RenderUtils() {
+	}
+
 	/**
 	 * Draws how far along something is as a filled bar. The fill is rounded rather than truncated, so
 	 * that a bar which is nearly full does not sit a pixel short of its own end.

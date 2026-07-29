@@ -45,8 +45,10 @@ public class BiomeUtils {
 	/** Tags naming a kind of biome are the ones a biome can be grouped by. */
 	private static final String GROUP_TAG_PREFIX = "is_";
 
-	// Tags that say which dimension a biome belongs to rather than what kind of biome it is. A
-	// biome falls back to one of them only when it carries no tag that says more than that.
+	/**
+	 * Tags that say which dimension a biome belongs to rather than what kind of biome it is. A
+	 * biome falls back to one of them only when it carries no tag that says more than that.
+	 */
 	private static final Set<String> DIMENSION_TAG_PATHS = Set.of("is_overworld", "is_nether", "is_end");
 
 	// Compiled forms of the configured blacklist globs, rebuilt when the config changes. Only ever
@@ -65,6 +67,9 @@ public class BiomeUtils {
 	private static ListMultimap<ResourceLocation, ResourceLocation> cachedDimensionKeys;
 	private static Map<ResourceLocation, ResourceLocation> cachedBiomeKeysToGroupKeys;
 	private static int cachedDataVersion;
+
+	private BiomeUtils() {
+	}
 
 	/**
 	 * The keys of every biome the compass may search for. Unlike structures, only the biomes that

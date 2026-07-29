@@ -56,9 +56,11 @@ public class ExplorersCompass {
 
 	public static final String MODID = "explorerscompass";
 
-	// Bump this whenever the packets change. Both sides have to declare the same version: a mismatch
-	// is then refused during the handshake with a clear message, instead of connecting and failing
-	// to decode later.
+	/**
+	 * Bump this whenever the packets change. Both sides have to declare the same version: a mismatch
+	 * is then refused during the handshake with a clear message, instead of connecting and failing
+	 * to decode later.
+	 */
 	public static final String PROTOCOL_VERSION = "2.3";
 
 	public static final Logger LOGGER = LogManager.getLogger(MODID);
@@ -77,6 +79,12 @@ public class ExplorersCompass {
 	/** Changes whenever a complete set of searchable client data is published. */
 	public static volatile int clientSearchDataRevision;
 
+	/**
+	 * Both of the contexts reached here are marked for removal in 1.21.1, where a mod is handed them
+	 * instead of asking for them. This version has nothing else to ask, so the warning is held back
+	 * rather than acted on: it says what to do when this mod is ported, not what to do now.
+	 */
+	@SuppressWarnings("removal")
 	public ExplorersCompass() {
 		FMLJavaModLoadingContext.get().getModEventBus().addListener(this::commonSetup);
 		DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> {
@@ -84,7 +92,7 @@ public class ExplorersCompass {
 			FMLJavaModLoadingContext.get().getModEventBus()
 					.addListener(this::registerClientReloadListeners);
 		});
-		
+
 		ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, ConfigHandler.GENERAL_SPEC);
 		ModLoadingContext.get().registerConfig(ModConfig.Type.CLIENT, ConfigHandler.CLIENT_SPEC);
 	}

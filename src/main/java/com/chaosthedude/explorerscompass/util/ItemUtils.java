@@ -9,6 +9,9 @@ import net.minecraft.world.item.ItemStack;
 
 public class ItemUtils {
 
+	private ItemUtils() {
+	}
+
 	public static boolean verifyNBT(ItemStack stack) {
 		if (stack.isEmpty() || stack.getItem() != ExplorersCompass.explorersCompass) {
 			return false;
