@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.chaosthedude.explorerscompass.client.OverlaySide;
+import com.chaosthedude.explorerscompass.client.TooltipDetail;
 
 import net.minecraftforge.common.ForgeConfigSpec;
 
@@ -98,6 +99,7 @@ public class ConfigHandler {
 
 	public static class Client {
 		public final ForgeConfigSpec.BooleanValue displayWithChatOpen;
+		public final ForgeConfigSpec.EnumValue<TooltipDetail> tooltipDetail;
 		public final ForgeConfigSpec.BooleanValue translateStructureNames;
 		public final ForgeConfigSpec.BooleanValue translateBiomeNames;
 		public final ForgeConfigSpec.BooleanValue createXaeroWaypoints;
@@ -120,6 +122,9 @@ public class ConfigHandler {
 
 			desc = "Displays Explorer's Compass information on the HUD even while chat is open.";
 			displayWithChatOpen = builder.comment(desc).define("displayWithChatOpen", true);
+
+			desc = "How much the compass says about itself in its own tooltip. COMPACT keeps it to what the compass is doing and what follows from that, with the rest a held shift key away; FULL shows all of it at once; NONE leaves the tooltip empty. Whether the coordinates are among what it may show is the server's to decide, not this. Ex: NONE, COMPACT, FULL";
+			tooltipDetail = builder.comment(desc).defineEnum("tooltipDetail", TooltipDetail.COMPACT);
 
 			desc = "Attempts to translate structure names before fixing the unlocalized names. Translations may not be available for all structures.";
 			translateStructureNames = builder.comment(desc).define("translateStructureNames", true);

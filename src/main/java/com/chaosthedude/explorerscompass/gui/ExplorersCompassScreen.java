@@ -152,9 +152,11 @@ public class ExplorersCompassScreen extends Screen {
 		this.stack = stack;
 		this.explorersCompass = explorersCompass;
 
-		// Opening on whatever was searched for last is what keeps a run of biome searches from having
-		// to be switched back to on every use of the compass
-		searchTarget = explorersCompass.getSearchTarget(stack);
+		// Opening on whichever list was last left showing is what keeps a run of biome searches from
+		// having to be switched back to on every use of the compass. It follows the player's own choice
+		// rather than the compass's, so a compass picked up mid biome search still opens on structures
+		// for someone who has never switched away from them.
+		searchTarget = SearchHistory.getSearchTarget();
 		allowedKeys = new ArrayList<ResourceLocation>(searchTarget.getAllowedKeys());
 		keysMatchingSearch = new ArrayList<ResourceLocation>(allowedKeys);
 		searchDocuments = createSearchDocuments();
@@ -369,26 +371,31 @@ public class ExplorersCompassScreen extends Screen {
 	private String statusDetails(CompassState state, ResourceLocation foundDimension, boolean inFoundDimension) {
 		final List<String> parts = new ArrayList<String>();
 		if (state == CompassState.SEARCHING) {
-			parts.add(I18n.get("string.explorerscompass.radius") + ": " + String.format("%,d", explorersCompass.getSearchRadius(stack)));
+			parts.add(labeled("string.explorerscompass.radius", String.format("%,d", explorersCompass.getSearchRadius(stack))));
 		} else if (state == CompassState.FOUND) {
 			if (!inFoundDimension) {
-				parts.add(I18n.get("string.explorerscompass.dimension") + ": " + StructureUtils.getDimensionName(foundDimension));
+				parts.add(labeled("string.explorerscompass.dimension", StructureUtils.getDimensionName(foundDimension)));
 			} else if (explorersCompass.shouldDisplayCoordinates(stack)) {
 				final int x = explorersCompass.getFoundStructureX(stack);
 				final int z = explorersCompass.getFoundStructureZ(stack);
 				final int y = explorersCompass.getFoundStructureY(stack);
-				parts.add(y != ExplorersCompassItem.UNKNOWN_Y ? x + ", " + y + ", " + z : x + ", " + z);
-				parts.add(I18n.get("string.explorerscompass.distance") + ": " + String.format("%,d", StructureUtils.getHorizontalDistanceToLocation(player, x, z)) + " (" + ClientEventHandler.compassDirection(player, x, z) + ")");
+				parts.add(StructureUtils.formatCoordinates(x, y, z));
+				parts.add(labeled("string.explorerscompass.distance", String.format("%,d", StructureUtils.getHorizontalDistanceToLocation(player, x, z)) + " (" + ClientEventHandler.compassDirection(player, x, z) + ")"));
 			}
 			final int previousLocations = cachedLocations - 1;
 			if (previousLocations > 0) {
-				parts.add(I18n.get("string.explorerscompass.previousLocations") + ": " + previousLocations);
+				parts.add(labeled("string.explorerscompass.previousLocations", String.valueOf(previousLocations)));
 			}
 		} else if (state == CompassState.NOT_FOUND) {
-			parts.add(I18n.get("string.explorerscompass.radius") + ": " + String.format("%,d", explorersCompass.getSearchRadius(stack)));
-			parts.add(I18n.get("string.explorerscompass.samples") + ": " + String.format("%,d", explorersCompass.getSamples(stack)));
+			parts.add(labeled("string.explorerscompass.radius", String.format("%,d", explorersCompass.getSearchRadius(stack))));
+			parts.add(labeled("string.explorerscompass.samples", String.format("%,d", explorersCompass.getSamples(stack))));
 		}
 		return String.join(" · ", parts);
+	}
+
+	/** A labelled value, punctuated the way the player's own language punctuates one. */
+	private static String labeled(String labelKey, String value) {
+		return I18n.get("string.explorerscompass.labeledValue", I18n.get(labelKey), value);
 	}
 
 	/** Explains whatever button the pointer is resting on, above everything else on the screen. */
@@ -412,7 +419,7 @@ public class ExplorersCompassScreen extends Screen {
 		}
 		final StructureSearchEntry hovered = selectionList.getHoveredEntry(mouseX, mouseY);
 		if (hovered != null) {
-			renderComponentTooltip(poseStack, List.of(hovered.getIdTooltip()), mouseX, mouseY);
+			renderComponentTooltip(poseStack, hovered.getTooltipLines(), mouseX, mouseY);
 		}
 	}
 
@@ -523,6 +530,9 @@ public class ExplorersCompassScreen extends Screen {
 	/** Lists biomes instead of structures, or the other way round. */
 	private void switchTarget() {
 		searchTarget = searchTarget.next();
+		// Remembered right away rather than when the screen closes, so that a switch is not lost to the
+		// game being shut down from the screen it was made on
+		SearchHistory.setSearchTarget(searchTarget);
 		targetButton.setMessage(targetButtonLabel());
 		modFilterPanel.close();
 		// What was picked out of one list means nothing in the other
@@ -845,12 +855,14 @@ public class ExplorersCompassScreen extends Screen {
 		closeButton = addRenderableWidget(new TransparentButton(GuiTheme.SIDEBAR_CONTENT_X, height - 26, GuiTheme.SIDEBAR_CONTENT_WIDTH, GuiTheme.BUTTON_HEIGHT, Component.translatable("string.explorerscompass.close"), (onPress) -> {
 			minecraft.setScreen(null);
 		}));
+		closeButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.close"));
 
 		// These three act on what the compass is doing, so they stand in the strip that reports it
 		final int statusButtonY = statusBarTop() + (STATUS_BAR_HEIGHT - STATUS_BUTTON_HEIGHT) / 2;
 		teleportButton = addRenderableWidget(new TransparentButton(0, statusButtonY, STATUS_BUTTON_WIDTH, STATUS_BUTTON_HEIGHT, Component.translatable("string.explorerscompass.teleport"), (onPress) -> {
 			teleport();
 		}));
+		teleportButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.teleport"));
 		shareButton = addRenderableWidget(new TransparentButton(0, statusButtonY, STATUS_BUTTON_WIDTH, STATUS_BUTTON_HEIGHT, Component.translatable("string.explorerscompass.share"), (onPress) -> {
 			share();
 		}));

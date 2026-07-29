@@ -37,10 +37,16 @@ import net.minecraftforge.fml.loading.FMLPaths;
 public class SearchHistory {
 
 	private static final String FILE_NAME = "history.json";
+	private static final String TARGET_FIELD = "searchTarget";
 	private static final int MAX_RECENTS = 8;
 
 	private static boolean loaded;
 	private static final Map<SearchTarget, History> histories = new EnumMap<SearchTarget, History>(SearchTarget.class);
+	// Which list the screen opens on. Named apart from the target every other method here takes as an
+	// argument, since those act on the history of whichever kind they are handed rather than on this
+	// one. Structures are what the compass is named for, so that is where a player who has never
+	// switched starts.
+	private static SearchTarget openOnTarget = SearchTarget.STRUCTURE;
 
 	/** The favorites and recent searches of one kind of target, and what they are stored under. */
 	private static class History {
@@ -63,6 +69,25 @@ public class SearchHistory {
 		// existing history file is read rather than started over
 		histories.put(SearchTarget.STRUCTURE, new History("favorites", "recents"));
 		histories.put(SearchTarget.BIOME, new History("biomeFavorites", "biomeRecents"));
+	}
+
+	/**
+	 * Which of the two lists the compass screen opens on: whichever one the player last left it
+	 * showing. It is their choice rather than the compass's, so a compass that was last pointed at a
+	 * biome still opens on structures for a player who searches for those.
+	 */
+	public static SearchTarget getSearchTarget() {
+		ensureLoaded();
+		return openOnTarget;
+	}
+
+	public static void setSearchTarget(SearchTarget target) {
+		ensureLoaded();
+		if (openOnTarget == target) {
+			return;
+		}
+		openOnTarget = target;
+		save();
 	}
 
 	public static boolean isFavorite(SearchTarget searchTarget, ResourceLocation key) {
@@ -119,8 +144,25 @@ public class SearchHistory {
 					history.recents.remove(history.recents.size() - 1);
 				}
 			}
+			readSearchTarget(root.getAsJsonObject().get(TARGET_FIELD));
 		} catch (IOException | JsonParseException e) {
 			ExplorersCompass.LOGGER.warn("Failed to read " + path + ", favorites and recent searches start empty", e);
+		}
+	}
+
+	/**
+	 * Stored by name rather than by the id it is written to a compass under, so that the file stays
+	 * readable and a name this version does not know simply leaves the default in place.
+	 */
+	private static void readSearchTarget(JsonElement element) {
+		if (element == null || !element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) {
+			return;
+		}
+		for (SearchTarget candidate : SearchTarget.values()) {
+			if (candidate.name().equals(element.getAsString())) {
+				openOnTarget = candidate;
+				return;
+			}
 		}
 	}
 
@@ -144,6 +186,7 @@ public class SearchHistory {
 			root.add(history.favoritesField, toArray(history.favorites));
 			root.add(history.recentsField, toArray(history.recents));
 		}
+		root.addProperty(TARGET_FIELD, openOnTarget.name());
 
 		final Path path = filePath();
 		try {

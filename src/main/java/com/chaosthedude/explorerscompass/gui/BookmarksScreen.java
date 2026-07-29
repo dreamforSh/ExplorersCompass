@@ -12,6 +12,7 @@ import com.chaosthedude.explorerscompass.util.BookmarkEntry;
 import com.chaosthedude.explorerscompass.util.ItemUtils;
 import com.mojang.blaze3d.vertex.PoseStack;
 
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.nbt.CompoundTag;
@@ -110,13 +111,17 @@ public class BookmarksScreen extends Screen {
 		renderButtonTooltip(poseStack, mouseX, mouseY);
 	}
 
-	/** Explains whatever button the pointer is resting on, above everything else on the screen. */
+	/** Explains whatever the pointer is resting on, above everything else on the screen. */
 	private void renderButtonTooltip(PoseStack poseStack, int mouseX, int mouseY) {
 		for (Object widget : renderables) {
 			if (widget instanceof TransparentButton button && button.visible && button.isHoveredOrFocused() && !button.getTooltipLines().isEmpty()) {
 				renderComponentTooltip(poseStack, button.getTooltipLines(), mouseX, mouseY);
 				return;
 			}
+		}
+		final BookmarkListEntry hovered = selectionList.getHoveredEntry(mouseX, mouseY);
+		if (hovered != null) {
+			renderComponentTooltip(poseStack, hovered.getTooltipLines(), mouseX, mouseY);
 		}
 	}
 
@@ -186,6 +191,7 @@ public class BookmarksScreen extends Screen {
 				teleportTo(selectionList.getSelected().getIndex());
 			}
 		});
+		teleportButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.teleport"));
 		shareButton = addSidebarButton(Component.translatable("string.explorerscompass.share"), (onPress) -> {
 			if (selectionList.hasSelection()) {
 				share(selectionList.getSelected().getIndex());
@@ -197,12 +203,17 @@ public class BookmarksScreen extends Screen {
 				remove(selectionList.getSelected().getIndex());
 			}
 		});
+		removeButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.remove"));
 		clearButton = addSidebarButton(Component.translatable("string.explorerscompass.clearAll"), (onPress) -> {
 			clearAll();
 		});
+		// The one control here that throws anything away, and it does so on a single click, so it says
+		// as much before the click rather than after it
+		clearButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.clearAll"), Component.translatable("string.explorerscompass.tooltip.clearAll.warning").withStyle(ChatFormatting.RED));
 		backButton = addRenderableWidget(new TransparentButton(GuiTheme.SIDEBAR_CONTENT_X, height - 26, GuiTheme.SIDEBAR_CONTENT_WIDTH, GuiTheme.BUTTON_HEIGHT, Component.translatable("string.explorerscompass.back"), (onPress) -> {
 			onClose();
 		}));
+		backButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.back"));
 
 		// Recreated on every init so that it picks up the current screen dimensions
 		selectionList = new BookmarkList(this, minecraft, GuiTheme.contentLeft(), GuiTheme.contentWidth(width), height, GuiTheme.HEADER_HEIGHT + 2, height - 10, 30);

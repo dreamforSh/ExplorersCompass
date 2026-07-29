@@ -17,6 +17,7 @@ import org.apache.commons.lang3.text.WordUtils;
 import com.chaosthedude.explorerscompass.ExplorersCompass;
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.config.StructureGroupsConfig;
+import com.chaosthedude.explorerscompass.items.ExplorersCompassItem;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Multimaps;
@@ -297,6 +298,15 @@ public class StructureUtils {
 		return distanceX * distanceX + distanceZ * distanceZ;
 	}
 
+	/**
+	 * The way a located place is written out. A search that could not tell the height leaves it out
+	 * rather than writing one that would be wrong, and every readout of a location has to make that
+	 * same choice, so they all make it here rather than each spelling it out again.
+	 */
+	public static String formatCoordinates(int x, int y, int z) {
+		return y != ExplorersCompassItem.UNKNOWN_Y ? x + ", " + y + ", " + z : x + ", " + z;
+	}
+
 	@OnlyIn(Dist.CLIENT)
 	public static String getPrettyStructureName(ResourceLocation key) {
 		if (key == null) {
@@ -346,8 +356,7 @@ public class StructureUtils {
 		if (key == null) {
 			return "";
 		}
-		String registryEntry = key.toString();
-		String modid = registryEntry.substring(0, registryEntry.indexOf(":"));
+		final String modid = key.getNamespace();
 		if (modid.equals("minecraft")) {
 			return "Minecraft";
 		}

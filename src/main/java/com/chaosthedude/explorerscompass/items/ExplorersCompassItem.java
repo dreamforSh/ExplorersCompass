@@ -11,6 +11,7 @@ import java.util.UUID;
 import javax.annotation.Nullable;
 
 import com.chaosthedude.explorerscompass.ExplorersCompass;
+import com.chaosthedude.explorerscompass.client.CompassTooltip;
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.config.CustomModelDataConfig;
 import com.chaosthedude.explorerscompass.gui.GuiWrapper;
@@ -51,6 +52,8 @@ import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.levelgen.structure.Structure;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkDirection;
 
 public class ExplorersCompassItem extends Item {
@@ -104,40 +107,15 @@ public class ExplorersCompassItem extends Item {
  		return super.shouldCauseReequipAnimation(oldStack, newStack, slotChanged);
  	}
 
+	/**
+	 * What the compass says about itself while the pointer rests on it. Everything it names has to be
+	 * named in the player's own language, and the translations only resolve on the client, so the
+	 * lines are put together over there. A dedicated server never builds a tooltip at all, and with
+	 * that class not present nothing is added rather than something half translated being.
+	 */
 	@Override
 	public void appendHoverText(ItemStack stack, @Nullable Level level, List<Component> tooltip, TooltipFlag flag) {
-		final CompassState state = getState(stack);
-		if (state == null || state == CompassState.INACTIVE) {
-			return;
-		}
-
-		// The basic name works on both sides; the translated one is only available on the client
-		final SearchTarget searchTarget = getSearchTarget(stack);
-		final String name = searchTarget.getBasicName(getTargetKey(stack));
-		if (state == CompassState.SEARCHING) {
-			// While a group is being searched, the stored key is the group's, which may have a
-			// configured display name; a search for several at once shows how many more it considers
-			String targetName = getIsGroup(stack) ? ExplorersCompass.groupNames.getOrDefault(getTargetKey(stack), searchTarget.getBasicGroupName(getTargetKey(stack))) : name;
-			final int targetCount = getTargetCount(stack);
-			if (targetCount > 1) {
-				targetName += " (+" + (targetCount - 1) + ")";
-			}
-			tooltip.add(Component.translatable("string.explorerscompass.searching").append(Component.literal(": " + targetName)).withStyle(ChatFormatting.GRAY));
-		} else if (state == CompassState.FOUND) {
-			tooltip.add(Component.translatable("string.explorerscompass.found").append(Component.literal(": " + name)).withStyle(ChatFormatting.GRAY));
-			if (shouldDisplayCoordinates(stack)) {
-				final int foundY = getFoundStructureY(stack);
-				final String coordinates = foundY != UNKNOWN_Y ? getFoundStructureX(stack) + ", " + foundY + ", " + getFoundStructureZ(stack) : getFoundStructureX(stack) + ", " + getFoundStructureZ(stack);
-				tooltip.add(Component.translatable("string.explorerscompass.coordinates").append(Component.literal(": " + coordinates)).withStyle(ChatFormatting.DARK_GRAY));
-			}
-			// The location being pointed at is part of the cached list, but is not a previous one
-			final int previousLocations = getPrevPos(stack).size() - 1;
-			if (previousLocations > 0) {
-				tooltip.add(Component.translatable("string.explorerscompass.previousLocations").append(Component.literal(": " + previousLocations)).withStyle(ChatFormatting.DARK_GRAY));
-			}
-		} else if (state == CompassState.NOT_FOUND) {
-			tooltip.add(Component.translatable("string.explorerscompass.notFound").append(Component.literal(": " + name)).withStyle(ChatFormatting.GRAY));
-		}
+		DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> CompassTooltip.appendHoverText(this, stack, tooltip, flag));
 	}
 
 	/**
@@ -327,7 +305,7 @@ public class ExplorersCompassItem extends Item {
 		SearchService.getWorkerManager(player).clear();
 
 		final String name = searchTarget.getBasicName(targetKey);
-		final String coordinates = y != UNKNOWN_Y ? x + ", " + y + ", " + z : x + ", " + z;
+		final String coordinates = StructureUtils.formatCoordinates(x, y, z);
 		notifySearchResult(player, Component.translatable("string.explorerscompass.found").append(Component.literal(displayCoordinates ? ": " + name + " (" + coordinates + ")" : ": " + name)));
 	}
 
@@ -629,7 +607,7 @@ public class ExplorersCompassItem extends Item {
 	 * which needs no permission, unlike suggesting a teleport command.
 	 */
 	private static Component sharedLocationMessage(ServerPlayer player, SearchTarget searchTarget, ResourceLocation targetKey, int x, int y, int z, ResourceLocation dimensionKey) {
-		final String coordinates = y != UNKNOWN_Y ? x + ", " + y + ", " + z : x + ", " + z;
+		final String coordinates = StructureUtils.formatCoordinates(x, y, z);
 		final Component coordinatesComponent = Component.literal(coordinates).withStyle((style) -> style
 				.withColor(ChatFormatting.GREEN)
 				.withClickEvent(new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD, coordinates))
@@ -674,6 +652,17 @@ public class ExplorersCompassItem extends Item {
 	public int getPrevPosCount(ItemStack stack) {
 		return ItemUtils.verifyNBT(stack) && stack.getTag().contains("PrevPos", Tag.TAG_LIST)
 				? stack.getTag().getList("PrevPos", Tag.TAG_COMPOUND).size()
+				: 0;
+	}
+
+	/**
+	 * How many locations this compass has collected, without reading any of them back. Every entry
+	 * costs two resource locations to parse, and the tooltip that wants this number is built again for
+	 * every frame the pointer rests on the stack.
+	 */
+	public int getBookmarkCount(ItemStack stack) {
+		return ItemUtils.verifyNBT(stack) && stack.getTag().contains("Bookmarks", Tag.TAG_LIST)
+				? stack.getTag().getList("Bookmarks", Tag.TAG_COMPOUND).size()
 				: 0;
 	}
 

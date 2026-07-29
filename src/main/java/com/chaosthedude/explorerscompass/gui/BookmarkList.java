@@ -127,6 +127,11 @@ public class BookmarkList extends ObjectSelectionList<BookmarkListEntry> {
 		return getSelected() != null;
 	}
 
+	/** The row under the pointer, so that the screen can explain it above everything else it draws. */
+	public BookmarkListEntry getHoveredEntry(double mouseX, double mouseY) {
+		return getEntryAtPosition(mouseX, mouseY);
+	}
+
 	public BookmarksScreen getParentScreen() {
 		return parentScreen;
 	}

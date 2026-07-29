@@ -332,10 +332,8 @@ public class ClientEventHandler {
 						StructureUtils.getDimensionName(compass.getFoundDimension(stack)),
 						GuiTheme.TEXT_WARNING));
 			} else if (displayCoordinates) {
-				final String coordinates = targetY != ExplorersCompassItem.UNKNOWN_Y
-						? targetX + ", " + targetY + ", " + targetZ
-						: targetX + ", " + targetZ;
-				rows.add(new HudRow(I18n.get("string.explorerscompass.coordinates"), coordinates,
+				rows.add(new HudRow(I18n.get("string.explorerscompass.coordinates"),
+						StructureUtils.formatCoordinates(targetX, targetY, targetZ),
 						GuiTheme.TEXT_PRIMARY));
 
 				final int distance = StructureUtils.getHorizontalDistanceToLocation(
