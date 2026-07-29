@@ -1,56 +1,94 @@
 # Explorer's Compass
 
-Explorer's Compass is a Minecraft mod that allows you to search for and locate structures anywhere in the world. It is the sister mod of [Nature's Compass](https://github.com/MattCzyr/NaturesCompass), which allows you to locate biomes.
+<!--
+  Distribution badges. This fork is not published to CurseForge or Modrinth yet, so the lines below
+  are kept commented out rather than rendering as broken images. Once it is published, uncomment
+  them and replace the placeholders:
 
-## Download
+    <CF_PROJECT_ID>  the numeric CurseForge project id (a slug does NOT work here)
+    <CF_SLUG>        the CurseForge page slug, used for the link only
+    <MR_SLUG>        the Modrinth slug or project id (either works, in both the badge and the link)
 
-Downloads, installation instructions, and more information can be found on [CurseForge](https://www.curseforge.com/minecraft/mc-mods/explorers-compass).
+  For reference, the upstream project's values are 491794, explorers-compass and explorers-compass.
 
-## Develop
+[![Available on CurseForge](https://cdn.jsdelivr.net/npm/@intergrav/devins-badges@3/assets/cozy/available/curseforge_vector.svg)](https://www.curseforge.com/minecraft/mc-mods/<CF_SLUG>)
+[![Available on Modrinth](https://cdn.jsdelivr.net/npm/@intergrav/devins-badges@3/assets/cozy/available/modrinth_vector.svg)](https://modrinth.com/mod/<MR_SLUG>)
 
-### Setup
+[![CurseForge versions](https://badges.moddingx.org/curseforge/versions/<CF_PROJECT_ID>)](https://www.curseforge.com/minecraft/mc-mods/<CF_SLUG>)
+[![CurseForge downloads](https://badges.moddingx.org/curseforge/downloads/<CF_PROJECT_ID>)](https://www.curseforge.com/minecraft/mc-mods/<CF_SLUG>)
+[![Modrinth versions](https://badges.moddingx.org/modrinth/versions/<MR_SLUG>)](https://modrinth.com/mod/<MR_SLUG>)
+[![Modrinth downloads](https://badges.moddingx.org/modrinth/downloads/<MR_SLUG>)](https://modrinth.com/mod/<MR_SLUG>)
+-->
 
-Fork this repository, then clone via SSH:
-```
-git clone git@github.com:<you>/ExplorersCompass.git
-```
+Explorer's Compass is a Minecraft mod that lets you search for and locate **structures and biomes**
+anywhere in the world, without leaving the chunk you are standing in.
 
-Or, clone via HTTPS:
-```
-git clone https://github.com/<you>/ExplorersCompass.git
-```
+This repository is a fork of [MattCzyr/ExplorersCompass](https://github.com/MattCzyr/ExplorersCompass)
+that adds biome search, bookmarks, location sharing, a heads-up direction strip and more. Structures
+alone are what the upstream mod covers; biomes are its sister mod,
+[Nature's Compass](https://github.com/MattCzyr/NaturesCompass).
 
-2. In the root of the repository, run:
-```
-gradlew eclipse
-```
+## Features
 
-Or, if you plan to use IntelliJ, run:
-```
-gradlew idea
-```
+**Searching**
 
-3. Run:
-```
-gradlew genEclipseRuns
-```
+- Locate any structure or biome the world can generate, in the dimension you are in.
+- Select several at once (Ctrl+click) and the search answers with whichever is nearest.
+- Search a whole group — every village, every ocean ruin — rather than naming one.
+- Search past what you already found for the next instance of it, and the one after that.
+- Filter the list by mod, by dimension, or with a small query language; sort by name, group,
+  dimension or source mod.
 
-Or, to use IntelliJ, run:
-```
-gradlew genIntellijRuns
-```
+**After a search**
 
-4. Open the project's parent directory in your IDE and import the project as an existing Gradle project.
+- A heads-up panel says what the compass is doing: search radius and progress while it runs, then
+  the coordinates, the distance and the compass point once it lands.
+- A direction strip across the top of the screen marks where the target lies against the horizon,
+  turns green when you are facing it, and points the way to turn when it is off screen.
+- The compass needle itself points at the located place, as a compass should.
+- Every located place is remembered. Point the compass back at one, share it in chat with
+  click-to-copy coordinates, or travel to it where the server allows that.
 
-### Build
+**Integration**
 
-To build the project, configure `build.gradle` then run:
-```
-gradlew build
-```
+- Waypoints in [Xaero's Minimap](https://www.curseforge.com/minecraft/mc-mods/xaeros-minimap) are
+  created for each located place, when that mod is installed.
+- Resource packs can give the compass a different look per structure through custom model data.
+- Data packs and modpacks can define structure groups of their own.
+- Translated into English, German, Spanish, Japanese, Russian, Simplified Chinese and
+  Traditional Chinese.
 
-This will build a jar file in `build/libs`.
+
+## Configuration
+
+Server-side options live in `config/explorerscompass-common.toml`, client-side ones in
+`config/explorerscompass-client.toml`.
+
+Things worth knowing about:
+
+- `maxRadius`, `maxSamples`, `maxBiomeSamples` — how hard a search is allowed to look before giving
+  up. Raising them finds more distant targets at a higher cost.
+- `maxSearchTimePerTick` — the slice of each server tick that searching may consume, shared by every
+  search running at once. Lower keeps the server responsive; higher finishes sooner.
+- `asyncBiomeSearch` — runs biome searches off the server thread, which finishes them several times
+  sooner and costs the server nothing. Safe because which biome generates somewhere follows from the
+  seed and the generator's noise alone. Turn it off if a biome-source mod turns out not to be
+  thread-safe. Structure searches are unaffected: they read chunks, which only the server thread may do.
+- `structureBlacklist` / `biomeBlacklist` — what the compass will not show or search for. `*` matches
+  any number of characters and `?` matches one, so `minecraft:*village*` works.
+- `allowTeleport`, `allowSharing`, and their cooldowns — what players are allowed to do with a result.
+- `showDirectionBar`, `directionBarWidth`, `directionBarSpan` — the horizon strip. Pair a wide strip
+  with a large span to have the whole horizon on screen at once.
+- `overlayBackground`, `guiHeaderBackground`, `guiSidebarBackground`, `guiStatusBarBackground` — each
+  panel can be filled in or left outlined and see-through on its own.
+
+## Credits
+
+Explorer's Compass was created by **ChaosTheDude**
+([MattCzyr/ExplorersCompass](https://github.com/MattCzyr/ExplorersCompass)). This repository builds
+on that work.
 
 ## License
 
-This mod is available under the [Creative Commons Attribution-NonCommercial ShareAlike 4.0 International License](https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode).
+This mod is available under the
+[Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License](https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode).
