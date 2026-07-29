@@ -10,7 +10,10 @@ import net.neoforged.neoforge.event.BuildCreativeModeTabContentsEvent;
 import net.neoforged.neoforge.registries.DeferredItem;
 import net.neoforged.neoforge.registries.DeferredRegister;
 
-@EventBusSubscriber(modid = ExplorersCompass.MODID, bus = EventBusSubscriber.Bus.MOD)
+// Which bus a listener belongs on is worked out from the event it takes, so naming one here is
+// both ignored and on its way out. BuildCreativeModeTabContentsEvent is a mod bus event, so this
+// lands on the mod bus either way.
+@EventBusSubscriber(modid = ExplorersCompass.MODID)
 public class ExplorersCompassRegistry {
 
 	public static final DeferredRegister.Items ITEMS = DeferredRegister.createItems(ExplorersCompass.MODID);

@@ -8,9 +8,15 @@
     "WSW"
   ],
   "key": {
-    "W": "minecraft:cobweb",
-    "S": "minecraft:cracked_stone_bricks",
-    "C": "minecraft:compass"
+    "W": {
+      "item": "minecraft:cobweb"
+    },
+    "S": {
+      "item": "minecraft:cracked_stone_bricks"
+    },
+    "C": {
+      "item": "minecraft:compass"
+    }
   },
   "result": {
     "id": "explorerscompass:explorerscompass",
