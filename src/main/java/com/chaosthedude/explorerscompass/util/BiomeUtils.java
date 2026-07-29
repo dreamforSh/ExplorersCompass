@@ -21,6 +21,8 @@ import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Multimaps;
 
 import net.minecraft.Util;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.core.Holder;
 import net.minecraft.core.Registry;
@@ -51,6 +53,13 @@ public class BiomeUtils {
 	 * biome falls back to one of them only when it carries no tag that says more than that.
 	 */
 	private static final Set<String> DIMENSION_TAG_PATHS = Set.of("is_overworld", "is_nether", "is_end");
+
+	/**
+	 * The temperature below which whatever falls in a biome falls as snow. This is the same threshold
+	 * the game itself reckons by, which it only shifts well above the heights a biome is travelled to
+	 * at.
+	 */
+	private static final float SNOW_TEMPERATURE = 0.15F;
 
 	// Compiled forms of the configured blacklist globs, rebuilt when the config changes. Only ever
 	// touched from the server thread.
@@ -280,7 +289,7 @@ public class BiomeUtils {
 	 */
 	@OnlyIn(Dist.CLIENT)
 	public static String getPrettyGroupName(ResourceLocation groupKey) {
-		if (groupKey == null) {
+		if (StructureUtils.hasNoGroup(groupKey)) {
 			return "";
 		}
 		final String translationKey = Util.makeDescriptionId("biomegroup", groupKey);
@@ -289,6 +298,49 @@ public class BiomeUtils {
 			return name;
 		}
 		return getBasicGroupName(groupKey);
+	}
+
+	/**
+	 * How warm the given biome is, as the number the game's own worldgen reckons it by. Empty when the
+	 * client is in no world, or is in one holding no such biome, which happens while the server is
+	 * replacing the list a screen is showing.
+	 */
+	@OnlyIn(Dist.CLIENT)
+	public static String getTemperature(ResourceLocation biomeKey) {
+		final Biome biome = getClientBiome(biomeKey);
+		return biome == null ? "" : String.format("%.2f", biome.getModifiedClimateSettings().temperature());
+	}
+
+	/**
+	 * What falls in the given biome, which is what its temperature amounts to for whoever is standing
+	 * in it. Worked out from the biome's own temperature rather than from a position in it, since a
+	 * biome being picked out of a list has no position yet.
+	 */
+	@OnlyIn(Dist.CLIENT)
+	public static String getPrecipitation(ResourceLocation biomeKey) {
+		final Biome biome = getClientBiome(biomeKey);
+		if (biome == null) {
+			return "";
+		}
+
+		final Biome.ClimateSettings climate = biome.getModifiedClimateSettings();
+		if (!climate.hasPrecipitation()) {
+			return I18n.get("string.explorerscompass.precipitation.none");
+		}
+		return I18n.get(climate.temperature() < SNOW_TEMPERATURE ? "string.explorerscompass.precipitation.snow" : "string.explorerscompass.precipitation.rain");
+	}
+
+	/**
+	 * The biome the given key names in the world the client is in. The biomes are part of what a
+	 * server sends on joining it, so this answers away from single player as well.
+	 */
+	@OnlyIn(Dist.CLIENT)
+	private static Biome getClientBiome(ResourceLocation biomeKey) {
+		final ClientLevel level = Minecraft.getInstance().level;
+		if (level == null || biomeKey == null) {
+			return null;
+		}
+		return level.registryAccess().registryOrThrow(Registries.BIOME).get(biomeKey);
 	}
 
 	private static Registry<Biome> getBiomeRegistry(ServerLevel level) {

@@ -26,9 +26,9 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.client.event.RenderGuiEvent;
 import net.minecraftforge.event.TickEvent.ClientTickEvent;
 import net.minecraftforge.event.TickEvent.Phase;
-import net.minecraftforge.event.TickEvent.RenderTickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 
 @OnlyIn(Dist.CLIENT)
@@ -198,9 +198,19 @@ public class ClientEventHandler {
 		hudData = createHudData(player, compass, stack, state);
 	}
 
+	/**
+	 * Draws the compass readout as part of the interface the game draws over the world.
+	 *
+	 * <p>This used to be drawn at the end of the frame instead. That no longer puts anything on the
+	 * screen: the interface is drawn shifted far back into a narrow slice of depth, and that shift is
+	 * taken back down before the frame ends, so anything drawn afterwards sits nearer than the slice
+	 * begins and is clipped away without a word. Drawing while the interface is still being drawn is
+	 * also what supplies the graphics object rather than having to conjure one, and the interface is
+	 * drawn while a screen is open too, so the readout still shows over an open chat.
+	 */
 	@SubscribeEvent
-	public void onRenderTick(RenderTickEvent event) {
-		if (event.phase != Phase.END || mc.player == null || mc.level == null || mc.options.hideGui || mc.options.renderDebug) {
+	public void onRenderGui(RenderGuiEvent.Post event) {
+		if (mc.player == null || mc.level == null || mc.options.hideGui || mc.options.renderDebug) {
 			return;
 		}
 		if (mc.screen != null && !(ConfigHandler.CLIENT.displayWithChatOpen.get() && mc.screen instanceof ChatScreen)) {
@@ -213,11 +223,12 @@ public class ClientEventHandler {
 			return;
 		}
 
-		// Drawing is no longer done against a bare matrix stack but through a graphics object, which
-		// carries the stack along with the buffer the text is batched into. One is made here rather
-		// than taken from the event, so that the HUD keeps being drawn at the very end of the frame,
-		// over an open chat screen as before, rather than under whatever screen is showing.
-		final GuiGraphics guiGraphics = new GuiGraphics(mc, mc.renderBuffers().bufferSource());
+		final GuiGraphics guiGraphics = event.getGuiGraphics();
+		// The panels below are drawn straight away where text is batched up, so whatever the rest of
+		// the interface has queued so far is put on the screen first and this readout composes over it
+		// rather than having someone else's text come out on top of its own background
+		guiGraphics.flush();
+
 		if (data.state == CompassState.FOUND && data.inFoundDimension) {
 			if (ConfigHandler.CLIENT.showDirectionBar.get()) {
 				renderDirectionBar(guiGraphics, player, data);
@@ -225,7 +236,6 @@ public class ClientEventHandler {
 		}
 
 		renderInfoPanel(guiGraphics, data);
-		guiGraphics.flush();
 	}
 
 	/**

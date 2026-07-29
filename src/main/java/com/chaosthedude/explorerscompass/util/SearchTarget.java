@@ -79,12 +79,15 @@ public enum SearchTarget {
 	}
 
 	/**
-	 * The group the given key belongs to, or null for a key the synced list does not hold. That
-	 * happens while the server is replacing the list the screen is showing.
+	 * The group the given key belongs to, or null when it belongs to none. That also covers a key the
+	 * synced list does not hold at all, which happens while the server is replacing the list the
+	 * screen is showing: neither one has a group to name or to search for, and answering with the key
+	 * that stands in for having no group would leave every caller checking for it separately.
 	 */
 	@OnlyIn(Dist.CLIENT)
 	public ResourceLocation getGroupKey(ResourceLocation key) {
-		return this == BIOME ? ExplorersCompass.biomeKeysToGroupKeys.get(key) : ExplorersCompass.structureKeysToTypeKeys.get(key);
+		final ResourceLocation groupKey = this == BIOME ? ExplorersCompass.biomeKeysToGroupKeys.get(key) : ExplorersCompass.structureKeysToTypeKeys.get(key);
+		return StructureUtils.hasNoGroup(groupKey) ? null : groupKey;
 	}
 
 	/** The dimensions the given key generates in, empty when they could not be determined. */

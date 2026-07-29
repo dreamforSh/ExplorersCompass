@@ -62,7 +62,9 @@ public class BookmarkList extends ObjectSelectionList<BookmarkListEntry> {
 	protected void renderList(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
 		final int bandLeft = getRowLeft() - 3;
 		final int bandRight = getRowLeft() + getRowWidth() + 3;
-		final boolean overList = isMouseOver((double) mouseX, (double) mouseY);
+		// The same row the screen explains in a tooltip, so that the two cannot disagree about which
+		// one the pointer is on
+		final BookmarkListEntry hoveredEntry = getHoveredEntry(mouseX, mouseY);
 
 		final int firstRow = Math.max(0,
 				(int) Math.floor(getScrollAmount() / itemHeight) - 1);
@@ -77,7 +79,7 @@ public class BookmarkList extends ObjectSelectionList<BookmarkListEntry> {
 			}
 
 			final BookmarkListEntry entry = getEntry(j);
-			final boolean hovered = overList && Objects.equals(getEntryAtPosition((double) mouseX, (double) mouseY), entry);
+			final boolean hovered = Objects.equals(entry, hoveredEntry);
 			if (isSelectedItem(j)) {
 				RenderUtils.drawHorizontalGradient(bandLeft, bandTop, bandRight, bandBottom, GuiTheme.ROW_SELECTED_LEFT, GuiTheme.ROW_SELECTED_RIGHT);
 				RenderUtils.drawRect(bandLeft, bandTop, bandLeft + 2, bandBottom, GuiTheme.ACCENT | 0xFF000000);
@@ -127,9 +129,17 @@ public class BookmarkList extends ObjectSelectionList<BookmarkListEntry> {
 		return getSelected() != null;
 	}
 
-	/** The row under the pointer, so that the screen can explain it above everything else it draws. */
+	/**
+	 * The row under the pointer, so that the screen can explain it above everything else it draws.
+	 *
+	 * <p>Whether the pointer is over the list at all has to be asked separately. The base class works
+	 * the row out from how far the list has been scrolled without ever checking that the pointer is
+	 * within the list vertically, so a pointer above or below it still arrives at whichever row that
+	 * arithmetic lands on, and the tooltip would name a row that is neither under the pointer nor the
+	 * one drawn as hovered.
+	 */
 	public BookmarkListEntry getHoveredEntry(double mouseX, double mouseY) {
-		return getEntryAtPosition(mouseX, mouseY);
+		return isMouseOver(mouseX, mouseY) ? getEntryAtPosition(mouseX, mouseY) : null;
 	}
 
 	public BookmarksScreen getParentScreen() {

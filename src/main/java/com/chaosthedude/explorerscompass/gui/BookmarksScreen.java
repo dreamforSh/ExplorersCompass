@@ -114,7 +114,7 @@ public class BookmarksScreen extends Screen {
 	/** Explains whatever the pointer is resting on, above everything else on the screen. */
 	private void renderButtonTooltip(GuiGraphics guiGraphics, int mouseX, int mouseY) {
 		for (Object widget : renderables) {
-			if (widget instanceof TransparentButton button && button.visible && button.isHoveredOrFocused() && !button.getTooltipLines().isEmpty()) {
+			if (widget instanceof TransparentButton button && button.visible && button.isPointedAt() && !button.getTooltipLines().isEmpty()) {
 				guiGraphics.renderComponentTooltip(font, button.getTooltipLines(), mouseX, mouseY);
 				return;
 			}

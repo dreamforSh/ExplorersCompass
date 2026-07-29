@@ -53,6 +53,20 @@ public class TransparentButton extends Button {
 		return tooltipLines;
 	}
 
+	/**
+	 * Whether this button is the one being pointed at, and so the one to pick out and to explain.
+	 *
+	 * <p>Being focused is not the same thing and cannot stand in for it. A click leaves the focus on
+	 * whatever it landed on and nothing takes it away again, so a button asked whether it is hovered
+	 * or focused answers yes for the rest of the screen's life once it has been pressed: it stays lit
+	 * as though the pointer were still on it, and it goes on explaining itself over everything else.
+	 * Focus is only worth showing when it arrived by keyboard, there being no pointer to follow then,
+	 * which is the same rule the game applies to its own widgets.
+	 */
+	public boolean isPointedAt() {
+		return isHovered() || (isFocused() && Minecraft.getInstance().getLastInputType().isKeyboard());
+	}
+
 	@Override
 	public void renderWidget(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
 		if (!visible) {
@@ -62,16 +76,17 @@ public class TransparentButton extends Button {
 		final Minecraft mc = Minecraft.getInstance();
 		final int x = getX();
 		final int y = getY();
-		final int background = !active ? BACKGROUND_DISABLED : (isHoveredOrFocused() ? BACKGROUND_HOVERED : BACKGROUND);
+		final boolean pointedAt = isPointedAt();
+		final int background = !active ? BACKGROUND_DISABLED : (pointedAt ? BACKGROUND_HOVERED : BACKGROUND);
 		RenderUtils.drawRect(x, y, x + width, y + height, background);
 
-		final int border = !active ? BORDER : (isHoveredOrFocused() ? BORDER_HOVERED : (highlighted ? BORDER_HIGHLIGHTED : BORDER));
+		final int border = !active ? BORDER : (pointedAt ? BORDER_HOVERED : (highlighted ? BORDER_HIGHLIGHTED : BORDER));
 		RenderUtils.drawInnerOutline(x, y, x + width, y + height, border);
 
 		// The leading edge carries the state that matters most: what is switched on, and what is being
 		// pointed at, without either of them having to be read off the label
-		if (active && (highlighted || isHoveredOrFocused())) {
-			RenderUtils.drawRect(x, y, x + 2, y + height, isHoveredOrFocused() ? GuiTheme.ACCENT | 0xFF000000 : GuiTheme.ACCENT_DIM);
+		if (active && (highlighted || pointedAt)) {
+			RenderUtils.drawRect(x, y, x + 2, y + height, pointedAt ? GuiTheme.ACCENT | 0xFF000000 : GuiTheme.ACCENT_DIM);
 		}
 
 		final int textColor = !active ? GuiTheme.TEXT_DISABLED : (highlighted ? GuiTheme.ACCENT : GuiTheme.TEXT_PRIMARY);

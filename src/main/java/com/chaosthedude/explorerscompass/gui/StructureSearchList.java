@@ -11,6 +11,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import org.jetbrains.annotations.NotNull;
 
 @OnlyIn(Dist.CLIENT)
 public class StructureSearchList extends ObjectSelectionList<StructureSearchEntry> {
@@ -53,7 +54,7 @@ public class StructureSearchList extends ObjectSelectionList<StructureSearchEntr
 	}
 
 	@Override
-	public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
+	public void render(@NotNull GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
 		// A row that is only half inside the list is still drawn whole, so without clipping the rows
 		// being scrolled past spill over the search field and the title above the list
 		RenderUtils.enableScissor(guiGraphics, x0, y0, x1, y1);
@@ -62,10 +63,12 @@ public class StructureSearchList extends ObjectSelectionList<StructureSearchEntr
 	}
 
 	@Override
-	protected void renderList(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
+	protected void renderList(@NotNull GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
 		final int bandLeft = getRowLeft() - 3;
 		final int bandRight = getRowLeft() + getRowWidth() + 3;
-		final boolean overList = isMouseOver((double) mouseX, (double) mouseY);
+		// The same row the screen explains in a tooltip, so that the two cannot disagree about which
+		// one the pointer is on
+		final StructureSearchEntry hoveredEntry = getHoveredEntry(mouseX, mouseY);
 
 		final int firstRow = Math.max(0,
 				(int) Math.floor(getScrollAmount() / itemHeight) - 1);
@@ -80,7 +83,7 @@ public class StructureSearchList extends ObjectSelectionList<StructureSearchEntr
 			}
 
 			final StructureSearchEntry entry = getEntry(j);
-			final boolean hovered = overList && Objects.equals(getEntryAtPosition((double) mouseX, (double) mouseY), entry);
+			final boolean hovered = Objects.equals(entry, hoveredEntry);
 			if (isSelectedItem(j)) {
 				// The selection fades out towards the right, so that the row it marks stays readable
 				RenderUtils.drawHorizontalGradient(bandLeft, bandTop, bandRight, bandBottom, GuiTheme.ROW_SELECTED_LEFT, GuiTheme.ROW_SELECTED_RIGHT);
@@ -171,9 +174,17 @@ public class StructureSearchList extends ObjectSelectionList<StructureSearchEntr
 		return getSelected() != null;
 	}
 
-	/** The entry under the pointer, exposed so the owning screen can draw its ID tooltip last. */
+	/**
+	 * The entry under the pointer, exposed so the owning screen can draw its ID tooltip last.
+	 *
+	 * <p>Whether the pointer is over the list at all has to be asked separately. The base class works
+	 * the row out from how far the list has been scrolled without ever checking that the pointer is
+	 * within the list vertically, so a pointer above or below it still arrives at whichever row that
+	 * arithmetic lands on: the tooltip would show over the header and over the status strip below,
+	 * naming a row that is neither under the pointer nor the one drawn as hovered.
+	 */
 	public StructureSearchEntry getHoveredEntry(double mouseX, double mouseY) {
-		return getEntryAtPosition(mouseX, mouseY);
+		return isMouseOver(mouseX, mouseY) ? getEntryAtPosition(mouseX, mouseY) : null;
 	}
 
 	public ExplorersCompassScreen getParentScreen() {

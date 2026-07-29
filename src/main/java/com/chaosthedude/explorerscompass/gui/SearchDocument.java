@@ -3,6 +3,7 @@ package com.chaosthedude.explorerscompass.gui;
 import java.util.List;
 import java.util.Locale;
 
+import com.chaosthedude.explorerscompass.util.BiomeUtils;
 import com.chaosthedude.explorerscompass.util.SearchTarget;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
 
@@ -23,6 +24,9 @@ final class SearchDocument {
 	private final String sourceName;
 	private final String groupName;
 	private final String dimensions;
+	/** How warm this is and what falls on it, both of which only a biome has. Empty otherwise. */
+	private final String temperature;
+	private final String precipitation;
 	private final List<ResourceLocation> dimensionKeys;
 	private final String allSearchText;
 	private final String idSearchText;
@@ -39,6 +43,8 @@ final class SearchDocument {
 		groupName = searchTarget.getPrettyGroupName(groupKey);
 		dimensionKeys = List.copyOf(searchTarget.getDimensionKeys(key));
 		dimensions = StructureUtils.dimensionKeysToString(dimensionKeys);
+		temperature = searchTarget == SearchTarget.BIOME ? BiomeUtils.getTemperature(key) : "";
+		precipitation = searchTarget == SearchTarget.BIOME ? BiomeUtils.getPrecipitation(key) : "";
 
 		idSearchText = combine(key.toString(), key.getPath());
 		nameSearchText = combine(displayName, searchTarget.getBasicName(key));
@@ -65,6 +71,8 @@ final class SearchDocument {
 		sourceName = source;
 		groupName = group;
 		dimensions = dimension;
+		temperature = "";
+		precipitation = "";
 		dimensionKeys = List.of();
 		idSearchText = combine(id, key == null ? "" : key.getPath());
 		nameSearchText = normalize(name);
@@ -89,6 +97,14 @@ final class SearchDocument {
 
 	String getDimensions() {
 		return dimensions;
+	}
+
+	String getTemperature() {
+		return temperature;
+	}
+
+	String getPrecipitation() {
+		return precipitation;
 	}
 
 	List<ResourceLocation> getDimensionKeys() {

@@ -64,18 +64,39 @@ public class StructureSearchEntry extends ObjectSelectionList.Entry<StructureSea
 		narration = Component.literal(document.getDisplayName() + " (" + key + ")");
 		groupLine = labeled("string.explorerscompass.group", document.getGroupName());
 		dimensionLine = labeled("string.explorerscompass.dimension", document.getDimensions());
-		tooltipLines = List.of(
-				Component.literal(document.getDisplayName()).withStyle((style) -> style.withColor(TextColor.fromRgb(GuiTheme.TEXT_PRIMARY))),
-				muted(labeled("string.explorerscompass.source", document.getSourceName())),
-				muted(groupLine),
-				muted(dimensionLine),
-				// Last and dimmest, the way an advanced tooltip names a registry entry
-				Component.literal(key.toString()).withStyle(ChatFormatting.DARK_GRAY));
+
+		final List<Component> lines = new ArrayList<Component>();
+		lines.add(Component.literal(document.getDisplayName()).withStyle((style) -> style.withColor(TextColor.fromRgb(GuiTheme.TEXT_PRIMARY))));
+		addLabeled(lines, "string.explorerscompass.source", document.getSourceName());
+		addLabeled(lines, "string.explorerscompass.group", document.getGroupName());
+		addLabeled(lines, "string.explorerscompass.dimension", document.getDimensions());
+		// How warm somewhere is and what falls on it belong to a biome alone, and the row itself has no
+		// room left to say either
+		addLabeled(lines, "string.explorerscompass.temperature", document.getTemperature());
+		addLabeled(lines, "string.explorerscompass.precipitation", document.getPrecipitation());
+		// Last and dimmest, the way an advanced tooltip names a registry entry
+		lines.add(Component.literal(key.toString()).withStyle(ChatFormatting.DARK_GRAY));
+		tooltipLines = List.copyOf(lines);
 	}
 
-	/** A labelled value, punctuated the way the player's own language punctuates one. */
+	/**
+	 * A labelled value, punctuated the way the player's own language punctuates one. Empty when there
+	 * is no value to label: a label standing on its own says less than nothing, since it reads as the
+	 * value having been looked up and come back blank.
+	 */
 	private static String labeled(String labelKey, String value) {
+		if (value.isEmpty()) {
+			return "";
+		}
 		return I18n.get("string.explorerscompass.labeledValue", I18n.get(labelKey), value);
+	}
+
+	/** Adds a labelled line, unless there is nothing to label. */
+	private static void addLabeled(List<Component> lines, String labelKey, String value) {
+		final String line = labeled(labelKey, value);
+		if (!line.isEmpty()) {
+			lines.add(muted(line));
+		}
 	}
 
 	private static Component muted(String text) {
@@ -190,6 +211,11 @@ public class StructureSearchEntry extends ObjectSelectionList.Entry<StructureSea
 	public void search() {
 		mc.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.0F));
 		parentScreen.searchForTarget(key);
+	}
+
+	/** Whether this belongs to a group at all, and so whether searching for its group means anything. */
+	public boolean hasGroup() {
+		return parentScreen.getSearchTarget().getGroupKey(key) != null;
 	}
 
 	public void searchForGroup() {

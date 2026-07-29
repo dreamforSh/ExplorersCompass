@@ -33,6 +33,16 @@ minecraft {
     // Default run configurations.
     // These can be tweaked, removed, or duplicated as needed.
     runs {
+        // Mods pulled from a maven ship refmaps written in the intermediate names their own build
+        // used, while this workspace is compiled against the official ones. Without a mapping
+        // between the two, their mixins find none of the methods they name and abort startup before
+        // this mod is ever reached. Applied to every run configuration, since any of them can end up
+        // with such a mod on the classpath.
+        configureEach {
+            property 'mixin.env.remapRefMap', 'true'
+            property 'mixin.env.refMapRemappingFile', "${projectDir}/build/createSrgToMcp/output.srg"
+        }
+
         client {
             workingDirectory project.file('run')
 

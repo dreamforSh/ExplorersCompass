@@ -138,8 +138,10 @@ public class ConfigHandler {
 			desc = "Creates a waypoint in Xaero's Minimap for each located structure. Has no effect when that mod is not installed.";
 			createXaeroWaypoints = builder.comment(desc).define("createXaeroWaypoints", true);
 
+			// The first entry in that list is black, which a waypoint marker is not readable in, so the
+			// gold this mod picks things out in elsewhere is used instead
 			desc = "The color of the waypoints created in Xaero's Minimap, as an index into its own color list.";
-			xaeroWaypointColor = builder.comment(desc).defineInRange("xaeroWaypointColor", 0, 0, 15);
+			xaeroWaypointColor = builder.comment(desc).defineInRange("xaeroWaypointColor", 6, 0, 15);
 
 			desc = "The line offset for information rendered on the HUD.";
 			overlayLineOffset = builder.comment(desc).defineInRange("overlayLineOffset", 1, 0, 50);

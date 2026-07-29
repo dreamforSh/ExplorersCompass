@@ -129,6 +129,7 @@ public class ExplorersCompassScreen extends Screen {
 	/** Everything that can change how the action buttons look or whether they can be used. */
 	private record ButtonState(
 			boolean hasSelection,
+			boolean selectionHasGroup,
 			int multiSelected,
 			CompassState compassState,
 			int cachedLocations,
@@ -195,7 +196,15 @@ public class ExplorersCompassScreen extends Screen {
 				}
 			}
 		}
-		return super.mouseClicked(mouseX, mouseY, button);
+
+		final boolean handled = super.mouseClicked(mouseX, mouseY, button);
+		// A click leaves the focus on whatever it landed on, and this screen reads the keys that walk and
+		// search its list from the filter field: with a button holding the focus instead, typing reaches
+		// that button, which does nothing with it, and the field stops narrowing the list altogether
+		if (!searchTextField.isFocused()) {
+			setFocused(searchTextField);
+		}
+		return handled;
 	}
 
 	@Override
@@ -412,7 +421,7 @@ public class ExplorersCompassScreen extends Screen {
 			return;
 		}
 		for (Object widget : renderables) {
-			if (widget instanceof TransparentButton button && button.visible && button.isHoveredOrFocused() && !button.getTooltipLines().isEmpty()) {
+			if (widget instanceof TransparentButton button && button.visible && button.isPointedAt() && !button.getTooltipLines().isEmpty()) {
 				guiGraphics.renderComponentTooltip(font, button.getTooltipLines(), mouseX, mouseY);
 				return;
 			}
@@ -931,12 +940,15 @@ public class ExplorersCompassScreen extends Screen {
 	/** Keeps the buttons in step with what the compass is currently able to do. */
 	private void updateButtons() {
 		final boolean hasSelection = selectionList != null && selectionList.hasSelection();
+		// Not everything belongs to a group: nothing the packs group together, and no biome carrying no
+		// tag that says what kind of biome it is
+		final boolean selectionHasGroup = hasSelection && selectionList.getSelected().hasGroup();
 		final int multiSelected = multiSelectedKeys.size();
 		final CompassState state = explorersCompass.getState(stack);
 		final boolean located = state == CompassState.FOUND;
 		final ResourceLocation foundDimension = explorersCompass.getFoundDimension(stack);
 		final ResourceLocation currentDimension = player.level().dimension().location();
-		final ButtonState buttonState = new ButtonState(hasSelection, multiSelected, state,
+		final ButtonState buttonState = new ButtonState(hasSelection, selectionHasGroup, multiSelected, state,
 				cachedLocations, ExplorersCompass.canTeleport,
 				ConfigHandler.GENERAL.allowSharing.get(), foundDimension, currentDimension);
 		if (buttonState.equals(lastButtonState)) {
@@ -946,8 +958,8 @@ public class ExplorersCompassScreen extends Screen {
 
 		searchButton.active = hasSelection || multiSelected > 0;
 		searchButton.setMessage(multiSelected > 1 ? Component.translatable("string.explorerscompass.search").append(Component.literal(" (" + multiSelected + ")")) : Component.translatable("string.explorerscompass.search"));
-		// A group search applies to the group of a single entry
-		searchGroupButton.active = hasSelection && multiSelected <= 1;
+		// A group search applies to the group of a single entry, and only where there is one
+		searchGroupButton.active = selectionHasGroup && multiSelected <= 1;
 
 		// Searching for a further instance needs something to have been located to look past
 		if (searchNextButton != null) {

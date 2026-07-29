@@ -338,11 +338,26 @@ public class StructureUtils {
 	}
 
 	/**
+	 * Whether the given key stands for belonging to no group at all rather than for a group. Both
+	 * lists record that the same way: whatever belongs to no group of its own is recorded under
+	 * {@link #NO_TYPE_KEY} and sent to the client under it, so there is one thing to ask about it
+	 * rather than a null in one place and a key standing in for one in another.
+	 */
+	public static boolean hasNoGroup(ResourceLocation groupKey) {
+		return groupKey == null || groupKey.equals(NO_TYPE_KEY);
+	}
+
+	/**
 	 * Display name of a group: the name its {@code groups.json} entry configured, when there is
-	 * one, and whatever the group key displays as otherwise.
+	 * one, and whatever the group key displays as otherwise. Belonging to no group has no name:
+	 * prettifying the key that stands for it reads as a group actually called "None", in English
+	 * whatever the language, so it is left to whoever displays this to say nothing at all instead.
 	 */
 	@OnlyIn(Dist.CLIENT)
 	public static String getPrettyGroupName(ResourceLocation typeKey) {
+		if (hasNoGroup(typeKey)) {
+			return "";
+		}
 		final String customName = ExplorersCompass.groupNames.get(typeKey);
 		if (customName != null) {
 			return customName;
