@@ -197,10 +197,23 @@ public class ExplorersCompassScreen extends Screen {
 			}
 		}
 
-		final boolean handled = super.mouseClicked(mouseX, mouseY, button);
-		// A click leaves the focus on whatever it landed on, and this screen reads the keys that walk and
-		// search its list from the filter field: with a button holding the focus instead, typing reaches
-		// that button, which does nothing with it, and the field stops narrowing the list altogether
+		return super.mouseClicked(mouseX, mouseY, button);
+	}
+
+	/**
+	 * Gives the filter field the focus back once whatever was clicked has been let go of.
+	 *
+	 * <p>A click leaves the focus on whatever it landed on, and this screen reads the keys that walk and
+	 * search its list from the filter field: with a button holding the focus instead, typing reaches
+	 * that button, which does nothing with it, and the field stops narrowing the list altogether.
+	 *
+	 * <p>Waiting for the button to come up is what leaves a drag in between alone. A drag is only ever
+	 * delivered to whatever holds the focus, so taking it back any earlier than this strands the
+	 * scrollbar mid-drag and leaves the list only able to be scrolled by the wheel.
+	 */
+	@Override
+	public boolean mouseReleased(double mouseX, double mouseY, int button) {
+		final boolean handled = super.mouseReleased(mouseX, mouseY, button);
 		if (!searchTextField.isFocused()) {
 			setFocused(searchTextField);
 		}
