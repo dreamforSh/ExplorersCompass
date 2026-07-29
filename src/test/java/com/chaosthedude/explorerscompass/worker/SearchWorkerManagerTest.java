@@ -16,8 +16,8 @@ import net.minecraft.resources.ResourceLocation;
 class SearchWorkerManagerTest {
 
 	private static final BlockPos START = new BlockPos(0, 64, 0);
-	private static final ResourceLocation NEAR_KEY = new ResourceLocation("test", "near");
-	private static final ResourceLocation FAR_KEY = new ResourceLocation("test", "far");
+	private static final ResourceLocation NEAR_KEY = ResourceLocation.fromNamespaceAndPath("test", "near");
+	private static final ResourceLocation FAR_KEY = ResourceLocation.fromNamespaceAndPath("test", "far");
 
 	// Far more turns than any of these searches take, so a manager that never finishes fails the test
 	// instead of hanging the build

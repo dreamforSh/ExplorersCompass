@@ -9,8 +9,8 @@ import java.util.function.LongSupplier;
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
 
 import net.minecraft.server.MinecraftServer;
-import net.minecraftforge.common.WorldWorkerManager;
-import net.minecraftforge.server.ServerLifecycleHooks;
+import net.neoforged.neoforge.common.WorldWorkerManager;
+import net.neoforged.neoforge.server.ServerLifecycleHooks;
 
 /**
  * Hands out the time the searches on this server are allowed to spend on the server thread.

@@ -10,9 +10,9 @@ import com.chaosthedude.explorerscompass.items.ExplorersCompassItem;
 
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
-import net.minecraftforge.fml.ModList;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
+import net.neoforged.fml.ModList;
 
 /**
  * Adds a waypoint to Xaero's Minimap for every location the compass finds.

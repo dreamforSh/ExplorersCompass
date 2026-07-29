@@ -2,14 +2,15 @@ package com.chaosthedude.explorerscompass.gui;
 
 import com.chaosthedude.explorerscompass.util.RenderUtils;
 
+import net.minecraft.Util;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
 
 @OnlyIn(Dist.CLIENT)
 public class TransparentTextField extends EditBox {
@@ -31,7 +32,12 @@ public class TransparentTextField extends EditBox {
 	private int pseudoLineScrollOffset;
 	private int pseudoEnabledColor = 14737632;
 	private int pseudoDisabledColor = 7368816;
-	private int pseudoCursorCounter;
+	/**
+	 * When this field last took focus. The vanilla box blinks its caret off the time since that
+	 * moment rather than off a counter advanced once a tick, since there is no longer a tick to
+	 * advance one in, and the field it keeps it in is private.
+	 */
+	private long pseudoFocusedTime = Util.getMillis();
 	private int pseudoSelectionEnd;
 
 	public TransparentTextField(Font font, int x, int y, int width, int height, Component label) {
@@ -47,10 +53,10 @@ public class TransparentTextField extends EditBox {
 			final int y = getY();
 			final boolean showClear = !getValue().isEmpty();
 			if (pseudoEnableBackgroundDrawing) {
-				RenderUtils.drawRect(x, y, x + width, y + height, BACKGROUND);
+				RenderUtils.drawRect(guiGraphics, x, y, x + width, y + height, BACKGROUND);
 				// The border is what says whether typing lands here, which the blinking cursor alone
 				// does not make obvious on a field that has no chrome of its own
-				RenderUtils.drawInnerOutline(x, y, x + width, y + height, isFocused() ? BORDER_FOCUSED : BORDER);
+				RenderUtils.drawInnerOutline(guiGraphics, x, y, x + width, y + height, isFocused() ? BORDER_FOCUSED : BORDER);
 			}
 			if (showClear) {
 				final boolean overClear = isOverClearGlyph(mouseX, mouseY);
@@ -63,7 +69,7 @@ public class TransparentTextField extends EditBox {
 			String text = showLabel ? label.getString() : getValue();
 			String s = font.plainSubstrByWidth(text.substring(pseudoLineScrollOffset), getWidth() - (showClear ? CLEAR_WIDTH + 4 : 4));
 			boolean flag = j >= 0 && j <= s.length();
-			boolean flag1 = isFocused() && pseudoCursorCounter / 6 % 2 == 0 && flag;
+			boolean flag1 = isFocused() && (Util.getMillis() - pseudoFocusedTime) / 300L % 2L == 0L && flag;
 			int l = pseudoEnableBackgroundDrawing ? x + 4 : x;
 			int i1 = pseudoEnableBackgroundDrawing ? y + (height - 8) / 2 : y;
 			int j1 = l;
@@ -93,7 +99,7 @@ public class TransparentTextField extends EditBox {
 
 			if (flag1) {
 				if (flag2) {
-					RenderUtils.drawRect(k1, i1 - 1, k1 + 1, i1 + 1 + font.lineHeight, -3092272);
+					RenderUtils.drawRect(guiGraphics, k1, i1 - 1, k1 + 1, i1 + 1 + font.lineHeight, -3092272);
 				} else {
 					guiGraphics.drawString(font, "_", k1, i1, i, true);
 				}
@@ -143,7 +149,7 @@ public class TransparentTextField extends EditBox {
 	@Override
 	public void setFocused(boolean isFocused) {
 		if (isFocused && !isFocused()) {
-			pseudoCursorCounter = 0;
+			pseudoFocusedTime = Util.getMillis();
 		}
 		super.setFocused(isFocused);
 	}
@@ -158,12 +164,6 @@ public class TransparentTextField extends EditBox {
 	public void setMaxLength(int length) {
 		super.setMaxLength(length);
 		pseudoMaxStringLength = length;
-	}
-	
-	@Override
-	public void tick() {
-		super.tick();
-		pseudoCursorCounter++;
 	}
 	
 	@Override

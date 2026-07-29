@@ -1,0 +1,33 @@
+modLoader="javafml"
+loaderVersion="${loader_version_range}"
+license="${mod_license}"
+issueTrackerURL="https://github.com/MattCzyr/ExplorersCompass/issues"
+
+[[mods]]
+    modId="${mod_id}"
+    version="${mod_version}"
+    displayName="${mod_name}"
+    displayURL="https://github.com/MattCzyr/ExplorersCompass"
+    authors="${mod_authors}"
+    description='''
+    Search for and locate structures anywhere in the world.
+    '''
+
+# Opens up ChunkGeneratorStructureState#ringPositions so that a stronghold search can wait on the
+# ring positions by yielding, rather than blocking the server thread inside getRingPositionsFor.
+[[accessTransformers]]
+    file="META-INF/accesstransformer.cfg"
+
+[[dependencies.${mod_id}]]
+    modId="neoforge"
+    type="required"
+    versionRange="${neo_version_range}"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="minecraft"
+    type="required"
+    versionRange="${minecraft_version_range}"
+    ordering="NONE"
+    side="BOTH"

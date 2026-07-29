@@ -3,10 +3,14 @@ package com.chaosthedude.explorerscompass.util;
 import java.util.List;
 
 import com.chaosthedude.explorerscompass.ExplorersCompass;
+import com.mojang.serialization.Codec;
 
+import io.netty.buffer.ByteBuf;
+import net.minecraft.network.codec.ByteBufCodecs;
+import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
 
 /**
  * What the compass looks for. Structures and biomes are listed, filtered, searched and reported in
@@ -16,6 +20,16 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 public enum SearchTarget {
 
 	STRUCTURE(0), BIOME(1);
+
+	/**
+	 * Serialized by id rather than by name, matching what the tag this replaces held, so that a
+	 * compass written by an older version of the mod still reads. {@link #fromID} already falls back
+	 * to {@link #STRUCTURE} for an unknown id, which is what a compass from before biomes could be
+	 * searched for needs anyway.
+	 */
+	public static final Codec<SearchTarget> CODEC = Codec.INT.xmap(SearchTarget::fromID, SearchTarget::getID);
+
+	public static final StreamCodec<ByteBuf, SearchTarget> STREAM_CODEC = ByteBufCodecs.VAR_INT.map(SearchTarget::fromID, SearchTarget::getID);
 
 	private final int id;
 

@@ -3,26 +3,21 @@ package com.chaosthedude.explorerscompass.registry;
 import com.chaosthedude.explorerscompass.ExplorersCompass;
 import com.chaosthedude.explorerscompass.items.ExplorersCompassItem;
 
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.CreativeModeTabs;
-import net.minecraftforge.event.BuildCreativeModeTabContentsEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod.EventBusSubscriber;
-import net.minecraftforge.registries.ForgeRegistries;
-import net.minecraftforge.registries.RegisterEvent;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.event.BuildCreativeModeTabContentsEvent;
+import net.neoforged.neoforge.registries.DeferredItem;
+import net.neoforged.neoforge.registries.DeferredRegister;
 
 @EventBusSubscriber(modid = ExplorersCompass.MODID, bus = EventBusSubscriber.Bus.MOD)
 public class ExplorersCompassRegistry {
 
-	private ExplorersCompassRegistry() {
-	}
+	public static final DeferredRegister.Items ITEMS = DeferredRegister.createItems(ExplorersCompass.MODID);
 
-	@SubscribeEvent
-	public static void registerItems(RegisterEvent e) {
-		e.register(ForgeRegistries.Keys.ITEMS, helper -> {
-			ExplorersCompass.explorersCompass = new ExplorersCompassItem();
-            helper.register(new ResourceLocation(ExplorersCompass.MODID, ExplorersCompassItem.NAME), ExplorersCompass.explorersCompass);
-        });
+	public static final DeferredItem<ExplorersCompassItem> EXPLORERS_COMPASS = ITEMS.register(ExplorersCompassItem.NAME, () -> new ExplorersCompassItem());
+
+	private ExplorersCompassRegistry() {
 	}
 
 	/**
@@ -32,7 +27,7 @@ public class ExplorersCompassRegistry {
 	@SubscribeEvent
 	public static void buildCreativeTabContents(BuildCreativeModeTabContentsEvent e) {
 		if (e.getTabKey() == CreativeModeTabs.TOOLS_AND_UTILITIES) {
-			e.accept(ExplorersCompass.explorersCompass);
+			e.accept(EXPLORERS_COMPASS.get());
 		}
 	}
 

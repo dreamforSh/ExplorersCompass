@@ -16,9 +16,11 @@ import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 
 import net.minecraft.ResourceLocationException;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.fml.loading.FMLPaths;
+import net.minecraft.world.item.component.CustomModelData;
+import net.neoforged.fml.loading.FMLPaths;
 
 /**
  * Maps structures to the {@code CustomModelData} value the compass carries while it is pointing
@@ -36,7 +38,6 @@ public class CustomModelDataConfig {
 	private static final String FILE_NAME = "config.json";
 	private static final String KEY_FIELD = "key";
 	private static final String VALUE_FIELD = "value";
-	private static final String NBT_KEY = "CustomModelData";
 
 	private static Map<ResourceLocation, Integer> customModelData = new HashMap<ResourceLocation, Integer>();
 
@@ -91,7 +92,7 @@ public class CustomModelDataConfig {
 			}
 
 			try {
-				values.put(new ResourceLocation(entry.get(KEY_FIELD).getAsString()), entry.get(VALUE_FIELD).getAsInt());
+				values.put(ResourceLocation.parse(entry.get(KEY_FIELD).getAsString()), entry.get(VALUE_FIELD).getAsInt());
 			} catch (ResourceLocationException | NumberFormatException | UnsupportedOperationException | IllegalStateException e) {
 				ExplorersCompass.LOGGER.warn("Ignoring malformed custom model data entry " + entry + ": " + e.getMessage());
 			}
@@ -106,15 +107,13 @@ public class CustomModelDataConfig {
 		final Integer value = structureKey == null ? null : customModelData.get(structureKey);
 		if (value == null) {
 			remove(stack);
-		} else if (stack.hasTag()) {
-			stack.getTag().putInt(NBT_KEY, value);
+		} else {
+			stack.set(DataComponents.CUSTOM_MODEL_DATA, new CustomModelData(value));
 		}
 	}
 
 	public static void remove(ItemStack stack) {
-		if (stack.hasTag()) {
-			stack.getTag().remove(NBT_KEY);
-		}
+		stack.remove(DataComponents.CUSTOM_MODEL_DATA);
 	}
 
 }

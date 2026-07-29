@@ -8,8 +8,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-import javax.annotation.Nullable;
-
 import com.chaosthedude.explorerscompass.ExplorersCompass;
 import com.chaosthedude.explorerscompass.client.CompassTooltip;
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
@@ -19,6 +17,7 @@ import com.chaosthedude.explorerscompass.network.ShareLocationPacket;
 import com.chaosthedude.explorerscompass.network.SyncPacket;
 import com.chaosthedude.explorerscompass.util.BiomeUtils;
 import com.chaosthedude.explorerscompass.util.BookmarkEntry;
+import com.chaosthedude.explorerscompass.util.CompassData;
 import com.chaosthedude.explorerscompass.util.CompassState;
 import com.chaosthedude.explorerscompass.util.ItemUtils;
 import com.chaosthedude.explorerscompass.util.PlayerUtils;
@@ -31,10 +30,6 @@ import com.chaosthedude.explorerscompass.worker.SearchWorkerManager;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.StringTag;
-import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
@@ -51,9 +46,9 @@ import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.levelgen.structure.Structure;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.fml.DistExecutor;
-import net.minecraftforge.network.PacketDistributor;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.fml.loading.FMLEnvironment;
+import net.neoforged.neoforge.network.PacketDistributor;
 
 public class ExplorersCompassItem extends Item {
 
@@ -95,9 +90,7 @@ public class ExplorersCompassItem extends Item {
 				final ServerPlayer serverPlayer = (ServerPlayer) player;
 				final boolean canTeleport = ConfigHandler.GENERAL.allowTeleport.get() && PlayerUtils.canTeleport(player.getServer(), player);
 				for (SyncPacket packet : SyncPacket.createForPlayer(serverPlayer, canTeleport, serverLevel)) {
-					// Addressed to the player rather than to the raw connection behind them, which is no
-					// longer reachable from the packet listener
-					ExplorersCompass.network.send(PacketDistributor.PLAYER.with(() -> serverPlayer), packet);
+					PacketDistributor.sendToPlayer(serverPlayer, packet);
 				}
 			}
 		} else {
@@ -105,24 +98,27 @@ public class ExplorersCompassItem extends Item {
 		}
 		return new InteractionResultHolder<ItemStack>(InteractionResult.PASS, player.getItemInHand(hand));
 	}
-	
+
 	@Override
- 	public boolean shouldCauseReequipAnimation(ItemStack oldStack, ItemStack newStack, boolean slotChanged) {
- 		if (getState(oldStack) == getState(newStack)) {
- 			return false;
- 		}
- 		return super.shouldCauseReequipAnimation(oldStack, newStack, slotChanged);
- 	}
+	public boolean shouldCauseReequipAnimation(ItemStack oldStack, ItemStack newStack, boolean slotChanged) {
+		if (getState(oldStack) == getState(newStack)) {
+			return false;
+		}
+		return super.shouldCauseReequipAnimation(oldStack, newStack, slotChanged);
+	}
 
 	/**
 	 * What the compass says about itself while the pointer rests on it. Everything it names has to be
 	 * named in the player's own language, and the translations only resolve on the client, so the
 	 * lines are put together over there. A dedicated server never builds a tooltip at all, and with
-	 * that class not present nothing is added rather than something half translated being.
+	 * that branch never taken the class is never loaded, so nothing is added rather than something
+	 * half translated being.
 	 */
 	@Override
-	public void appendHoverText(ItemStack stack, @Nullable Level level, List<Component> tooltip, TooltipFlag flag) {
-		DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> CompassTooltip.appendHoverText(this, stack, tooltip, flag));
+	public void appendHoverText(ItemStack stack, TooltipContext context, List<Component> tooltip, TooltipFlag flag) {
+		if (FMLEnvironment.dist == Dist.CLIENT) {
+			CompassTooltip.appendHoverText(this, stack, tooltip, flag);
+		}
 	}
 
 	/**
@@ -170,7 +166,7 @@ public class ExplorersCompassItem extends Item {
 			return;
 		}
 
-		List<BlockPos> prevPos = getPrevPos(stack);
+		List<BlockPos> prevPos = new ArrayList<BlockPos>(getPrevPos(stack));
 		if (prevPos.size() >= ConfigHandler.GENERAL.maxNextSearches.get()) {
 			prevPos.clear();
 		}
@@ -304,10 +300,14 @@ public class ExplorersCompassItem extends Item {
 
 	public void succeed(Player player, ItemStack stack, ResourceLocation targetKey, boolean isGroup, int x, int z, int y, ResourceLocation dimensionKey, List<BlockPos> prevPos, int samples, boolean displayCoordinates) {
 		final SearchTarget searchTarget = getSearchTarget(stack);
-		setFound(stack, targetKey, x, z, y, dimensionKey, samples);
-		setIsGroup(stack, isGroup);
+		// One write rather than three: the record is immutable and replaced whole, so setting these
+		// one at a time would copy it once per field
+		ItemUtils.updateData(stack, data -> data
+				.found(targetKey, x, z, y, dimensionKey, samples)
+				.withIsGroup(isGroup)
+				.withDisplayCoordinates(displayCoordinates));
+		CustomModelDataConfig.apply(stack, targetKey);
 		setPrevPos(stack, prevPos);
-		setDisplayCoordinates(stack, displayCoordinates);
 		addBookmark(stack, new BookmarkEntry(searchTarget, targetKey, x, y, z, dimensionKey));
 		SearchService.getWorkerManager(player).clear();
 
@@ -334,104 +334,58 @@ public class ExplorersCompassItem extends Item {
 	}
 
 	public boolean isActive(ItemStack stack) {
-		if (ItemUtils.verifyNBT(stack)) {
-			return getState(stack) != CompassState.INACTIVE;
-		}
-
-		return false;
+		return ItemUtils.isCompass(stack) && getState(stack) != CompassState.INACTIVE;
 	}
 
 	public void setSearching(ItemStack stack, SearchTarget searchTarget, ResourceLocation targetKey, Player player) {
-		if (ItemUtils.verifyNBT(stack)) {
-			setSearchTarget(stack, searchTarget);
-			stack.getTag().putString("StructureKey", targetKey.toString());
-			stack.getTag().putInt("State", CompassState.SEARCHING.getID());
-			CustomModelDataConfig.apply(stack, targetKey);
-		}
+		ItemUtils.updateData(stack, data -> data.searching(searchTarget, targetKey));
+		CustomModelDataConfig.apply(stack, targetKey);
 	}
 
 	public void setFound(ItemStack stack, ResourceLocation targetKey, int x, int z, int y, ResourceLocation dimensionKey, int samples) {
-		if (ItemUtils.verifyNBT(stack)) {
-			stack.getTag().putInt("State", CompassState.FOUND.getID());
-			stack.getTag().putString("StructureKey", targetKey.toString());
-			stack.getTag().putInt("FoundX", x);
-			stack.getTag().putInt("FoundZ", z);
-			if (y != UNKNOWN_Y) {
-				stack.getTag().putInt("FoundY", y);
-			} else {
-				stack.getTag().remove("FoundY");
-			}
-			if (dimensionKey != null) {
-				stack.getTag().putString("FoundDimension", dimensionKey.toString());
-			}
-			stack.getTag().putInt("Samples", samples);
-			CustomModelDataConfig.apply(stack, targetKey);
-		}
+		ItemUtils.updateData(stack, data -> data.found(targetKey, x, z, y, dimensionKey, samples));
+		CustomModelDataConfig.apply(stack, targetKey);
 	}
 
 	public void setNotFound(ItemStack stack, int searchRadius, int samples) {
-		if (ItemUtils.verifyNBT(stack)) {
-			stack.getTag().putInt("State", CompassState.NOT_FOUND.getID());
-			stack.getTag().putInt("SearchRadius", searchRadius);
-			stack.getTag().putInt("Samples", samples);
-		}
+		ItemUtils.updateData(stack, data -> data.notFound(searchRadius, samples));
 	}
 
 	public void setInactive(ItemStack stack, Player player) {
-		if (ItemUtils.verifyNBT(stack)) {
-			stack.getTag().putInt("State", CompassState.INACTIVE.getID());
-		}
+		ItemUtils.updateData(stack, data -> data.withState(CompassState.INACTIVE));
 	}
 
 	public void setState(ItemStack stack, BlockPos pos, CompassState state, Player player) {
-		if (ItemUtils.verifyNBT(stack)) {
-			stack.getTag().putInt("State", state.getID());
-			if (state == CompassState.INACTIVE) {
-				CustomModelDataConfig.remove(stack);
-			}
+		ItemUtils.updateData(stack, data -> data.withState(state));
+		if (state == CompassState.INACTIVE) {
+			CustomModelDataConfig.remove(stack);
 		}
 	}
 
 	/** What the compass is currently looking for, or last looked for. */
 	public SearchTarget getSearchTarget(ItemStack stack) {
-		if (ItemUtils.verifyNBT(stack) && stack.getTag().contains("SearchTarget")) {
-			return SearchTarget.fromID(stack.getTag().getInt("SearchTarget"));
-		}
-
-		// A compass from before biomes could be searched for records nothing here, and everything one
-		// could point at back then was a structure
-		return SearchTarget.STRUCTURE;
+		return ItemUtils.getData(stack).searchTarget();
 	}
 
 	public void setSearchTarget(ItemStack stack, SearchTarget searchTarget) {
-		if (ItemUtils.verifyNBT(stack)) {
-			stack.getTag().putInt("SearchTarget", searchTarget.getID());
-		}
+		ItemUtils.updateData(stack, data -> data.withSearchTarget(searchTarget));
 	}
 
 	public void setIsGroup(ItemStack stack, boolean isGroup) {
-		if (ItemUtils.verifyNBT(stack)) {
-			stack.getTag().putBoolean("IsGroup", isGroup);
-		}
+		ItemUtils.updateData(stack, data -> data.withIsGroup(isGroup));
 	}
 
 	public boolean getIsGroup(ItemStack stack) {
-		return ItemUtils.verifyNBT(stack) && stack.getTag().getBoolean("IsGroup");
+		return ItemUtils.getData(stack).isGroup();
 	}
 
 	/** How many structures the current search is looking for at once. */
 	public int getTargetCount(ItemStack stack) {
-		if (ItemUtils.verifyNBT(stack) && stack.getTag().contains("TargetCount")) {
-			return Math.max(1, stack.getTag().getInt("TargetCount"));
-		}
-
-		return 1;
+		return Math.max(1, ItemUtils.getData(stack).targetCount());
 	}
 
 	private void setTargetCount(ItemStack stack, int targetCount) {
-		if (ItemUtils.verifyNBT(stack)) {
-			stack.getTag().putInt("TargetCount", targetCount);
-		}
+		ItemUtils.updateData(stack, data -> data.withTargetCount(targetCount));
 	}
 
 	/**
@@ -439,64 +393,25 @@ public class ExplorersCompassItem extends Item {
 	 * instance keeps considering the whole selection. Empty for single and group searches.
 	 */
 	public List<ResourceLocation> getTargetKeys(ItemStack stack) {
-		final List<ResourceLocation> targetKeys = new ArrayList<ResourceLocation>();
-		if (ItemUtils.verifyNBT(stack) && stack.getTag().contains("TargetKeys", Tag.TAG_LIST)) {
-			for (Tag tag : stack.getTag().getList("TargetKeys", Tag.TAG_STRING)) {
-				ResourceLocation key = ResourceLocation.tryParse(tag.getAsString());
-				if (key != null) {
-					targetKeys.add(key);
-				}
-			}
-		}
-		return targetKeys;
+		return ItemUtils.getTargetKeys(stack);
 	}
 
 	private void setTargetKeys(ItemStack stack, List<ResourceLocation> targetKeys) {
-		if (ItemUtils.verifyNBT(stack)) {
-			if (targetKeys.size() <= 1) {
-				stack.getTag().remove("TargetKeys");
-				return;
-			}
-
-			final ListTag listTag = new ListTag();
-			for (ResourceLocation key : targetKeys) {
-				if (listTag.size() >= MAX_PERSISTED_TARGET_KEYS) {
-					ExplorersCompass.LOGGER.warn("Remembering only the first " + MAX_PERSISTED_TARGET_KEYS + " of " + targetKeys.size() + " selected targets; searching for a further instance will consider those alone");
-					break;
-				}
-				listTag.add(StringTag.valueOf(key.toString()));
-			}
-			stack.getTag().put("TargetKeys", listTag);
+		if (targetKeys.size() <= 1) {
+			ItemUtils.setTargetKeys(stack, List.of());
+			return;
 		}
+
+		if (targetKeys.size() > MAX_PERSISTED_TARGET_KEYS) {
+			ExplorersCompass.LOGGER.warn("Remembering only the first " + MAX_PERSISTED_TARGET_KEYS + " of " + targetKeys.size() + " selected targets; searching for a further instance will consider those alone");
+			targetKeys = targetKeys.subList(0, MAX_PERSISTED_TARGET_KEYS);
+		}
+		ItemUtils.setTargetKeys(stack, targetKeys);
 	}
 
 	/** The locations this compass has located and remembered, oldest first. */
 	public List<BookmarkEntry> getBookmarks(ItemStack stack) {
-		final List<BookmarkEntry> bookmarks = new ArrayList<BookmarkEntry>();
-		if (ItemUtils.verifyNBT(stack) && stack.getTag().contains("Bookmarks", Tag.TAG_LIST)) {
-			for (Tag tag : stack.getTag().getList("Bookmarks", Tag.TAG_COMPOUND)) {
-				final BookmarkEntry entry = BookmarkEntry.fromNBT((CompoundTag) tag);
-				if (entry != null) {
-					bookmarks.add(entry);
-				}
-			}
-		}
-		return bookmarks;
-	}
-
-	private void setBookmarks(ItemStack stack, List<BookmarkEntry> bookmarks) {
-		if (ItemUtils.verifyNBT(stack)) {
-			if (bookmarks.isEmpty()) {
-				stack.getTag().remove("Bookmarks");
-				return;
-			}
-
-			final ListTag listTag = new ListTag();
-			for (BookmarkEntry entry : bookmarks) {
-				listTag.add(entry.toNBT());
-			}
-			stack.getTag().put("Bookmarks", listTag);
-		}
+		return ItemUtils.getBookmarks(stack);
 	}
 
 	/**
@@ -510,7 +425,7 @@ public class ExplorersCompassItem extends Item {
 			return;
 		}
 
-		final List<BookmarkEntry> bookmarks = getBookmarks(stack);
+		final List<BookmarkEntry> bookmarks = new ArrayList<BookmarkEntry>(getBookmarks(stack));
 		for (BookmarkEntry existing : bookmarks) {
 			if (existing.isSamePlace(entry)) {
 				return;
@@ -521,7 +436,7 @@ public class ExplorersCompassItem extends Item {
 		while (bookmarks.size() > maxBookmarks) {
 			bookmarks.remove(0);
 		}
-		setBookmarks(stack, bookmarks);
+		ItemUtils.setBookmarks(stack, bookmarks);
 	}
 
 	/**
@@ -536,29 +451,29 @@ public class ExplorersCompassItem extends Item {
 		}
 
 		final BookmarkEntry entry = bookmarks.get(index);
-		setSearchTarget(stack, entry.getSearchTarget());
-		setFound(stack, entry.getTargetKey(), entry.getX(), entry.getZ(), entry.getY(), entry.getDimensionKey(), 0);
-		setIsGroup(stack, false);
-		setTargetCount(stack, 1);
-		setTargetKeys(stack, List.<ResourceLocation>of());
+		ItemUtils.updateData(stack, data -> data
+				.withSearchTarget(entry.getSearchTarget())
+				.found(entry.getTargetKey(), entry.getX(), entry.getZ(), entry.getY(), entry.getDimensionKey(), 0)
+				.withIsGroup(false)
+				.withTargetCount(1));
+		CustomModelDataConfig.apply(stack, entry.getTargetKey());
+		ItemUtils.setTargetKeys(stack, List.of());
 		// Only the horizontal coordinates of these are ever compared
 		setPrevPos(stack, List.of(new BlockPos(entry.getX(), 0, entry.getZ())));
 	}
 
 	public void removeBookmark(ItemStack stack, int index) {
-		final List<BookmarkEntry> bookmarks = getBookmarks(stack);
+		final List<BookmarkEntry> bookmarks = new ArrayList<BookmarkEntry>(getBookmarks(stack));
 		if (index < 0 || index >= bookmarks.size()) {
 			return;
 		}
 
 		bookmarks.remove(index);
-		setBookmarks(stack, bookmarks);
+		ItemUtils.setBookmarks(stack, bookmarks);
 	}
 
 	public void clearBookmarks(ItemStack stack) {
-		if (ItemUtils.verifyNBT(stack)) {
-			stack.getTag().remove("Bookmarks");
-		}
+		ItemUtils.setBookmarks(stack, List.of());
 	}
 
 	/**
@@ -580,12 +495,13 @@ public class ExplorersCompassItem extends Item {
 			if (getState(stack) != CompassState.FOUND) {
 				return;
 			}
-			searchTarget = getSearchTarget(stack);
-			targetKey = getTargetKey(stack);
-			x = getFoundStructureX(stack);
-			y = getFoundStructureY(stack);
-			z = getFoundStructureZ(stack);
-			dimensionKey = getFoundDimension(stack);
+			final CompassData data = ItemUtils.getData(stack);
+			searchTarget = data.searchTarget();
+			targetKey = data.targetKeyOrNull();
+			x = data.foundX();
+			y = data.foundY();
+			z = data.foundZ();
+			dimensionKey = data.foundDimensionOrNull();
 		} else {
 			final List<BookmarkEntry> bookmarks = getBookmarks(stack);
 			if (bookmarkIndex < 0 || bookmarkIndex >= bookmarks.size()) {
@@ -600,7 +516,9 @@ public class ExplorersCompassItem extends Item {
 			dimensionKey = entry.getDimensionKey();
 		}
 
-		if (!tryAcquireShareSlot(player)) {
+		// A compass aimed at nothing has nothing to announce, which the tag this replaces expressed as
+		// an empty key rather than as an absent one
+		if (targetKey == null || !tryAcquireShareSlot(player)) {
 			return;
 		}
 
@@ -643,178 +561,107 @@ public class ExplorersCompassItem extends Item {
 		return true;
 	}
 
-	/** The locations this compass has already located, which further searches pass over. */
+	/**
+	 * The locations this compass has already located, which further searches pass over.
+	 *
+	 * <p>The list is immutable and is replaced rather than edited whenever it changes, so its
+	 * identity tracks its contents: a reader that kept the last one it saw can tell whether anything
+	 * has changed by comparing references, which is what the HUD does rather than walking the list
+	 * every frame.
+	 */
 	public List<BlockPos> getPrevPos(ItemStack stack) {
-		final List<BlockPos> prevPos = new ArrayList<BlockPos>();
-		if (ItemUtils.verifyNBT(stack) && stack.getTag().contains("PrevPos", Tag.TAG_LIST)) {
-			for (Tag tag : stack.getTag().getList("PrevPos", Tag.TAG_COMPOUND)) {
-				CompoundTag posTag = (CompoundTag) tag;
-				prevPos.add(new BlockPos(posTag.getInt("X"), posTag.getInt("Y"), posTag.getInt("Z")));
-			}
-		}
-		return prevPos;
+		return ItemUtils.getPrevPos(stack);
 	}
 
-	/** Number of remembered locations, without constructing a position for every list entry. */
+	/** Number of remembered locations, without copying the list. */
 	public int getPrevPosCount(ItemStack stack) {
-		return ItemUtils.verifyNBT(stack) && stack.getTag().contains("PrevPos", Tag.TAG_LIST)
-				? stack.getTag().getList("PrevPos", Tag.TAG_COMPOUND).size()
-				: 0;
+		return ItemUtils.getPrevPos(stack).size();
 	}
 
 	/**
-	 * How many locations this compass has collected, without reading any of them back. Every entry
-	 * costs two resource locations to parse, and the tooltip that wants this number is built again for
-	 * every frame the pointer rests on the stack.
+	 * How many locations this compass has collected. The tooltip that wants this number is built
+	 * again for every frame the pointer rests on the stack, so it reads the size rather than the
+	 * entries.
 	 */
 	public int getBookmarkCount(ItemStack stack) {
-		return ItemUtils.verifyNBT(stack) && stack.getTag().contains("Bookmarks", Tag.TAG_LIST)
-				? stack.getTag().getList("Bookmarks", Tag.TAG_COMPOUND).size()
-				: 0;
-	}
-
-	/**
-	 * The list those locations are held in, or null while there are none. It is replaced whenever
-	 * they change, so its identity is what tells a reader that parsing them again is worth it.
-	 */
-	public Tag getPrevPosTag(ItemStack stack) {
-		return ItemUtils.verifyNBT(stack) ? stack.getTag().get("PrevPos") : null;
+		return ItemUtils.getBookmarks(stack).size();
 	}
 
 	public void setPrevPos(ItemStack stack, List<BlockPos> prevPos) {
-		if (ItemUtils.verifyNBT(stack)) {
-			final ListTag listTag = new ListTag();
-			for (BlockPos pos : prevPos) {
-				CompoundTag posTag = new CompoundTag();
-				posTag.putInt("X", pos.getX());
-				posTag.putInt("Y", pos.getY());
-				posTag.putInt("Z", pos.getZ());
-				listTag.add(posTag);
-			}
-			stack.getTag().put("PrevPos", listTag);
-		}
+		ItemUtils.setPrevPos(stack, prevPos);
 	}
 
 	public void clearPrevPos(ItemStack stack) {
-		if (ItemUtils.verifyNBT(stack)) {
-			stack.getTag().remove("PrevPos");
-		}
+		ItemUtils.setPrevPos(stack, List.of());
 	}
 
 	public void setFoundStructureX(ItemStack stack, int x, Player player) {
-		if (ItemUtils.verifyNBT(stack)) {
-			stack.getTag().putInt("FoundX", x);
-		}
+		ItemUtils.updateData(stack, data -> data.found(data.targetKeyOrNull(), x, data.foundZ(), data.foundY(), data.foundDimensionOrNull(), data.samples()));
 	}
 
 	public void setFoundStructureZ(ItemStack stack, int z, Player player) {
-		if (ItemUtils.verifyNBT(stack)) {
-			stack.getTag().putInt("FoundZ", z);
-		}
+		ItemUtils.updateData(stack, data -> data.found(data.targetKeyOrNull(), data.foundX(), z, data.foundY(), data.foundDimensionOrNull(), data.samples()));
 	}
 
 	public void setTargetKey(ItemStack stack, ResourceLocation targetKey, Player player) {
-		if (ItemUtils.verifyNBT(stack)) {
-			stack.getTag().putString("StructureKey", targetKey.toString());
-		}
+		ItemUtils.updateData(stack, data -> data.withTargetKey(targetKey));
 	}
 
 	public void setSearchRadius(ItemStack stack, int searchRadius, Player player) {
-		if (ItemUtils.verifyNBT(stack)) {
-			stack.getTag().putInt("SearchRadius", searchRadius);
-		}
+		ItemUtils.updateData(stack, data -> data.withSearchRadius(searchRadius));
 	}
 
 	public void setSamples(ItemStack stack, int samples, Player player) {
-		if (ItemUtils.verifyNBT(stack)) {
-			stack.getTag().putInt("Samples", samples);
-		}
+		ItemUtils.updateData(stack, data -> data.withSamples(samples));
 	}
-	
+
 	public void setDisplayCoordinates(ItemStack stack, boolean displayPosition) {
-		if (ItemUtils.verifyNBT(stack)) {
-			stack.getTag().putBoolean("DisplayCoordinates", displayPosition);
-		}
+		ItemUtils.updateData(stack, data -> data.withDisplayCoordinates(displayPosition));
 	}
 
+	/** What the compass is doing, or null for a stack that is not a compass at all. */
 	public CompassState getState(ItemStack stack) {
-		if (ItemUtils.verifyNBT(stack)) {
-			return CompassState.fromID(stack.getTag().getInt("State"));
-		}
-
-		return null;
+		return ItemUtils.isCompass(stack) ? ItemUtils.getData(stack).state() : null;
 	}
 
 	public int getFoundStructureX(ItemStack stack) {
-		if (ItemUtils.verifyNBT(stack)) {
-			return stack.getTag().getInt("FoundX");
-		}
-
-		return 0;
+		return ItemUtils.getData(stack).foundX();
 	}
 
 	public int getFoundStructureZ(ItemStack stack) {
-		if (ItemUtils.verifyNBT(stack)) {
-			return stack.getTag().getInt("FoundZ");
-		}
-
-		return 0;
+		return ItemUtils.getData(stack).foundZ();
 	}
 
 	/** The height of the located structure, or {@link #UNKNOWN_Y} when the search could not tell it. */
 	public int getFoundStructureY(ItemStack stack) {
-		if (ItemUtils.verifyNBT(stack) && stack.getTag().contains("FoundY")) {
-			return stack.getTag().getInt("FoundY");
-		}
-
-		return UNKNOWN_Y;
+		return ItemUtils.getData(stack).foundY();
 	}
 
 	/** The dimension the located structure is in, or null when an older compass never recorded it. */
 	public ResourceLocation getFoundDimension(ItemStack stack) {
-		if (ItemUtils.verifyNBT(stack) && stack.getTag().contains("FoundDimension", Tag.TAG_STRING)) {
-			return ResourceLocation.tryParse(stack.getTag().getString("FoundDimension"));
-		}
-
-		return null;
+		return ItemUtils.getData(stack).foundDimensionOrNull();
 	}
 
 	/**
 	 * The key of whatever the compass is aimed at: a structure, a biome, or the group either of them
 	 * is being searched within. Which of those it is follows from {@link #getSearchTarget} and
-	 * {@link #getIsGroup}. The tag is named for structures because that is all a compass could point
-	 * at when it was first written, and renaming it would leave every existing compass blank.
+	 * {@link #getIsGroup}. Null when the compass is aimed at nothing, which the tag this replaces
+	 * expressed as a key with an empty path.
 	 */
 	public ResourceLocation getTargetKey(ItemStack stack) {
-		if (ItemUtils.verifyNBT(stack)) {
-			return new ResourceLocation(stack.getTag().getString("StructureKey"));
-		}
-
-		return new ResourceLocation("");
+		return ItemUtils.getData(stack).targetKeyOrNull();
 	}
 
 	public int getSearchRadius(ItemStack stack) {
-		if (ItemUtils.verifyNBT(stack)) {
-			return stack.getTag().getInt("SearchRadius");
-		}
-
-		return -1;
+		return ItemUtils.getData(stack).searchRadius();
 	}
 
 	public int getSamples(ItemStack stack) {
-		if (ItemUtils.verifyNBT(stack)) {
-			return stack.getTag().getInt("Samples");
-		}
-
-		return -1;
+		return ItemUtils.getData(stack).samples();
 	}
 
 	public boolean shouldDisplayCoordinates(ItemStack stack) {
-		if (ItemUtils.verifyNBT(stack) && stack.getTag().contains("DisplayCoordinates")) {
-			return stack.getTag().getBoolean("DisplayCoordinates");
-		}
-
-		return true;
+		return ItemUtils.getData(stack).displayCoordinates();
 	}
 
 }

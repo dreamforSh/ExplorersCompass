@@ -1,10 +1,16 @@
 package com.chaosthedude.explorerscompass.util;
 
 import java.util.Objects;
+import java.util.Optional;
 
 import com.chaosthedude.explorerscompass.items.ExplorersCompassItem;
+import com.mojang.serialization.Codec;
+import com.mojang.serialization.codecs.RecordCodecBuilder;
 
+import io.netty.buffer.ByteBuf;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.codec.ByteBufCodecs;
+import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.resources.ResourceLocation;
 
 /**
@@ -12,6 +18,24 @@ import net.minecraft.resources.ResourceLocation;
  * after searching for something else.
  */
 public class BookmarkEntry {
+
+	public static final Codec<BookmarkEntry> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+			SearchTarget.CODEC.optionalFieldOf("search_target", SearchTarget.STRUCTURE).forGetter(BookmarkEntry::getSearchTarget),
+			ResourceLocation.CODEC.fieldOf("target_key").forGetter(BookmarkEntry::getTargetKey),
+			Codec.INT.fieldOf("x").forGetter(BookmarkEntry::getX),
+			Codec.INT.optionalFieldOf("y", ExplorersCompassItem.UNKNOWN_Y).forGetter(BookmarkEntry::getY),
+			Codec.INT.fieldOf("z").forGetter(BookmarkEntry::getZ),
+			ResourceLocation.CODEC.optionalFieldOf("dimension").forGetter(entry -> Optional.ofNullable(entry.getDimensionKey()))
+	).apply(instance, (searchTarget, targetKey, x, y, z, dimension) -> new BookmarkEntry(searchTarget, targetKey, x, y, z, dimension.orElse(null))));
+
+	public static final StreamCodec<ByteBuf, BookmarkEntry> STREAM_CODEC = StreamCodec.composite(
+			SearchTarget.STREAM_CODEC, BookmarkEntry::getSearchTarget,
+			ResourceLocation.STREAM_CODEC, BookmarkEntry::getTargetKey,
+			ByteBufCodecs.INT, BookmarkEntry::getX,
+			ByteBufCodecs.INT, BookmarkEntry::getY,
+			ByteBufCodecs.INT, BookmarkEntry::getZ,
+			ByteBufCodecs.optional(ResourceLocation.STREAM_CODEC), entry -> Optional.ofNullable(entry.getDimensionKey()),
+			(searchTarget, targetKey, x, y, z, dimension) -> new BookmarkEntry(searchTarget, targetKey, x, y, z, dimension.orElse(null)));
 
 	private final SearchTarget searchTarget;
 	private final ResourceLocation targetKey;
@@ -29,7 +53,11 @@ public class BookmarkEntry {
 		this.dimensionKey = dimensionKey;
 	}
 
-	/** Reads an entry, or returns null when the tag does not hold a usable one. */
+	/**
+	 * Reads an entry the way a compass from before 1.21 wrote it, or returns null when the tag does
+	 * not hold a usable one. Only reached while migrating such a compass; everything since goes
+	 * through {@link #CODEC}.
+	 */
 	public static BookmarkEntry fromNBT(CompoundTag tag) {
 		final ResourceLocation targetKey = ResourceLocation.tryParse(tag.getString("StructureKey"));
 		if (targetKey == null) {
@@ -42,21 +70,6 @@ public class BookmarkEntry {
 		final ResourceLocation dimensionKey = ResourceLocation.tryParse(tag.getString("Dimension"));
 		final int y = tag.contains("Y") ? tag.getInt("Y") : ExplorersCompassItem.UNKNOWN_Y;
 		return new BookmarkEntry(searchTarget, targetKey, tag.getInt("X"), y, tag.getInt("Z"), dimensionKey);
-	}
-
-	public CompoundTag toNBT() {
-		final CompoundTag tag = new CompoundTag();
-		tag.putString("StructureKey", targetKey.toString());
-		tag.putInt("SearchTarget", searchTarget.getID());
-		tag.putInt("X", x);
-		tag.putInt("Z", z);
-		if (y != ExplorersCompassItem.UNKNOWN_Y) {
-			tag.putInt("Y", y);
-		}
-		if (dimensionKey != null) {
-			tag.putString("Dimension", dimensionKey.toString());
-		}
-		return tag;
 	}
 
 	/** Whether this location is a structure's or a biome's. */

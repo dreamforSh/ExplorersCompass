@@ -19,17 +19,15 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.core.BlockPos;
-import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
-import net.minecraftforge.client.event.RenderGuiEvent;
-import net.minecraftforge.event.TickEvent.ClientTickEvent;
-import net.minecraftforge.event.TickEvent.Phase;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
+import net.neoforged.neoforge.client.event.RenderGuiEvent;
+import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.bus.api.SubscribeEvent;
 
 @OnlyIn(Dist.CLIENT)
 public class ClientEventHandler {
@@ -96,9 +94,14 @@ public class ClientEventHandler {
 	private static final int CARDINAL_LABEL_COLOR = 0xFFFFFF;
 	private static final int INTERCARDINAL_LABEL_COLOR = 0xA0A0A0;
 
+	/**
+	 * Resolved once the class is first used rather than eagerly: the game is well past starting by
+	 * the time any of this draws, and a font captured before the first resource reload measures with
+	 * glyph widths that are then replaced.
+	 */
 	private static final Minecraft mc = Minecraft.getInstance();
 
-	private Tag lastPrevPosTag;
+	private List<BlockPos> lastPrevPos;
 	private List<BlockPos> cachedPrevPos = List.of();
 	// A search finishing is the one thing the player is not watching the panel for, so the panel says
 	// so by picking itself out for a moment afterwards
@@ -158,14 +161,11 @@ public class ClientEventHandler {
 	}
 
 	@SubscribeEvent
-	public void onClientTick(ClientTickEvent event) {
-		if (event.phase != Phase.END) {
-			return;
-		}
+	public void onClientTick(ClientTickEvent.Post event) {
 		if (mc.player == null || mc.level == null) {
 			hudData = null;
 			lastState = null;
-			lastPrevPosTag = null;
+			lastPrevPos = null;
 			cachedPrevPos = List.of();
 			return;
 		}
@@ -210,7 +210,7 @@ public class ClientEventHandler {
 	 */
 	@SubscribeEvent
 	public void onRenderGui(RenderGuiEvent.Post event) {
-		if (mc.player == null || mc.level == null || mc.options.hideGui || mc.options.renderDebug) {
+		if (mc.player == null || mc.level == null || mc.options.hideGui || mc.getDebugOverlay().showDebugScreen()) {
 			return;
 		}
 		if (mc.screen != null && !(ConfigHandler.CLIENT.displayWithChatOpen.get() && mc.screen instanceof ChatScreen)) {
@@ -223,11 +223,9 @@ public class ClientEventHandler {
 			return;
 		}
 
+		// Everything below draws through the graphics object, so it batches and composes with the rest
+		// of the interface in the order it was asked for; nothing has to be forced out first
 		final GuiGraphics guiGraphics = event.getGuiGraphics();
-		// The panels below are drawn straight away where text is batched up, so whatever the rest of
-		// the interface has queued so far is put on the screen first and this readout composes over it
-		// rather than having someone else's text come out on top of its own background
-		guiGraphics.flush();
 
 		if (data.state == CompassState.FOUND && data.inFoundDimension) {
 			if (ConfigHandler.CLIENT.showDirectionBar.get()) {
@@ -287,7 +285,7 @@ public class ClientEventHandler {
 				final float pulse = (Mth.sin(Util.getMillis() / 150.0F) + 1.0F) / 2.0F;
 				borderColor = (dotColor & 0xFFFFFF) | ((int) (90 + 165 * pulse) << 24);
 			}
-			RenderUtils.drawPanel(panelLeft, panelTop, panelLeft + contentWidth + HUD_PADDING * 2, panelTop + contentHeight + HUD_PADDING * 2, GuiTheme.PANEL_TOP, GuiTheme.PANEL_BOTTOM, borderColor);
+			RenderUtils.drawPanel(guiGraphics, panelLeft, panelTop, panelLeft + contentWidth + HUD_PADDING * 2, panelTop + contentHeight + HUD_PADDING * 2, GuiTheme.PANEL_TOP, GuiTheme.PANEL_BOTTOM, borderColor);
 		}
 
 		final int textLeft = panelLeft + HUD_PADDING;
@@ -305,7 +303,7 @@ public class ClientEventHandler {
 		}
 
 		if (data.progress >= 0.0F) {
-			RenderUtils.drawProgressBar(textLeft, y + 1, textLeft + contentWidth,
+			RenderUtils.drawProgressBar(guiGraphics, textLeft, y + 1, textLeft + contentWidth,
 					y + 1 + HUD_PROGRESS_HEIGHT, data.progress,
 					background ? HUD_PROGRESS_BACKGROUND : HUD_PROGRESS_BACKGROUND_PLAIN,
 					MARKER_COLOR);
@@ -412,10 +410,10 @@ public class ClientEventHandler {
 	 * every frame, and parsing the list that often adds up.
 	 */
 	private List<BlockPos> getPrevPosCached(ExplorersCompassItem compass, ItemStack stack) {
-		final Tag prevPosTag = compass.getPrevPosTag(stack);
-		if (prevPosTag != lastPrevPosTag) {
-			cachedPrevPos = compass.getPrevPos(stack);
-			lastPrevPosTag = prevPosTag;
+		final List<BlockPos> prevPos = compass.getPrevPos(stack);
+		if (prevPos != lastPrevPos) {
+			cachedPrevPos = prevPos;
+			lastPrevPos = prevPos;
 		}
 		return cachedPrevPos;
 	}
@@ -467,24 +465,24 @@ public class ClientEventHandler {
 
 		if (bar.background) {
 			// An outline keeps the strip legible against a bright sky
-			RenderUtils.drawOutline(bar.left, bar.top, bar.right, bar.bottom, BAR_BORDER_COLOR);
-			RenderUtils.drawRect(bar.left, bar.top, bar.right, bar.bottom, BAR_BACKGROUND_COLOR);
+			RenderUtils.drawOutline(guiGraphics, bar.left, bar.top, bar.right, bar.bottom, BAR_BORDER_COLOR);
+			RenderUtils.drawRect(guiGraphics, bar.left, bar.top, bar.right, bar.bottom, BAR_BACKGROUND_COLOR);
 		}
 
 		// Drawn first, so that the marks of the horizon and their names stay crisp over them
-		drawPreviousMarkers(player, data.previousLocations, bar);
-		drawBarTicks(bar);
+		drawPreviousMarkers(guiGraphics, player, data.previousLocations, bar);
+		drawBarTicks(guiGraphics, bar);
 		drawBarLabels(guiGraphics, bar);
 
 		if (bar.background) {
 			// Fading the ends hides marks appearing and disappearing at the edges, and is drawn over the
 			// marks rather than under them. With no panel to fade, each mark fades itself instead.
-			RenderUtils.drawHorizontalGradient(bar.left, bar.top, bar.left + bar.fadeWidth, bar.bottom, BAR_FADE_COLOR, BAR_FADE_CLEAR_COLOR);
-			RenderUtils.drawHorizontalGradient(bar.right - bar.fadeWidth, bar.top, bar.right, bar.bottom, BAR_FADE_CLEAR_COLOR, BAR_FADE_COLOR);
+			RenderUtils.drawHorizontalGradient(guiGraphics, bar.left, bar.top, bar.left + bar.fadeWidth, bar.bottom, BAR_FADE_COLOR, BAR_FADE_CLEAR_COLOR);
+			RenderUtils.drawHorizontalGradient(guiGraphics, bar.right - bar.fadeWidth, bar.top, bar.right, bar.bottom, BAR_FADE_CLEAR_COLOR, BAR_FADE_COLOR);
 		}
 
 		// Straight ahead, so that how far off the target lies reads at a glance
-		drawBarMark(bar, bar.centerX, bar.top, bar.bottom, BAR_CENTER_COLOR, 1.0F);
+		drawBarMark(guiGraphics, bar, bar.centerX, bar.top, bar.bottom, BAR_CENTER_COLOR, 1.0F);
 
 		final double relative = Mth.wrapDegrees(bearingTo(player, targetX, targetZ) - bar.playerBearing);
 		// Turning the marker green the moment the target is straight ahead saves lining it up against
@@ -492,11 +490,11 @@ public class ClientEventHandler {
 		final int markerColor = Math.abs(relative) <= ON_TARGET_DEGREES ? ON_TARGET_COLOR : MARKER_COLOR;
 		final boolean inSpan = Math.abs(relative) <= bar.halfSpan;
 		if (inSpan) {
-			drawTargetMarker(bar, bar.xFor(relative), markerColor);
+			drawTargetMarker(guiGraphics, bar, bar.xFor(relative), markerColor);
 		} else {
 			// The structure lies outside the stretch of horizon the strip covers, so point the way to
 			// turn to bring it into view instead
-			drawEdgeArrow(bar, relative > 0.0D ? bar.right - 2 : bar.left + 1, relative > 0.0D, markerColor);
+			drawEdgeArrow(guiGraphics, bar, relative > 0.0D ? bar.right - 2 : bar.left + 1, relative > 0.0D, markerColor);
 		}
 
 		drawBarReadout(guiGraphics, player, data.displayCoordinates, bar.centerX, bar.bottom,
@@ -557,13 +555,13 @@ public class ClientEventHandler {
 	}
 
 	/** Marks every fifteen degrees along the bottom of the strip, the wind points taller. */
-	private void drawBarTicks(BarLayout bar) {
+	private void drawBarTicks(GuiGraphics guiGraphics, BarLayout bar) {
 		final int firstTick = (int) Math.ceil((bar.playerBearing - bar.halfSpan) / DIRECTION_BAR_TICK_DEGREES) * DIRECTION_BAR_TICK_DEGREES;
 		for (double degrees = firstTick; degrees <= bar.playerBearing + bar.halfSpan; degrees += DIRECTION_BAR_TICK_DEGREES) {
 			final int x = bar.xFor(degrees - bar.playerBearing);
 			final boolean major = Math.floorMod((int) degrees, 45) == 0;
 			// The taller marks stop short of the labels above them, which sit at those same degrees
-			drawBarMark(bar, x, major ? bar.bottom - 4 : bar.bottom - 3, bar.bottom - 1, major ? BAR_MAJOR_TICK_COLOR : BAR_MINOR_TICK_COLOR, bar.fade(x));
+			drawBarMark(guiGraphics, bar, x, major ? bar.bottom - 4 : bar.bottom - 3, bar.bottom - 1, major ? BAR_MAJOR_TICK_COLOR : BAR_MINOR_TICK_COLOR, bar.fade(x));
 		}
 	}
 
@@ -594,7 +592,7 @@ public class ClientEventHandler {
 	 * before the ends of the strip are faded, so that the structure being pointed at stays the one
 	 * mark that stands out.
 	 */
-	private void drawPreviousMarkers(Player player, List<BlockPos> prevPos, BarLayout bar) {
+	private void drawPreviousMarkers(GuiGraphics guiGraphics, Player player, List<BlockPos> prevPos, BarLayout bar) {
 		// The last entry is the location the strip already marks
 		int drawn = 0;
 		for (int i = prevPos.size() - 2; i >= 0 && drawn < MAX_PREVIOUS_MARKERS; i--) {
@@ -604,7 +602,7 @@ public class ClientEventHandler {
 				continue;
 			}
 			final int x = bar.xFor(relative);
-			drawBarMark(bar, x, bar.top + 1, bar.bottom - 1, PREVIOUS_MARKER_COLOR, bar.fade(x));
+			drawBarMark(guiGraphics, bar, x, bar.top + 1, bar.bottom - 1, PREVIOUS_MARKER_COLOR, bar.fade(x));
 			drawn++;
 		}
 	}
@@ -613,43 +611,43 @@ public class ClientEventHandler {
 	 * A one pixel wide mark down the strip. With no panel behind it, it carries a shadow of its own,
 	 * the way the text on the strip does.
 	 */
-	private void drawBarMark(BarLayout bar, int x, int top, int bottom, int color, float fade) {
+	private void drawBarMark(GuiGraphics guiGraphics, BarLayout bar, int x, int top, int bottom, int color, float fade) {
 		if (fade < MINIMUM_FADE) {
 			return;
 		}
 		if (!bar.background) {
-			RenderUtils.drawRect(x + 1, top + 1, x + 2, bottom + 1, fadeFill(MARK_SHADOW_COLOR, fade));
+			RenderUtils.drawRect(guiGraphics, x + 1, top + 1, x + 2, bottom + 1, fadeFill(MARK_SHADOW_COLOR, fade));
 		}
-		RenderUtils.drawRect(x, top, x + 1, bottom, fadeFill(color, fade));
+		RenderUtils.drawRect(guiGraphics, x, top, x + 1, bottom, fadeFill(color, fade));
 	}
 
 	/** A line down the strip under a pointer, so the exact bearing is readable but the marks are not hidden. */
-	private void drawTargetMarker(BarLayout bar, int markerX, int color) {
+	private void drawTargetMarker(GuiGraphics guiGraphics, BarLayout bar, int markerX, int color) {
 		if (!bar.background) {
-			drawTargetMarkerShape(markerX + 1, bar.top + 1, bar.bottom + 1, MARK_SHADOW_COLOR);
+			drawTargetMarkerShape(guiGraphics, markerX + 1, bar.top + 1, bar.bottom + 1, MARK_SHADOW_COLOR);
 		}
-		drawTargetMarkerShape(markerX, bar.top, bar.bottom, color);
+		drawTargetMarkerShape(guiGraphics, markerX, bar.top, bar.bottom, color);
 	}
 
-	private void drawTargetMarkerShape(int markerX, int top, int bottom, int color) {
-		RenderUtils.drawRect(markerX, top, markerX + 1, bottom, color);
-		RenderUtils.drawRect(markerX - 2, top, markerX + 3, top + 1, color);
-		RenderUtils.drawRect(markerX - 1, top + 1, markerX + 2, top + 2, color);
+	private void drawTargetMarkerShape(GuiGraphics guiGraphics, int markerX, int top, int bottom, int color) {
+		RenderUtils.drawRect(guiGraphics, markerX, top, markerX + 1, bottom, color);
+		RenderUtils.drawRect(guiGraphics, markerX - 2, top, markerX + 3, top + 1, color);
+		RenderUtils.drawRect(guiGraphics, markerX - 1, top + 1, markerX + 2, top + 2, color);
 	}
 
 	/** A triangle at one end of the strip, pointing the way to turn to bring the target into view. */
-	private void drawEdgeArrow(BarLayout bar, int tipX, boolean pointingRight, int color) {
+	private void drawEdgeArrow(GuiGraphics guiGraphics, BarLayout bar, int tipX, boolean pointingRight, int color) {
 		if (!bar.background) {
-			drawEdgeArrowShape(tipX + 1, bar.top + 3, bar.bottom - 1, pointingRight, MARK_SHADOW_COLOR);
+			drawEdgeArrowShape(guiGraphics, tipX + 1, bar.top + 3, bar.bottom - 1, pointingRight, MARK_SHADOW_COLOR);
 		}
-		drawEdgeArrowShape(tipX, bar.top + 2, bar.bottom - 2, pointingRight, color);
+		drawEdgeArrowShape(guiGraphics, tipX, bar.top + 2, bar.bottom - 2, pointingRight, color);
 	}
 
-	private void drawEdgeArrowShape(int tipX, int top, int bottom, boolean pointingRight, int color) {
+	private void drawEdgeArrowShape(GuiGraphics guiGraphics, int tipX, int top, int bottom, boolean pointingRight, int color) {
 		final int halfHeight = (bottom - top) / 2;
 		for (int column = 0; column < halfHeight; column++) {
 			final int x = pointingRight ? tipX - halfHeight + 1 + column : tipX + halfHeight - 1 - column;
-			RenderUtils.drawRect(x, top + column, x + 1, bottom - column, color);
+			RenderUtils.drawRect(guiGraphics, x, top + column, x + 1, bottom - column, color);
 		}
 	}
 

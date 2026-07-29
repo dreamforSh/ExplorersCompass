@@ -9,8 +9,8 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.ObjectSelectionList;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
 import org.jetbrains.annotations.NotNull;
 
 @OnlyIn(Dist.CLIENT)
@@ -22,18 +22,22 @@ public class StructureSearchList extends ObjectSelectionList<StructureSearchEntr
 
 	private final ExplorersCompassScreen parentScreen;
 
-	public StructureSearchList(ExplorersCompassScreen parentScreen, Minecraft mc, int left, int width, int height, int top, int bottom, int slotHeight) {
-		super(mc, width, height, top, bottom, slotHeight);
+	/**
+	 * The list now takes its vertical extent as a height rather than as a pair of edges, which is
+	 * what everything the base class works out from it is measured against.
+	 */
+	public StructureSearchList(ExplorersCompassScreen parentScreen, Minecraft mc, int left, int width, int top, int bottom, int slotHeight) {
+		super(mc, width, bottom - top, top, slotHeight);
 		this.parentScreen = parentScreen;
 		// The list is laid out where the screen puts it rather than across the whole screen, so that the
 		// rows fill the space beside the sidebar and grow with the window instead of staying a fixed size
-		setLeftPos(left);
+		setX(left);
 		refreshList();
 	}
 
 	@Override
 	protected int getScrollbarPosition() {
-		return x1 - SCROLLBAR_WIDTH;
+		return getRight() - SCROLLBAR_WIDTH;
 	}
 
 	@Override
@@ -45,7 +49,7 @@ public class StructureSearchList extends ObjectSelectionList<StructureSearchEntr
 	public int getRowLeft() {
 		// Without the offset the base class adds, what is drawn lines up exactly with what can be
 		// clicked, which is what lets the badge along the right edge of a row be clickable
-		return x0 + width / 2 - getRowWidth() / 2;
+		return getX() + width / 2 - getRowWidth() / 2;
 	}
 
 	@Override
@@ -53,17 +57,26 @@ public class StructureSearchList extends ObjectSelectionList<StructureSearchEntr
 		return slotIndex >= 0 && slotIndex < children().size() ? children().get(slotIndex).equals(getSelected()) : false;
 	}
 
+	/**
+	 * The base class draws a tiled backdrop behind the rows and rules across the top and bottom
+	 * edges. This list sits on the screen's own panel, so both are left out.
+	 */
 	@Override
-	public void render(@NotNull GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
-		// A row that is only half inside the list is still drawn whole, so without clipping the rows
-		// being scrolled past spill over the search field and the title above the list
-		RenderUtils.enableScissor(guiGraphics, x0, y0, x1, y1);
-		renderList(guiGraphics, mouseX, mouseY, partialTicks);
-		RenderUtils.disableScissor(guiGraphics);
+	protected void renderListBackground(@NotNull GuiGraphics guiGraphics) {
 	}
 
 	@Override
-	protected void renderList(@NotNull GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
+	protected void renderListSeparators(@NotNull GuiGraphics guiGraphics) {
+	}
+
+	/** The scrollbar is drawn in {@link #renderDecorations} instead, to the theme's own colours. */
+	@Override
+	protected boolean scrollbarVisible() {
+		return false;
+	}
+
+	@Override
+	protected void renderListItems(@NotNull GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
 		final int bandLeft = getRowLeft() - 3;
 		final int bandRight = getRowLeft() + getRowWidth() + 3;
 		// The same row the screen explains in a tooltip, so that the two cannot disagree about which
@@ -72,13 +85,13 @@ public class StructureSearchList extends ObjectSelectionList<StructureSearchEntr
 
 		final int firstRow = Math.max(0,
 				(int) Math.floor(getScrollAmount() / itemHeight) - 1);
-		final int visibleRowCount = (int) Math.ceil((double) (y1 - y0) / itemHeight) + 3;
+		final int visibleRowCount = (int) Math.ceil((double) height / itemHeight) + 3;
 		final int lastRow = Math.min(getItemCount(), firstRow + visibleRowCount);
 		for (int j = firstRow; j < lastRow; ++j) {
 			final int rowTop = getRowTop(j);
 			final int bandTop = rowTop - 2;
 			final int bandBottom = bandTop + itemHeight;
-			if (bandBottom < y0 || bandTop > y1) {
+			if (bandBottom < getY() || bandTop > getBottom()) {
 				continue;
 			}
 
@@ -86,39 +99,48 @@ public class StructureSearchList extends ObjectSelectionList<StructureSearchEntr
 			final boolean hovered = Objects.equals(entry, hoveredEntry);
 			if (isSelectedItem(j)) {
 				// The selection fades out towards the right, so that the row it marks stays readable
-				RenderUtils.drawHorizontalGradient(bandLeft, bandTop, bandRight, bandBottom, GuiTheme.ROW_SELECTED_LEFT, GuiTheme.ROW_SELECTED_RIGHT);
-				RenderUtils.drawRect(bandLeft, bandTop, bandLeft + 2, bandBottom, GuiTheme.ACCENT | 0xFF000000);
+				RenderUtils.drawHorizontalGradient(guiGraphics, bandLeft, bandTop, bandRight, bandBottom, GuiTheme.ROW_SELECTED_LEFT, GuiTheme.ROW_SELECTED_RIGHT);
+				RenderUtils.drawRect(guiGraphics, bandLeft, bandTop, bandLeft + 2, bandBottom, GuiTheme.ACCENT | 0xFF000000);
 			} else if (parentScreen.isMultiSelected(entry.getKey())) {
 				// Rows picked with Ctrl-click show fainter, with the same accent along their edge
-				RenderUtils.drawRect(bandLeft, bandTop, bandRight, bandBottom, GuiTheme.ROW_MULTI_SELECTED);
-				RenderUtils.drawRect(bandLeft, bandTop, bandLeft + 2, bandBottom, GuiTheme.ACCENT_DIM);
+				RenderUtils.drawRect(guiGraphics, bandLeft, bandTop, bandRight, bandBottom, GuiTheme.ROW_MULTI_SELECTED);
+				RenderUtils.drawRect(guiGraphics, bandLeft, bandTop, bandLeft + 2, bandBottom, GuiTheme.ACCENT_DIM);
 			} else if (hovered) {
-				RenderUtils.drawRect(bandLeft, bandTop, bandRight, bandBottom, GuiTheme.ROW_HOVER);
+				RenderUtils.drawRect(guiGraphics, bandLeft, bandTop, bandRight, bandBottom, GuiTheme.ROW_HOVER);
 			}
 
 			if (j < getItemCount() - 1) {
 				// A brighter rule closes off the rows held at the top of the list, so that their order
 				// reads as deliberate rather than as the sort having gone wrong
 				final boolean lastPinned = j == parentScreen.getPinnedCount() - 1;
-				RenderUtils.drawRect(bandLeft + 2, bandBottom - 1, bandRight - 2, bandBottom, lastPinned ? GuiTheme.ROW_SECTION_SEPARATOR : GuiTheme.ROW_SEPARATOR);
+				RenderUtils.drawRect(guiGraphics, bandLeft + 2, bandBottom - 1, bandRight - 2, bandBottom, lastPinned ? GuiTheme.ROW_SECTION_SEPARATOR : GuiTheme.ROW_SEPARATOR);
 			}
 
 			entry.render(guiGraphics, j, rowTop, getRowLeft(), getRowWidth(), itemHeight - 4, mouseX, mouseY, hovered, partialTicks);
 		}
+	}
 
-		if (getMaxScroll() > 0) {
-			final int left = getScrollbarPosition();
-			final int right = left + SCROLLBAR_WIDTH;
-			int thumbHeight = (int) ((float) ((y1 - y0) * (y1 - y0)) / (float) getMaxPosition());
-			thumbHeight = Mth.clamp(thumbHeight, 32, y1 - y0 - 8);
-			int thumbTop = (int) getScrollAmount() * (y1 - y0 - thumbHeight) / getMaxScroll() + y0;
-			if (thumbTop < y0) {
-				thumbTop = y0;
-			}
-
-			RenderUtils.drawRect(left, y0, right, y1, GuiTheme.SCROLLBAR_TRACK);
-			RenderUtils.drawRect(left + 1, thumbTop, right - 1, thumbTop + thumbHeight, GuiTheme.SCROLLBAR_THUMB);
+	/**
+	 * The scrollbar, drawn after the rows have been clipped so that it is not cut off by the same
+	 * rectangle they are.
+	 */
+	@Override
+	protected void renderDecorations(@NotNull GuiGraphics guiGraphics, int mouseX, int mouseY) {
+		if (getMaxScroll() <= 0) {
+			return;
 		}
+
+		final int left = getScrollbarPosition();
+		final int right = left + SCROLLBAR_WIDTH;
+		int thumbHeight = (int) ((float) (height * height) / (float) getMaxPosition());
+		thumbHeight = Mth.clamp(thumbHeight, 32, height - 8);
+		int thumbTop = (int) getScrollAmount() * (height - thumbHeight) / getMaxScroll() + getY();
+		if (thumbTop < getY()) {
+			thumbTop = getY();
+		}
+
+		RenderUtils.drawRect(guiGraphics, left, getY(), right, getBottom(), GuiTheme.SCROLLBAR_TRACK);
+		RenderUtils.drawRect(guiGraphics, left + 1, thumbTop, right - 1, thumbTop + thumbHeight, GuiTheme.SCROLLBAR_THUMB);
 	}
 
 	public void refreshList() {

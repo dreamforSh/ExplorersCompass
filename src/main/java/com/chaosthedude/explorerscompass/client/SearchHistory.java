@@ -21,9 +21,9 @@ import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 
 import net.minecraft.resources.ResourceLocation;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
-import net.minecraftforge.fml.loading.FMLPaths;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
+import net.neoforged.fml.loading.FMLPaths;
 
 /**
  * The player's favorites and their most recent searches, shown at the top of the selection list.

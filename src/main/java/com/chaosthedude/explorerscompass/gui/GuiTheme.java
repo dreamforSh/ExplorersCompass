@@ -5,8 +5,8 @@ import com.chaosthedude.explorerscompass.util.RenderUtils;
 
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
 
 /**
  * The colours and the few shared pieces of chrome every screen of the compass is drawn out of.
@@ -75,28 +75,28 @@ public class GuiTheme {
 		return Math.max(80, screenWidth - contentLeft() - 8);
 	}
 
-	public static void drawHeader(int screenWidth) {
+	public static void drawHeader(GuiGraphics guiGraphics, int screenWidth) {
 		if (ConfigHandler.CLIENT.guiHeaderBackground.get()) {
-			RenderUtils.drawVerticalGradient(0, 0, screenWidth, HEADER_HEIGHT, HEADER_TOP, HEADER_BOTTOM);
+			RenderUtils.drawVerticalGradient(guiGraphics, 0, 0, screenWidth, HEADER_HEIGHT, HEADER_TOP, HEADER_BOTTOM);
 		}
 		// The rule under the header stays either way: it is what separates the title and the filter
 		// from the list below them
-		RenderUtils.drawRect(0, HEADER_HEIGHT - 1, screenWidth, HEADER_HEIGHT, PANEL_BORDER);
+		RenderUtils.drawRect(guiGraphics, 0, HEADER_HEIGHT - 1, screenWidth, HEADER_HEIGHT, PANEL_BORDER);
 	}
 
-	public static void drawSidebar(int screenHeight) {
-		drawScreenPanel(SIDEBAR_X, HEADER_HEIGHT + 6, SIDEBAR_X + SIDEBAR_WIDTH, screenHeight - 6, ConfigHandler.CLIENT.guiSidebarBackground.get());
+	public static void drawSidebar(GuiGraphics guiGraphics, int screenHeight) {
+		drawScreenPanel(guiGraphics, SIDEBAR_X, HEADER_HEIGHT + 6, SIDEBAR_X + SIDEBAR_WIDTH, screenHeight - 6, ConfigHandler.CLIENT.guiSidebarBackground.get());
 	}
 
 	/**
 	 * One of the panels a screen is laid out on. Filled in by default, and left outlined but see
 	 * through where the player asked to keep the world behind that part of the screen in view.
 	 */
-	public static void drawScreenPanel(int left, int top, int right, int bottom, boolean filled) {
+	public static void drawScreenPanel(GuiGraphics guiGraphics, int left, int top, int right, int bottom, boolean filled) {
 		if (filled) {
-			RenderUtils.drawPanel(left, top, right, bottom, PANEL_TOP, PANEL_BOTTOM, PANEL_BORDER);
+			RenderUtils.drawPanel(guiGraphics, left, top, right, bottom, PANEL_TOP, PANEL_BOTTOM, PANEL_BORDER);
 		} else {
-			RenderUtils.drawInnerOutline(left, top, right, bottom, PANEL_BORDER);
+			RenderUtils.drawInnerOutline(guiGraphics, left, top, right, bottom, PANEL_BORDER);
 		}
 	}
 

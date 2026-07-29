@@ -38,18 +38,18 @@ import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.levelgen.structure.StructureSet;
 import net.minecraft.world.level.levelgen.structure.StructureSet.StructureSelectionEntry;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
-import net.minecraftforge.fml.ModContainer;
-import net.minecraftforge.fml.ModList;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
+import net.neoforged.fml.ModContainer;
+import net.neoforged.fml.ModList;
 
 public class StructureUtils {
 
 	/** Group of a structure that does not belong to any structure set. */
-	public static final ResourceLocation NO_TYPE_KEY = new ResourceLocation(ExplorersCompass.MODID, "none");
+	public static final ResourceLocation NO_TYPE_KEY = ResourceLocation.fromNamespaceAndPath(ExplorersCompass.MODID, "none");
 
-	private static final ResourceLocation STRONGHOLD_KEY = new ResourceLocation("minecraft", "stronghold");
-	private static final ResourceLocation OVERWORLD_KEY = new ResourceLocation("minecraft", "overworld");
+	private static final ResourceLocation STRONGHOLD_KEY = ResourceLocation.withDefaultNamespace("stronghold");
+	private static final ResourceLocation OVERWORLD_KEY = ResourceLocation.withDefaultNamespace("overworld");
 
 	private static final String REGEX_METACHARACTERS = "\\.[]{}()+^$|";
 

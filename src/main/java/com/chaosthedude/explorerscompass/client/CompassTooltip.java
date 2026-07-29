@@ -22,8 +22,8 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
 
 /**
  * The lines the compass carries in its own tooltip.
@@ -204,7 +204,7 @@ public class CompassTooltip {
 	/** Where the target came from and what it is grouped with, as the selection screen also lists it. */
 	private static void appendGroupAndSource(ExplorersCompassItem compass, ItemStack stack, CompassState state, List<Component> details) {
 		final ResourceLocation targetKey = compass.getTargetKey(stack);
-		if (targetKey.getPath().isEmpty()) {
+		if (targetKey == null || targetKey.getPath().isEmpty()) {
 			return;
 		}
 		// While a search for several runs, the key held here is only the first of them, and a group or a
@@ -241,7 +241,7 @@ public class CompassTooltip {
 	 */
 	private static void appendKeys(ExplorersCompassItem compass, ItemStack stack, CompassState state, List<Component> tooltip) {
 		final ResourceLocation targetKey = compass.getTargetKey(stack);
-		if (!targetKey.getPath().isEmpty()) {
+		if (targetKey != null && !targetKey.getPath().isEmpty()) {
 			tooltip.add(Component.literal(targetKey.toString()).withStyle(ChatFormatting.DARK_GRAY));
 		}
 		final ResourceLocation foundDimension = compass.getFoundDimension(stack);

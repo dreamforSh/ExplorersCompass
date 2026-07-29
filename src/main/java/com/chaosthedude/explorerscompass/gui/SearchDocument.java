@@ -8,8 +8,8 @@ import com.chaosthedude.explorerscompass.util.SearchTarget;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
 
 import net.minecraft.resources.ResourceLocation;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
 
 /**
  * The searchable and displayable text of one structure or biome, resolved once when the list is

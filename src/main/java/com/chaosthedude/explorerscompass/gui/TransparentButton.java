@@ -9,8 +9,8 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.network.chat.Component;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
 
 /**
  * A flat button drawn without the vanilla texture, so that it sits on the compass panels rather
@@ -78,15 +78,15 @@ public class TransparentButton extends Button {
 		final int y = getY();
 		final boolean pointedAt = isPointedAt();
 		final int background = !active ? BACKGROUND_DISABLED : (pointedAt ? BACKGROUND_HOVERED : BACKGROUND);
-		RenderUtils.drawRect(x, y, x + width, y + height, background);
+		RenderUtils.drawRect(guiGraphics, x, y, x + width, y + height, background);
 
 		final int border = !active ? BORDER : (pointedAt ? BORDER_HOVERED : (highlighted ? BORDER_HIGHLIGHTED : BORDER));
-		RenderUtils.drawInnerOutline(x, y, x + width, y + height, border);
+		RenderUtils.drawInnerOutline(guiGraphics, x, y, x + width, y + height, border);
 
 		// The leading edge carries the state that matters most: what is switched on, and what is being
 		// pointed at, without either of them having to be read off the label
 		if (active && (highlighted || pointedAt)) {
-			RenderUtils.drawRect(x, y, x + 2, y + height, pointedAt ? GuiTheme.ACCENT | 0xFF000000 : GuiTheme.ACCENT_DIM);
+			RenderUtils.drawRect(guiGraphics, x, y, x + 2, y + height, pointedAt ? GuiTheme.ACCENT | 0xFF000000 : GuiTheme.ACCENT_DIM);
 		}
 
 		final int textColor = !active ? GuiTheme.TEXT_DISABLED : (highlighted ? GuiTheme.ACCENT : GuiTheme.TEXT_PRIMARY);

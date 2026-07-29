@@ -14,7 +14,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.ChunkAccess;
-import net.minecraft.world.level.chunk.ChunkStatus;
+import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.levelgen.structure.StructureCheckResult;
 import net.minecraft.world.level.levelgen.structure.StructureStart;
@@ -64,7 +64,9 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> extend
 		SectionPos sectionPos = null;
 		for (Structure structure : structureSet) {
 			if (chunkAccess == null) {
-				StructureCheckResult result = level.structureManager().checkStructurePresence(chunkPos, structure, false);
+				// The placement now has to be handed in rather than being looked up from the structure's
+				// own set, which is what this worker was built around anyway
+				StructureCheckResult result = level.structureManager().checkStructurePresence(chunkPos, structure, placement, false);
 				if (result == StructureCheckResult.START_NOT_PRESENT) {
 					continue;
 				}

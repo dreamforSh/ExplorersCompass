@@ -44,8 +44,9 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
+import net.neoforged.neoforge.network.PacketDistributor;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
 
 @OnlyIn(Dist.CLIENT)
 public class ExplorersCompassScreen extends Screen {
@@ -175,11 +176,11 @@ public class ExplorersCompassScreen extends Screen {
 	}
 
 	@Override
-	public boolean mouseScrolled(double mouseX, double mouseY, double amount) {
-		if (modFilterPanel.mouseScrolled(mouseX, mouseY, amount)) {
+	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+		if (modFilterPanel.mouseScrolled(mouseX, mouseY, scrollY)) {
 			return true;
 		}
-		return selectionList.mouseScrolled(mouseX, mouseY, amount);
+		return selectionList.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
 	}
 
 	@Override
@@ -232,7 +233,6 @@ public class ExplorersCompassScreen extends Screen {
 
 	@Override
 	public void tick() {
-		searchTextField.tick();
 		// The server replaces the whole stack object when it syncs NBT changes, so the reference
 		// captured when this screen opened goes stale; without this, the state panel and the buttons
 		// would never notice a search finishing while the screen is open
@@ -250,16 +250,27 @@ public class ExplorersCompassScreen extends Screen {
 		}
 	}
 
+	/**
+	 * All of this screen's own chrome. The base class draws the background itself, before the
+	 * widgets, so drawing it from the body of the render would put a second copy on top of the
+	 * header, the sidebar and the status strip. Its in-world default is an opaque tiled panel behind
+	 * a blur, which would defeat the see-through panels this screen is built on, so the plain
+	 * translucent wash is asked for by name.
+	 *
+	 * <p>Drawing the status strip here also keeps it under the two buttons standing in it, which is
+	 * what it was drawn before the widgets for.
+	 */
 	@Override
-	public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
-		renderBackground(guiGraphics);
-		GuiTheme.drawHeader(width);
-		GuiTheme.drawSidebar(height);
-		// The status strip is drawn before the widgets so that the two buttons standing in it are not
-		// covered by its own background
+	public void renderBackground(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
+		renderTransparentBackground(guiGraphics);
+		GuiTheme.drawHeader(guiGraphics, width);
+		GuiTheme.drawSidebar(guiGraphics, height);
 		renderStatusBar(guiGraphics);
 		renderHeaderContents(guiGraphics, mouseX, mouseY);
+	}
 
+	@Override
+	public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
 		super.render(guiGraphics, mouseX, mouseY, partialTicks);
 
 		if (keysMatchingSearch.isEmpty()) {
@@ -320,7 +331,7 @@ public class ExplorersCompassScreen extends Screen {
 			filterChips.add(new FilterChip(
 					I18n.get("string.explorerscompass.modFilter") + ": "
 							+ StructureUtils.getPrettySourceName(
-									new ResourceLocation(modFilter, "any")),
+									ResourceLocation.fromNamespaceAndPath(modFilter, "any")),
 					() -> setModFilter(null)));
 		}
 		if (filterByCurrentDimension) {
@@ -344,7 +355,7 @@ public class ExplorersCompassScreen extends Screen {
 		final int top = statusBarTop();
 		final int left = GuiTheme.contentLeft();
 		final int right = left + GuiTheme.contentWidth(width);
-		GuiTheme.drawScreenPanel(left, top, right, top + STATUS_BAR_HEIGHT, ConfigHandler.CLIENT.guiStatusBarBackground.get());
+		GuiTheme.drawScreenPanel(guiGraphics, left, top, right, top + STATUS_BAR_HEIGHT, ConfigHandler.CLIENT.guiStatusBarBackground.get());
 
 		final CompassState state = explorersCompass.getState(stack);
 		final ResourceLocation foundDimension = explorersCompass.getFoundDimension(stack);
@@ -621,7 +632,7 @@ public class ExplorersCompassScreen extends Screen {
 
 	public void searchForTarget(ResourceLocation key) {
 		SearchHistory.pushRecent(searchTarget, key);
-		ExplorersCompass.network.sendToServer(CompassSearchPacket.forTargets(searchTarget, List.of(key)));
+		PacketDistributor.sendToServer(CompassSearchPacket.forTargets(searchTarget, List.of(key)));
 		minecraft.setScreen(null);
 	}
 
@@ -631,7 +642,7 @@ public class ExplorersCompassScreen extends Screen {
 		for (ResourceLocation key : keys) {
 			SearchHistory.pushRecent(searchTarget, key);
 		}
-		ExplorersCompass.network.sendToServer(CompassSearchPacket.forTargets(searchTarget, keys));
+		PacketDistributor.sendToServer(CompassSearchPacket.forTargets(searchTarget, keys));
 		minecraft.setScreen(null);
 	}
 
@@ -639,17 +650,17 @@ public class ExplorersCompassScreen extends Screen {
 		if (key == null) {
 			return;
 		}
-		ExplorersCompass.network.sendToServer(CompassSearchPacket.forGroup(searchTarget, key));
+		PacketDistributor.sendToServer(CompassSearchPacket.forGroup(searchTarget, key));
 		minecraft.setScreen(null);
 	}
 
 	public void searchForNext() {
-		ExplorersCompass.network.sendToServer(new CompassSearchForNextPacket());
+		PacketDistributor.sendToServer(new CompassSearchForNextPacket());
 		minecraft.setScreen(null);
 	}
 
 	public void clearCache() {
-		ExplorersCompass.network.sendToServer(new ClearCachePacket());
+		PacketDistributor.sendToServer(new ClearCachePacket());
 		// Applied to this copy of the stack as well as asked for, so that the count on the button, the
 		// status strip and the marks on the HUD all drop away at once. Waiting for the server to send
 		// its copy back would leave them showing locations that have already been forgotten, and would
@@ -664,20 +675,20 @@ public class ExplorersCompassScreen extends Screen {
 	 * open so that something else can be picked straight away.
 	 */
 	public void cancelSearch() {
-		ExplorersCompass.network.sendToServer(new CancelSearchPacket());
+		PacketDistributor.sendToServer(new CancelSearchPacket());
 		explorersCompass.cancelSearch(level, player, stack);
 		cachedLocations = 0;
 		updateButtons();
 	}
 
 	public void teleport() {
-		ExplorersCompass.network.sendToServer(new TeleportPacket());
+		PacketDistributor.sendToServer(new TeleportPacket());
 		minecraft.setScreen(null);
 	}
 
 	/** Announces the located place to the other players, leaving this screen open. */
 	public void share() {
-		ExplorersCompass.network.sendToServer(new ShareLocationPacket(ShareLocationPacket.CURRENT_TARGET));
+		PacketDistributor.sendToServer(new ShareLocationPacket(ShareLocationPacket.CURRENT_TARGET));
 	}
 
 	public void processSearchTerm() {
@@ -914,7 +925,7 @@ public class ExplorersCompassScreen extends Screen {
 	}
 
 	private StructureSearchList createSelectionList() {
-		return new StructureSearchList(this, minecraft, GuiTheme.contentLeft(), GuiTheme.contentWidth(width), height, GuiTheme.HEADER_HEIGHT + 2, statusBarTop() - 4, 38);
+		return new StructureSearchList(this, minecraft, GuiTheme.contentLeft(), GuiTheme.contentWidth(width), GuiTheme.HEADER_HEIGHT + 2, statusBarTop() - 4, 38);
 	}
 
 	/** Adds a control to the bottom of the sidebar column, and moves the column down past it. */
@@ -946,7 +957,7 @@ public class ExplorersCompassScreen extends Screen {
 	}
 
 	private Component modFilterButtonLabel() {
-		final String name = modFilter == null ? I18n.get("string.explorerscompass.allMods") : StructureUtils.getPrettySourceName(new ResourceLocation(modFilter, "any"));
+		final String name = modFilter == null ? I18n.get("string.explorerscompass.allMods") : StructureUtils.getPrettySourceName(ResourceLocation.fromNamespaceAndPath(modFilter, "any"));
 		return Component.translatable("string.explorerscompass.modFilter").append(Component.literal(": " + name));
 	}
 

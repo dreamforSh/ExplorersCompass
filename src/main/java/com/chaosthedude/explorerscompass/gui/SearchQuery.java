@@ -3,8 +3,8 @@ package com.chaosthedude.explorerscompass.gui;
 import java.util.ArrayList;
 import java.util.List;
 
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
 
 /**
  * A parsed list filter. Positive terms must all match and a match by any excluded term rejects the

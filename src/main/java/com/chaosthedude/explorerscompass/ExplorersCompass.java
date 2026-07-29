@@ -8,7 +8,6 @@ import java.util.Map;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import com.chaosthedude.explorerscompass.client.ClientEventHandler;
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.config.CustomModelDataConfig;
 import com.chaosthedude.explorerscompass.config.StructureGroupsConfig;
@@ -21,35 +20,19 @@ import com.chaosthedude.explorerscompass.network.CompassSearchPacket;
 import com.chaosthedude.explorerscompass.network.ShareLocationPacket;
 import com.chaosthedude.explorerscompass.network.SyncPacket;
 import com.chaosthedude.explorerscompass.network.TeleportPacket;
-import com.chaosthedude.explorerscompass.util.CompassState;
+import com.chaosthedude.explorerscompass.registry.ExplorersCompassRegistry;
+import com.chaosthedude.explorerscompass.registry.ModDataComponents;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ListMultimap;
 
-import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.renderer.item.ClampedItemPropertyFunction;
-import net.minecraft.client.renderer.item.ItemProperties;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.server.packs.resources.ResourceManagerReloadListener;
-import net.minecraft.util.Mth;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.decoration.ItemFrame;
-import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
-import net.minecraftforge.client.event.RegisterClientReloadListenersEvent;
-import net.minecraftforge.common.MinecraftForge;
-import net.minecraftforge.fml.DistExecutor;
-import net.minecraftforge.fml.ModLoadingContext;
-import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.config.ModConfig;
-import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
-import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
-import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
-import net.minecraftforge.network.NetworkRegistry;
-import net.minecraftforge.network.simple.SimpleChannel;
+import net.neoforged.bus.api.IEventBus;
+import net.neoforged.fml.ModContainer;
+import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.config.ModConfig;
+import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
+import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
+import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 @Mod(ExplorersCompass.MODID)
 public class ExplorersCompass {
@@ -65,7 +48,6 @@ public class ExplorersCompass {
 
 	public static final Logger LOGGER = LogManager.getLogger(MODID);
 
-	public static SimpleChannel network;
 	public static ExplorersCompassItem explorersCompass;
 
 	public static boolean canTeleport;
@@ -80,39 +62,25 @@ public class ExplorersCompass {
 	public static volatile int clientSearchDataRevision;
 
 	/**
-	 * Both of the contexts reached here are marked for removal in 1.21.1, where a mod is handed them
-	 * instead of asking for them. This version has nothing else to ask, so the warning is held back
-	 * rather than acted on: it says what to do when this mod is ported, not what to do now.
+	 * The bus and the container are handed to the mod now rather than being asked for, which is what
+	 * the two removed context lookups used to do.
 	 */
-	@SuppressWarnings("removal")
-	public ExplorersCompass() {
-		FMLJavaModLoadingContext.get().getModEventBus().addListener(this::commonSetup);
-		DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> {
-			FMLJavaModLoadingContext.get().getModEventBus().addListener(this::clientSetup);
-			FMLJavaModLoadingContext.get().getModEventBus()
-					.addListener(this::registerClientReloadListeners);
-		});
+	public ExplorersCompass(IEventBus modEventBus, ModContainer modContainer) {
+		ExplorersCompassRegistry.ITEMS.register(modEventBus);
+		ModDataComponents.COMPONENTS.register(modEventBus);
 
-		ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, ConfigHandler.GENERAL_SPEC);
-		ModLoadingContext.get().registerConfig(ModConfig.Type.CLIENT, ConfigHandler.CLIENT_SPEC);
+		modEventBus.addListener(this::commonSetup);
+		modEventBus.addListener(this::registerPayloads);
+
+		modContainer.registerConfig(ModConfig.Type.COMMON, ConfigHandler.GENERAL_SPEC);
+		modContainer.registerConfig(ModConfig.Type.CLIENT, ConfigHandler.CLIENT_SPEC);
 	}
 
 	private void commonSetup(FMLCommonSetupEvent event) {
-		// Accept a matching version, or the absence of the channel altogether so that joining a server
-		// without the mod still works
-		network = NetworkRegistry.newSimpleChannel(new ResourceLocation(MODID, MODID), () -> PROTOCOL_VERSION, NetworkRegistry.acceptMissingOr(PROTOCOL_VERSION), NetworkRegistry.acceptMissingOr(PROTOCOL_VERSION));
-
-		// Server packets
-		network.registerMessage(0, CompassSearchPacket.class, CompassSearchPacket::toBytes, CompassSearchPacket::new, CompassSearchPacket::handle);
-		network.registerMessage(1, TeleportPacket.class, TeleportPacket::toBytes, TeleportPacket::new, TeleportPacket::handle);
-		network.registerMessage(3, CompassSearchForNextPacket.class, CompassSearchForNextPacket::toBytes, CompassSearchForNextPacket::new, CompassSearchForNextPacket::handle);
-		network.registerMessage(4, ClearCachePacket.class, ClearCachePacket::toBytes, ClearCachePacket::new, ClearCachePacket::handle);
-		network.registerMessage(5, BookmarkActionPacket.class, BookmarkActionPacket::toBytes, BookmarkActionPacket::new, BookmarkActionPacket::handle);
-		network.registerMessage(6, ShareLocationPacket.class, ShareLocationPacket::toBytes, ShareLocationPacket::new, ShareLocationPacket::handle);
-		network.registerMessage(7, CancelSearchPacket.class, CancelSearchPacket::toBytes, CancelSearchPacket::new, CancelSearchPacket::handle);
-
-		// Client packet
-		network.registerMessage(2, SyncPacket.class, SyncPacket::toBytes, SyncPacket::new, SyncPacket::handle);
+		// The registries have all been filled by the time setup runs, so the item is safe to resolve
+		// here. Keeping it in a field of its own spares every user of it from going through the
+		// deferred holder.
+		explorersCompass = ExplorersCompassRegistry.EXPLORERS_COMPASS.get();
 
 		CustomModelDataConfig.load();
 		StructureGroupsConfig.load();
@@ -126,90 +94,29 @@ public class ExplorersCompass {
 		biomeKeysToGroupKeys = new HashMap<ResourceLocation, ResourceLocation>();
 		clientSearchDataRevision = 0;
 	}
-	
-	@OnlyIn(Dist.CLIENT)
-	public void clientSetup(FMLClientSetupEvent event) {
-		MinecraftForge.EVENT_BUS.register(new ClientEventHandler());
-		
-		event.enqueueWork(() -> {
-			ItemProperties.register(explorersCompass, new ResourceLocation("angle"), new ClampedItemPropertyFunction() {
-				@OnlyIn(Dist.CLIENT)
-				private double rotation;
-				@OnlyIn(Dist.CLIENT)
-				private double rota;
-				@OnlyIn(Dist.CLIENT)
-				private long lastUpdateTick;
-	
-				@OnlyIn(Dist.CLIENT)
-				@Override
-				public float unclampedCall(ItemStack stack, ClientLevel world, LivingEntity entityLiving, int seed) {
-					if (entityLiving == null && !stack.isFramed()) {
-						return 0.0F;
-					} else {
-						final boolean entityExists = entityLiving != null;
-						final Entity entity = (Entity) (entityExists ? entityLiving : stack.getFrame());
-						if (world == null && entity.level() instanceof ClientLevel) {
-							world = (ClientLevel) entity.level();
-						}
-	
-						double rotation = entityExists ? (double) entity.getYRot() : getFrameRotation((ItemFrame) entity);
-						rotation = rotation % 360.0D;
-						double adjusted = Math.PI - ((rotation - 90.0D) * 0.01745329238474369D - getAngle(world, entity, stack));
-	
-						if (entityExists) {
-							adjusted = wobble(world, adjusted);
-						}
-	
-						final float f = (float) (adjusted / (Math.PI * 2D));
-						return Mth.positiveModulo(f, 1.0F);
-					}
-				}
-	
-				@OnlyIn(Dist.CLIENT)
-				private double wobble(ClientLevel world, double amount) {
-					if (world.getGameTime() != lastUpdateTick) {
-						lastUpdateTick = world.getGameTime();
-						double d0 = amount - rotation;
-						d0 = d0 % (Math.PI * 2D);
-						d0 = Mth.clamp(d0, -1.0D, 1.0D);
-						rota += d0 * 0.1D;
-						rota *= 0.8D;
-						rotation += rota;
-					}
-	
-					return rotation;
-				}
-	
-				@OnlyIn(Dist.CLIENT)
-				private double getFrameRotation(ItemFrame itemFrame) {
-					Direction direction = itemFrame.getDirection();
-					int i = direction.getAxis().isVertical() ? 90 * direction.getAxisDirection().getStep() : 0;
-					return (double)Mth.wrapDegrees(180 + direction.get2DDataValue() * 90 + itemFrame.getRotation() * 45 + i);
-				}
-	
-				@OnlyIn(Dist.CLIENT)
-				private double getAngle(ClientLevel world, Entity entity, ItemStack stack) {
-					if (stack.getItem() == explorersCompass) {
-						ExplorersCompassItem compassItem = (ExplorersCompassItem) stack.getItem();
-						BlockPos pos;
-						if (compassItem.getState(stack) == CompassState.FOUND) {
-							pos = new BlockPos(compassItem.getFoundStructureX(stack), 0, compassItem.getFoundStructureZ(stack));
-						} else {
-							pos = world.getSharedSpawnPos();
-						}
-						return Math.atan2((double) pos.getZ() - entity.position().z(), (double) pos.getX() - entity.position().x());
-					}
-					return 0.0D;
-				}
-			});
-		});
-	}
 
-	@OnlyIn(Dist.CLIENT)
-	private void registerClientReloadListeners(RegisterClientReloadListenersEvent event) {
-		event.registerReloadListener((ResourceManagerReloadListener) (resourceManager) -> {
-			clientSearchDataRevision++;
-		});
+	/**
+	 * A channel is no longer built by hand: each packet declares its own type and codec, and is
+	 * registered here in the direction it travels.
+	 *
+	 * <p>The registrar is marked optional, which is what the old channel's "accept a matching version
+	 * or the absence of the channel altogether" meant: joining a server without this mod still works,
+	 * rather than being refused during the handshake.
+	 */
+	private void registerPayloads(RegisterPayloadHandlersEvent event) {
+		final PayloadRegistrar registrar = event.registrar(MODID).versioned(PROTOCOL_VERSION).optional();
+
+		// Server packets
+		registrar.playToServer(CompassSearchPacket.TYPE, CompassSearchPacket.STREAM_CODEC, CompassSearchPacket::handle);
+		registrar.playToServer(TeleportPacket.TYPE, TeleportPacket.STREAM_CODEC, TeleportPacket::handle);
+		registrar.playToServer(CompassSearchForNextPacket.TYPE, CompassSearchForNextPacket.STREAM_CODEC, CompassSearchForNextPacket::handle);
+		registrar.playToServer(ClearCachePacket.TYPE, ClearCachePacket.STREAM_CODEC, ClearCachePacket::handle);
+		registrar.playToServer(BookmarkActionPacket.TYPE, BookmarkActionPacket.STREAM_CODEC, BookmarkActionPacket::handle);
+		registrar.playToServer(ShareLocationPacket.TYPE, ShareLocationPacket.STREAM_CODEC, ShareLocationPacket::handle);
+		registrar.playToServer(CancelSearchPacket.TYPE, CancelSearchPacket.STREAM_CODEC, CancelSearchPacket::handle);
+
+		// Client packet
+		registrar.playToClient(SyncPacket.TYPE, SyncPacket.STREAM_CODEC, SyncPacket::handle);
 	}
 
 }

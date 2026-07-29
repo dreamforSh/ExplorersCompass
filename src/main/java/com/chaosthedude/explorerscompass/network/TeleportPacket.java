@@ -1,7 +1,5 @@
 package com.chaosthedude.explorerscompass.network;
 
-import java.util.function.Supplier;
-
 import com.chaosthedude.explorerscompass.ExplorersCompass;
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.items.ExplorersCompassItem;
@@ -11,8 +9,10 @@ import com.chaosthedude.explorerscompass.util.PlayerUtils;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -23,51 +23,53 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.chunk.ChunkStatus;
+import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.levelgen.Heightmap;
-import net.minecraftforge.network.NetworkEvent;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
-public class TeleportPacket {
+/** Asks to be teleported to the located structure. */
+public record TeleportPacket() implements CustomPacketPayload {
 
-	public TeleportPacket() {}
+	public static final TeleportPacket INSTANCE = new TeleportPacket();
 
-	public TeleportPacket(FriendlyByteBuf buf) {}
+	public static final CustomPacketPayload.Type<TeleportPacket> TYPE = new CustomPacketPayload.Type<TeleportPacket>(ResourceLocation.fromNamespaceAndPath(ExplorersCompass.MODID, "teleport"));
 
-	public void fromBytes(FriendlyByteBuf buf) {}
+	public static final StreamCodec<RegistryFriendlyByteBuf, TeleportPacket> STREAM_CODEC = StreamCodec.unit(INSTANCE);
 
-	public void toBytes(FriendlyByteBuf buf) {}
-
-	public void handle(Supplier<NetworkEvent.Context> ctx) {
-		ctx.get().enqueueWork(() -> {
-			final ServerPlayer player = ctx.get().getSender();
-			if (player == null) {
-				return;
-			}
-
-			final ItemStack stack = ItemUtils.getHeldItem(player, ExplorersCompass.explorersCompass);
-			if (!stack.isEmpty()) {
-				final ExplorersCompassItem explorersCompass = (ExplorersCompassItem) stack.getItem();
-				if (ConfigHandler.GENERAL.allowTeleport.get() && PlayerUtils.canTeleport(player.getServer(), player)) {
-					if (explorersCompass.getState(stack) == CompassState.FOUND) {
-						// The coordinates were found in the dimension the search ran in, and mean nothing
-						// anywhere else. Compasses from before the dimension was recorded have no way to
-						// tell, and keep the old behavior.
-						final ResourceLocation foundDimension = explorersCompass.getFoundDimension(stack);
-						if (foundDimension != null && !player.level().dimension().location().equals(foundDimension)) {
-							player.displayClientMessage(Component.translatable("string.explorerscompass.wrongDimension"), true);
-							return;
-						}
-
-						teleportWhenChunkIsReady(player, explorersCompass.getFoundStructureX(stack), explorersCompass.getFoundStructureY(stack), explorersCompass.getFoundStructureZ(stack));
-					}
-				} else {
-					ExplorersCompass.LOGGER.warn("Player " + player.getDisplayName().getString() + " tried to teleport but does not have permission.");
-				}
-			}
-		});
-		ctx.get().setPacketHandled(true);
+	@Override
+	public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+		return TYPE;
 	}
-	
+
+	public static void handle(TeleportPacket packet, IPayloadContext ctx) {
+		if (!(ctx.player() instanceof ServerPlayer player)) {
+			return;
+		}
+
+		final ItemStack stack = ItemUtils.getHeldItem(player, ExplorersCompass.explorersCompass);
+		if (stack.isEmpty()) {
+			return;
+		}
+
+		final ExplorersCompassItem explorersCompass = (ExplorersCompassItem) stack.getItem();
+		if (ConfigHandler.GENERAL.allowTeleport.get() && PlayerUtils.canTeleport(player.getServer(), player)) {
+			if (explorersCompass.getState(stack) == CompassState.FOUND) {
+				// The coordinates were found in the dimension the search ran in, and mean nothing
+				// anywhere else. Compasses from before the dimension was recorded have no way to
+				// tell, and keep the old behavior.
+				final ResourceLocation foundDimension = explorersCompass.getFoundDimension(stack);
+				if (foundDimension != null && !player.level().dimension().location().equals(foundDimension)) {
+					player.displayClientMessage(Component.translatable("string.explorerscompass.wrongDimension"), true);
+					return;
+				}
+
+				teleportWhenChunkIsReady(player, explorersCompass.getFoundStructureX(stack), explorersCompass.getFoundStructureY(stack), explorersCompass.getFoundStructureZ(stack));
+			}
+		} else {
+			ExplorersCompass.LOGGER.warn("Player " + player.getDisplayName().getString() + " tried to teleport but does not have permission.");
+		}
+	}
+
 	/**
 	 * Requests the target chunk and teleports once it is ready. The search never generated this
 	 * chunk (it stops at structure starts), so loading it here usually means generating it, which
@@ -75,11 +77,13 @@ public class TeleportPacket {
 	 * a future lets the generation run on the worker threads instead, and the teleport itself runs
 	 * back on the server thread once they are done.
 	 */
-	private void teleportWhenChunkIsReady(ServerPlayer player, int x, int structureY, int z) {
+	private static void teleportWhenChunkIsReady(ServerPlayer player, int x, int structureY, int z) {
 		final ServerLevel level = player.serverLevel();
-		level.getChunkSource().getChunkFuture(SectionPos.blockToSectionCoord(x), SectionPos.blockToSectionCoord(z), ChunkStatus.FULL, true).thenAcceptAsync((either) -> {
-			if (either.left().isEmpty()) {
-				ExplorersCompass.LOGGER.warn("Could not load the chunk at " + x + ", " + z + " to teleport " + player.getDisplayName().getString());
+		// What comes back says whether the chunk was produced, where it used to be one of the chunk or
+		// a reason it was not
+		level.getChunkSource().getChunkFuture(SectionPos.blockToSectionCoord(x), SectionPos.blockToSectionCoord(z), ChunkStatus.FULL, true).thenAcceptAsync((result) -> {
+			if (!result.isSuccess()) {
+				ExplorersCompass.LOGGER.warn("Could not load the chunk at " + x + ", " + z + " to teleport " + player.getDisplayName().getString() + ": " + result.getError());
 				return;
 			}
 			// The player may have logged out, died, or changed dimension while the chunk generated
@@ -103,7 +107,7 @@ public class TeleportPacket {
 	 * recorded one, and to sea level otherwise. The column was just loaded, so every read is served
 	 * from memory, and each block of it is read at most once.
 	 */
-	private int findValidTeleportHeight(Level level, int x, int structureY, int z) {
+	private static int findValidTeleportHeight(Level level, int x, int structureY, int z) {
 		final int minY = level.getMinBuildHeight();
 		final int maxY = level.getMaxBuildHeight() - 1;
 		final int scanCenter = structureY != ExplorersCompassItem.UNKNOWN_Y ? Mth.clamp(structureY, minY, maxY) : level.getSeaLevel();
@@ -127,11 +131,11 @@ public class TeleportPacket {
 		return level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
 	}
 
-	private boolean isValidTeleportPosition(Level level, int x, int z, int y, BlockState[] states) {
+	private static boolean isValidTeleportPosition(Level level, int x, int z, int y, BlockState[] states) {
 		return isSafe(stateAt(level, x, z, y, states)) && isSafe(stateAt(level, x, z, y + 1, states)) && !isPassable(stateAt(level, x, z, y - 1, states));
 	}
 
-	private BlockState stateAt(Level level, int x, int z, int y, BlockState[] states) {
+	private static BlockState stateAt(Level level, int x, int z, int y, BlockState[] states) {
 		final int index = y - level.getMinBuildHeight();
 		if (index < 0 || index >= states.length) {
 			// Outside the build height everything reads as air

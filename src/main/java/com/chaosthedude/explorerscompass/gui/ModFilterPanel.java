@@ -16,8 +16,8 @@ import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.util.Mth;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
 
 /**
  * The list of mods whatever the compass is listing comes from, dropped down beside the sidebar so
@@ -93,7 +93,7 @@ public class ModFilterPanel {
 		for (Map.Entry<String, Integer> entry : countsByNamespace.entrySet()) {
 			// The source is resolved from a key rather than from the namespace, so that the mod's own
 			// display name is what shows wherever it is known
-			final String displayName = StructureUtils.getPrettySourceName(new ResourceLocation(entry.getKey(), "any"));
+			final String displayName = StructureUtils.getPrettySourceName(ResourceLocation.fromNamespaceAndPath(entry.getKey(), "any"));
 			options.add(new ModOption(entry.getKey(), displayName, entry.getValue()));
 		}
 		options.sort(Comparator.comparing((ModOption option) -> !option.getNamespace().equals("minecraft")).thenComparing(ModOption::getDisplayName, String.CASE_INSENSITIVE_ORDER));
@@ -163,9 +163,9 @@ public class ModFilterPanel {
 			return;
 		}
 
-		RenderUtils.drawPanel(x, y, x + WIDTH, y + height, BACKGROUND_TOP, BACKGROUND_BOTTOM, GuiTheme.PANEL_BORDER);
+		RenderUtils.drawPanel(guiGraphics, x, y, x + WIDTH, y + height, BACKGROUND_TOP, BACKGROUND_BOTTOM, GuiTheme.PANEL_BORDER);
 		guiGraphics.drawString(mc.font, I18n.get("string.explorerscompass.filterByMod"), x + PADDING + 2, y + PADDING + 1, GuiTheme.TEXT_MUTED, false);
-		RenderUtils.drawRect(x + PADDING, y + HEADER_HEIGHT - 1, x + WIDTH - PADDING, y + HEADER_HEIGHT, GuiTheme.ROW_SEPARATOR);
+		RenderUtils.drawRect(guiGraphics, x + PADDING, y + HEADER_HEIGHT - 1, x + WIDTH - PADDING, y + HEADER_HEIGHT, GuiTheme.ROW_SEPARATOR);
 
 		final boolean scrollable = maxScrollRow() > 0;
 		final int rowsLeft = x + PADDING;
@@ -178,9 +178,9 @@ public class ModFilterPanel {
 			final boolean hovered = mouseX >= rowsLeft && mouseX < rowsRight && mouseY >= rowTop && mouseY < rowTop + ROW_HEIGHT;
 
 			if (selected) {
-				RenderUtils.drawHorizontalGradient(rowsLeft, rowTop, rowsRight, rowTop + ROW_HEIGHT, GuiTheme.ROW_SELECTED_LEFT, GuiTheme.ROW_SELECTED_RIGHT);
+				RenderUtils.drawHorizontalGradient(guiGraphics, rowsLeft, rowTop, rowsRight, rowTop + ROW_HEIGHT, GuiTheme.ROW_SELECTED_LEFT, GuiTheme.ROW_SELECTED_RIGHT);
 			} else if (hovered) {
-				RenderUtils.drawRect(rowsLeft, rowTop, rowsRight, rowTop + ROW_HEIGHT, GuiTheme.ROW_HOVER);
+				RenderUtils.drawRect(guiGraphics, rowsLeft, rowTop, rowsRight, rowTop + ROW_HEIGHT, GuiTheme.ROW_HOVER);
 			}
 
 			final String count = String.valueOf(option.getEntryCount());
@@ -194,10 +194,10 @@ public class ModFilterPanel {
 			final int trackTop = y + HEADER_HEIGHT + PADDING;
 			final int trackBottom = y + height - PADDING;
 			final int trackLeft = x + WIDTH - PADDING - SCROLLBAR_WIDTH;
-			RenderUtils.drawRect(trackLeft, trackTop, trackLeft + SCROLLBAR_WIDTH, trackBottom, GuiTheme.SCROLLBAR_TRACK);
+			RenderUtils.drawRect(guiGraphics, trackLeft, trackTop, trackLeft + SCROLLBAR_WIDTH, trackBottom, GuiTheme.SCROLLBAR_TRACK);
 			final int thumbHeight = Math.max(12, (trackBottom - trackTop) * visibleRows() / options.size());
 			final int thumbTop = trackTop + (trackBottom - trackTop - thumbHeight) * scrollRow / maxScrollRow();
-			RenderUtils.drawRect(trackLeft, thumbTop, trackLeft + SCROLLBAR_WIDTH, thumbTop + thumbHeight, GuiTheme.SCROLLBAR_THUMB);
+			RenderUtils.drawRect(guiGraphics, trackLeft, thumbTop, trackLeft + SCROLLBAR_WIDTH, thumbTop + thumbHeight, GuiTheme.SCROLLBAR_THUMB);
 		}
 	}
 

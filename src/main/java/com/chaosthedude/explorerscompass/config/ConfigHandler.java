@@ -5,43 +5,44 @@ import java.util.List;
 
 import com.chaosthedude.explorerscompass.client.OverlaySide;
 import com.chaosthedude.explorerscompass.client.TooltipDetail;
+import com.chaosthedude.explorerscompass.registry.ModDataComponents;
 
-import net.minecraftforge.common.ForgeConfigSpec;
+import net.neoforged.neoforge.common.ModConfigSpec;
 
 public class ConfigHandler {
 
-	private static final ForgeConfigSpec.Builder GENERAL_BUILDER = new ForgeConfigSpec.Builder();
-	private static final ForgeConfigSpec.Builder CLIENT_BUILDER = new ForgeConfigSpec.Builder();
+	private static final ModConfigSpec.Builder GENERAL_BUILDER = new ModConfigSpec.Builder();
+	private static final ModConfigSpec.Builder CLIENT_BUILDER = new ModConfigSpec.Builder();
 
 	public static final General GENERAL = new General(GENERAL_BUILDER);
 	public static final Client CLIENT = new Client(CLIENT_BUILDER);
 
-	public static final ForgeConfigSpec GENERAL_SPEC = GENERAL_BUILDER.build();
-	public static final ForgeConfigSpec CLIENT_SPEC = CLIENT_BUILDER.build();
+	public static final ModConfigSpec GENERAL_SPEC = GENERAL_BUILDER.build();
+	public static final ModConfigSpec CLIENT_SPEC = CLIENT_BUILDER.build();
 
 	private ConfigHandler() {
 	}
 
 	public static class General {
-		public final ForgeConfigSpec.BooleanValue allowTeleport;
-		public final ForgeConfigSpec.IntValue maxNextSearches;
-		public final ForgeConfigSpec.BooleanValue displayCoordinates;
-		public final ForgeConfigSpec.IntValue maxRadius;
-		public final ForgeConfigSpec.ConfigValue<List<String>> structureBlacklist;
-		public final ForgeConfigSpec.ConfigValue<List<String>> biomeBlacklist;
-		public final ForgeConfigSpec.IntValue maxSamples;
-		public final ForgeConfigSpec.IntValue maxBiomeSamples;
-		public final ForgeConfigSpec.IntValue biomeSampleSpacing;
-		public final ForgeConfigSpec.IntValue biomeVerticalSampleSpacing;
-		public final ForgeConfigSpec.IntValue biomeDepthSampleInterval;
-		public final ForgeConfigSpec.BooleanValue asyncBiomeSearch;
-		public final ForgeConfigSpec.IntValue maxSearchTimePerTick;
-		public final ForgeConfigSpec.IntValue searchRequestCooldownMillis;
-		public final ForgeConfigSpec.IntValue maxBookmarks;
-		public final ForgeConfigSpec.BooleanValue allowSharing;
-		public final ForgeConfigSpec.IntValue shareCooldownMillis;
+		public final ModConfigSpec.BooleanValue allowTeleport;
+		public final ModConfigSpec.IntValue maxNextSearches;
+		public final ModConfigSpec.BooleanValue displayCoordinates;
+		public final ModConfigSpec.IntValue maxRadius;
+		public final ModConfigSpec.ConfigValue<List<String>> structureBlacklist;
+		public final ModConfigSpec.ConfigValue<List<String>> biomeBlacklist;
+		public final ModConfigSpec.IntValue maxSamples;
+		public final ModConfigSpec.IntValue maxBiomeSamples;
+		public final ModConfigSpec.IntValue biomeSampleSpacing;
+		public final ModConfigSpec.IntValue biomeVerticalSampleSpacing;
+		public final ModConfigSpec.IntValue biomeDepthSampleInterval;
+		public final ModConfigSpec.BooleanValue asyncBiomeSearch;
+		public final ModConfigSpec.IntValue maxSearchTimePerTick;
+		public final ModConfigSpec.IntValue searchRequestCooldownMillis;
+		public final ModConfigSpec.IntValue maxBookmarks;
+		public final ModConfigSpec.BooleanValue allowSharing;
+		public final ModConfigSpec.IntValue shareCooldownMillis;
 
-		General(ForgeConfigSpec.Builder builder) {
+		General(ModConfigSpec.Builder builder) {
 			String desc;
 			builder.push("General");
 
@@ -49,7 +50,9 @@ public class ConfigHandler {
 			allowTeleport = builder.comment(desc).define("allowTeleport", true);
 
 			desc = "The maximum number of times a player can search for the next instance of a located structure, skipping the locations already found. Once this many locations have been collected the next search starts over from the closest one again. Set to 0 to disable searching for further instances and make the compass always locate the nearest one.";
-			maxNextSearches = builder.comment(desc).defineInRange("maxNextSearches", 100, 0, 10000);
+			// The upper bound is what a stack can carry across the network in one go, since every
+			// collected location is kept on it: see ModDataComponents.MAX_STREAMED_POSITIONS.
+			maxNextSearches = builder.comment(desc).defineInRange("maxNextSearches", 100, 0, ModDataComponents.MAX_STREAMED_POSITIONS);
 			
 			desc = "Allows players to view the precise coordinates and distance of a located structure on the HUD, rather than relying on the direction the compass is pointing.";
 			displayCoordinates = builder.comment(desc).define("displayCoordinates", true);
@@ -88,7 +91,7 @@ public class ConfigHandler {
 			searchRequestCooldownMillis = builder.comment(desc).defineInRange("searchRequestCooldownMillis", 500, 0, 10000);
 
 			desc = "How many located structures a compass remembers, so that they can be pointed at again later. The oldest is dropped once this many have been collected. Set to 0 to disable remembering them.";
-			maxBookmarks = builder.comment(desc).defineInRange("maxBookmarks", 64, 0, 1024);
+			maxBookmarks = builder.comment(desc).defineInRange("maxBookmarks", 64, 0, ModDataComponents.MAX_STREAMED_BOOKMARKS);
 
 			desc = "Allows players to announce a located structure to everyone else on the server.";
 			allowSharing = builder.comment(desc).define("allowSharing", true);
@@ -101,25 +104,25 @@ public class ConfigHandler {
 	}
 
 	public static class Client {
-		public final ForgeConfigSpec.BooleanValue displayWithChatOpen;
-		public final ForgeConfigSpec.EnumValue<TooltipDetail> tooltipDetail;
-		public final ForgeConfigSpec.BooleanValue translateStructureNames;
-		public final ForgeConfigSpec.BooleanValue translateBiomeNames;
-		public final ForgeConfigSpec.BooleanValue createXaeroWaypoints;
-		public final ForgeConfigSpec.IntValue xaeroWaypointColor;
-		public final ForgeConfigSpec.EnumValue<OverlaySide> overlaySide;
-		public final ForgeConfigSpec.IntValue overlayLineOffset;
-		public final ForgeConfigSpec.BooleanValue overlayBackground;
-		public final ForgeConfigSpec.BooleanValue guiHeaderBackground;
-		public final ForgeConfigSpec.BooleanValue guiSidebarBackground;
-		public final ForgeConfigSpec.BooleanValue guiStatusBarBackground;
-		public final ForgeConfigSpec.BooleanValue showDirectionBar;
-		public final ForgeConfigSpec.IntValue directionBarY;
-		public final ForgeConfigSpec.IntValue directionBarWidth;
-		public final ForgeConfigSpec.IntValue directionBarSpan;
-		public final ForgeConfigSpec.BooleanValue directionBarBackground;
+		public final ModConfigSpec.BooleanValue displayWithChatOpen;
+		public final ModConfigSpec.EnumValue<TooltipDetail> tooltipDetail;
+		public final ModConfigSpec.BooleanValue translateStructureNames;
+		public final ModConfigSpec.BooleanValue translateBiomeNames;
+		public final ModConfigSpec.BooleanValue createXaeroWaypoints;
+		public final ModConfigSpec.IntValue xaeroWaypointColor;
+		public final ModConfigSpec.EnumValue<OverlaySide> overlaySide;
+		public final ModConfigSpec.IntValue overlayLineOffset;
+		public final ModConfigSpec.BooleanValue overlayBackground;
+		public final ModConfigSpec.BooleanValue guiHeaderBackground;
+		public final ModConfigSpec.BooleanValue guiSidebarBackground;
+		public final ModConfigSpec.BooleanValue guiStatusBarBackground;
+		public final ModConfigSpec.BooleanValue showDirectionBar;
+		public final ModConfigSpec.IntValue directionBarY;
+		public final ModConfigSpec.IntValue directionBarWidth;
+		public final ModConfigSpec.IntValue directionBarSpan;
+		public final ModConfigSpec.BooleanValue directionBarBackground;
 
-		Client(ForgeConfigSpec.Builder builder) {
+		Client(ModConfigSpec.Builder builder) {
 			String desc;
 			builder.push("Client");
 

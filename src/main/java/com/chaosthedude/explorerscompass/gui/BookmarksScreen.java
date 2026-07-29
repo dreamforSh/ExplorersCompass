@@ -15,12 +15,12 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
+import net.neoforged.neoforge.network.PacketDistributor;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
 
 /**
  * Lists the places this compass has located, so that any of them can be pointed at, travelled to,
@@ -34,8 +34,11 @@ public class BookmarksScreen extends Screen {
 	private final ExplorersCompassItem explorersCompass;
 	private ItemStack stack;
 	private List<BookmarkEntry> bookmarks;
-	/** The tag the list was read from, so that it is only re-read once the server has changed it. */
-	private CompoundTag lastTag;
+	/**
+	 * The list the rows were built from. The component holding it is replaced wholesale whenever the
+	 * server changes it, so comparing references is enough to tell that it is worth rebuilding.
+	 */
+	private List<BookmarkEntry> lastBookmarks;
 	private BookmarkList selectionList;
 	private TransparentButton pointAtButton;
 	private TransparentButton teleportButton;
@@ -54,7 +57,7 @@ public class BookmarksScreen extends Screen {
 		this.explorersCompass = explorersCompass;
 
 		bookmarks = explorersCompass.getBookmarks(stack);
-		lastTag = stack.getTag();
+		lastBookmarks = bookmarks;
 	}
 
 	public Player getPlayer() {
@@ -67,8 +70,8 @@ public class BookmarksScreen extends Screen {
 	}
 
 	@Override
-	public boolean mouseScrolled(double scroll1, double scroll2, double scroll3) {
-		return selectionList.mouseScrolled(scroll1, scroll2, scroll3);
+	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+		return selectionList.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
 	}
 
 	@Override
@@ -85,9 +88,9 @@ public class BookmarksScreen extends Screen {
 			stack = heldStack;
 		}
 
-		if (stack.getTag() != lastTag) {
-			lastTag = stack.getTag();
-			final List<BookmarkEntry> current = explorersCompass.getBookmarks(stack);
+		final List<BookmarkEntry> current = explorersCompass.getBookmarks(stack);
+		if (current != lastBookmarks) {
+			lastBookmarks = current;
 			// Rebuilding drops the selection, so only do it when the list really did change
 			if (!current.equals(bookmarks)) {
 				bookmarks = current;
@@ -98,12 +101,23 @@ public class BookmarksScreen extends Screen {
 		updateButtons();
 	}
 
+	/**
+	 * The chrome belongs to the background rather than to the body of the render: the base class now
+	 * draws the background itself, before the widgets, so drawing it here as well would put the
+	 * second copy on top of the header and the sidebar. Its own in-world default is an opaque tiled
+	 * panel behind a blur, which would also defeat the see-through panels this screen is built on, so
+	 * the plain translucent wash is asked for by name.
+	 */
+	@Override
+	public void renderBackground(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
+		renderTransparentBackground(guiGraphics);
+		GuiTheme.drawHeader(guiGraphics, width);
+		GuiTheme.drawSidebar(guiGraphics, height);
+		GuiTheme.drawTitle(guiGraphics, font, title.getString(), String.valueOf(bookmarks.size()), GuiTheme.SIDEBAR_CONTENT_X, 10);
+	}
+
 	@Override
 	public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
-		renderBackground(guiGraphics);
-		GuiTheme.drawHeader(width);
-		GuiTheme.drawSidebar(height);
-		GuiTheme.drawTitle(guiGraphics, font, title.getString(), String.valueOf(bookmarks.size()), GuiTheme.SIDEBAR_CONTENT_X, 10);
 		super.render(guiGraphics, mouseX, mouseY, partialTicks);
 		if (bookmarks.isEmpty()) {
 			guiGraphics.drawCenteredString(font, Component.translatable("string.explorerscompass.noBookmarks"), GuiTheme.contentLeft() + GuiTheme.contentWidth(width) / 2, height / 2 - 4, GuiTheme.TEXT_SECONDARY);
@@ -136,30 +150,30 @@ public class BookmarksScreen extends Screen {
 
 	/** Points the compass at a remembered location and closes, so that it can be followed. */
 	public void pointAt(int index) {
-		ExplorersCompass.network.sendToServer(new BookmarkActionPacket(BookmarkActionPacket.Action.SELECT, index));
+		PacketDistributor.sendToServer(new BookmarkActionPacket(BookmarkActionPacket.Action.SELECT, index));
 		minecraft.setScreen(null);
 	}
 
 	public void teleportTo(int index) {
 		// Teleporting acts on whatever the compass points at, so point it at this location first. Both
 		// packets are handled on the server thread in the order they were sent.
-		ExplorersCompass.network.sendToServer(new BookmarkActionPacket(BookmarkActionPacket.Action.SELECT, index));
-		ExplorersCompass.network.sendToServer(new TeleportPacket());
+		PacketDistributor.sendToServer(new BookmarkActionPacket(BookmarkActionPacket.Action.SELECT, index));
+		PacketDistributor.sendToServer(new TeleportPacket());
 		minecraft.setScreen(null);
 	}
 
 	public void share(int index) {
-		ExplorersCompass.network.sendToServer(new ShareLocationPacket(index));
+		PacketDistributor.sendToServer(new ShareLocationPacket(index));
 	}
 
 	public void remove(int index) {
-		ExplorersCompass.network.sendToServer(new BookmarkActionPacket(BookmarkActionPacket.Action.REMOVE, index));
+		PacketDistributor.sendToServer(new BookmarkActionPacket(BookmarkActionPacket.Action.REMOVE, index));
 		explorersCompass.removeBookmark(stack, index);
 		refreshBookmarks();
 	}
 
 	public void clearAll() {
-		ExplorersCompass.network.sendToServer(new BookmarkActionPacket(BookmarkActionPacket.Action.CLEAR, 0));
+		PacketDistributor.sendToServer(new BookmarkActionPacket(BookmarkActionPacket.Action.CLEAR, 0));
 		explorersCompass.clearBookmarks(stack);
 		refreshBookmarks();
 	}
@@ -170,8 +184,8 @@ public class BookmarksScreen extends Screen {
 	 * list would still be showing the entries that have just been taken out of it.
 	 */
 	private void refreshBookmarks() {
-		lastTag = stack.getTag();
 		bookmarks = explorersCompass.getBookmarks(stack);
+		lastBookmarks = bookmarks;
 		selectionList.refreshList();
 		updateButtons();
 	}
@@ -216,7 +230,7 @@ public class BookmarksScreen extends Screen {
 		backButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.back"));
 
 		// Recreated on every init so that it picks up the current screen dimensions
-		selectionList = new BookmarkList(this, minecraft, GuiTheme.contentLeft(), GuiTheme.contentWidth(width), height, GuiTheme.HEADER_HEIGHT + 2, height - 10, 30);
+		selectionList = new BookmarkList(this, minecraft, GuiTheme.contentLeft(), GuiTheme.contentWidth(width), GuiTheme.HEADER_HEIGHT + 2, height - 10, 30);
 		addRenderableWidget(selectionList);
 		updateButtons();
 	}

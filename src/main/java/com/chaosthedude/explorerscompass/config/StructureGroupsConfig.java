@@ -23,7 +23,7 @@ import com.google.gson.JsonParser;
 
 import net.minecraft.ResourceLocationException;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraftforge.fml.loading.FMLPaths;
+import net.neoforged.fml.loading.FMLPaths;
 
 /**
  * Custom structure groups, so that a pack can bundle structures into groups of its own instead of
@@ -122,7 +122,7 @@ public class StructureGroupsConfig {
 
 			final ResourceLocation groupKey;
 			try {
-				groupKey = new ResourceLocation(entry.get(GROUP_FIELD).getAsString());
+				groupKey = ResourceLocation.parse(entry.get(GROUP_FIELD).getAsString());
 			} catch (ResourceLocationException e) {
 				ExplorersCompass.LOGGER.warn("Ignoring custom group with malformed name " + entry.get(GROUP_FIELD) + ": " + e.getMessage());
 				continue;
