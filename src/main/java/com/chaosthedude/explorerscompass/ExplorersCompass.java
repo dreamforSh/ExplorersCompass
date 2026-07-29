@@ -148,8 +148,8 @@ public class ExplorersCompass {
 					} else {
 						final boolean entityExists = entityLiving != null;
 						final Entity entity = (Entity) (entityExists ? entityLiving : stack.getFrame());
-						if (world == null && entity.level instanceof ClientLevel) {
-							world = (ClientLevel) entity.level;
+						if (world == null && entity.level() instanceof ClientLevel) {
+							world = (ClientLevel) entity.level();
 						}
 	
 						double rotation = entityExists ? (double) entity.getYRot() : getFrameRotation((ItemFrame) entity);

@@ -33,7 +33,7 @@ public class CompassSearchForNextPacket {
 				try {
 					// Where the search starts is taken from the player rather than from the packet, so that
 					// a modified client cannot search around coordinates it is nowhere near
-					explorersCompass.searchForNext(player.getLevel(), player, player.blockPosition(), stack);
+					explorersCompass.searchForNext(player.serverLevel(), player, player.blockPosition(), stack);
 				} catch (Throwable t) {
 					// This runs on the server thread, so an exception here would take down the server
 					ExplorersCompass.LOGGER.error("Failed to start a search for a further instance", t);

@@ -4,9 +4,9 @@ import java.util.Collections;
 import java.util.List;
 
 import com.chaosthedude.explorerscompass.util.RenderUtils;
-import com.mojang.blaze3d.vertex.PoseStack;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.network.chat.Component;
 import net.minecraftforge.api.distmarker.Dist;
@@ -33,7 +33,9 @@ public class TransparentButton extends Button {
 	private List<Component> tooltipLines = Collections.emptyList();
 
 	public TransparentButton(int x, int y, int width, int height, Component label, OnPress onPress) {
-		super(x, y, width, height, label, onPress);
+		// The button is now built through a builder, and the constructor behind it also wants to be
+		// told how to narrate itself; the default is the same narration the old constructor supplied
+		super(x, y, width, height, label, onPress, DEFAULT_NARRATION);
 	}
 
 	public TransparentButton setHighlighted(boolean highlighted) {
@@ -52,12 +54,14 @@ public class TransparentButton extends Button {
 	}
 
 	@Override
-	public void renderButton(PoseStack poseStack, int mouseX, int mouseY, float partialTicks) {
+	public void renderWidget(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
 		if (!visible) {
 			return;
 		}
 
 		final Minecraft mc = Minecraft.getInstance();
+		final int x = getX();
+		final int y = getY();
 		final int background = !active ? BACKGROUND_DISABLED : (isHoveredOrFocused() ? BACKGROUND_HOVERED : BACKGROUND);
 		RenderUtils.drawRect(x, y, x + width, y + height, background);
 
@@ -74,7 +78,7 @@ public class TransparentButton extends Button {
 		// Labels grow with translation and with the values appended to them, so they are shortened
 		// rather than allowed to run past the edges of the button
 		final String label = RenderUtils.trimToWidth(getMessage().getString(), width - 10);
-		drawCenteredString(poseStack, mc.font, label, x + width / 2 + 1, y + (height - 8) / 2, textColor);
+		guiGraphics.drawCenteredString(mc.font, label, x + width / 2 + 1, y + (height - 8) / 2, textColor);
 	}
 
 }

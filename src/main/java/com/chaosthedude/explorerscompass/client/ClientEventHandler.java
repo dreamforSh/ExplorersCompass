@@ -9,13 +9,13 @@ import com.chaosthedude.explorerscompass.util.ItemUtils;
 import com.chaosthedude.explorerscompass.util.RenderUtils;
 import com.chaosthedude.explorerscompass.util.SearchTarget;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
-import com.mojang.blaze3d.vertex.PoseStack;
 
 import java.util.ArrayList;
 import java.util.List;
 
 import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.core.BlockPos;
@@ -213,14 +213,19 @@ public class ClientEventHandler {
 			return;
 		}
 
-		final PoseStack poseStack = new PoseStack();
+		// Drawing is no longer done against a bare matrix stack but through a graphics object, which
+		// carries the stack along with the buffer the text is batched into. One is made here rather
+		// than taken from the event, so that the HUD keeps being drawn at the very end of the frame,
+		// over an open chat screen as before, rather than under whatever screen is showing.
+		final GuiGraphics guiGraphics = new GuiGraphics(mc, mc.renderBuffers().bufferSource());
 		if (data.state == CompassState.FOUND && data.inFoundDimension) {
 			if (ConfigHandler.CLIENT.showDirectionBar.get()) {
-				renderDirectionBar(poseStack, player, data);
+				renderDirectionBar(guiGraphics, player, data);
 			}
 		}
 
-		renderInfoPanel(poseStack, data);
+		renderInfoPanel(guiGraphics, data);
+		guiGraphics.flush();
 	}
 
 	/**
@@ -228,7 +233,7 @@ public class ClientEventHandler {
 	 * and what it is aimed at, then a column of labelled values under it. Reading a value takes
 	 * finding its label on the same line, rather than counting lines between two columns of text.
 	 */
-	private void renderInfoPanel(PoseStack poseStack, HudData data) {
+	private void renderInfoPanel(GuiGraphics guiGraphics, HudData data) {
 		final int dotColor;
 		if (data.state == CompassState.SEARCHING) {
 			// Fading the marker in and out is what says the search is still running, on a readout where
@@ -277,15 +282,15 @@ public class ClientEventHandler {
 
 		final int textLeft = panelLeft + HUD_PADDING;
 		int y = panelTop + HUD_PADDING;
-		mc.font.drawShadow(poseStack, DOT_GLYPH, textLeft, y, dotColor);
-		mc.font.drawShadow(poseStack, data.headline,
-				textLeft + mc.font.width(DOT_GLYPH) + 4, y, GuiTheme.TEXT_PRIMARY);
-		mc.font.drawShadow(poseStack, target, textLeft + headlineFixedWidth, y, GuiTheme.TEXT_SECONDARY);
+		guiGraphics.drawString(mc.font, DOT_GLYPH, textLeft, y, dotColor, true);
+		guiGraphics.drawString(mc.font, data.headline,
+				textLeft + mc.font.width(DOT_GLYPH) + 4, y, GuiTheme.TEXT_PRIMARY, true);
+		guiGraphics.drawString(mc.font, target, textLeft + headlineFixedWidth, y, GuiTheme.TEXT_SECONDARY, true);
 		y += HUD_ROW_HEIGHT;
 
 		for (HudRow row : data.rows) {
-			mc.font.drawShadow(poseStack, row.label, textLeft, y, GuiTheme.TEXT_MUTED);
-			mc.font.drawShadow(poseStack, RenderUtils.trimToWidth(row.value, contentWidth - labelWidth - HUD_LABEL_GAP), textLeft + labelWidth + HUD_LABEL_GAP, y, row.color);
+			guiGraphics.drawString(mc.font, row.label, textLeft, y, GuiTheme.TEXT_MUTED, true);
+			guiGraphics.drawString(mc.font, RenderUtils.trimToWidth(row.value, contentWidth - labelWidth - HUD_LABEL_GAP), textLeft + labelWidth + HUD_LABEL_GAP, y, row.color, true);
 			y += HUD_ROW_HEIGHT;
 		}
 
@@ -408,7 +413,7 @@ public class ClientEventHandler {
 	/** Whether the located coordinates mean anything where the player currently is. */
 	private static boolean isInFoundDimension(Player player, ExplorersCompassItem compass, ItemStack stack) {
 		final ResourceLocation foundDimension = compass.getFoundDimension(stack);
-		return foundDimension == null || foundDimension.equals(player.level.dimension().location());
+		return foundDimension == null || foundDimension.equals(player.level().dimension().location());
 	}
 
 	/** What a search is aiming at: the name of what or of the group, plus how many more it considers. */
@@ -444,7 +449,7 @@ public class ClientEventHandler {
 	 * structure lies. Reading a direction off it takes a glance, where the pointer on the item has
 	 * to be studied and the coordinates have to be worked out.
 	 */
-	private void renderDirectionBar(PoseStack poseStack, Player player, HudData data) {
+	private void renderDirectionBar(GuiGraphics guiGraphics, Player player, HudData data) {
 		final int targetX = data.targetX;
 		final int targetY = data.targetY;
 		final int targetZ = data.targetZ;
@@ -459,7 +464,7 @@ public class ClientEventHandler {
 		// Drawn first, so that the marks of the horizon and their names stay crisp over them
 		drawPreviousMarkers(player, data.previousLocations, bar);
 		drawBarTicks(bar);
-		drawBarLabels(poseStack, bar);
+		drawBarLabels(guiGraphics, bar);
 
 		if (bar.background) {
 			// Fading the ends hides marks appearing and disappearing at the edges, and is drawn over the
@@ -484,7 +489,7 @@ public class ClientEventHandler {
 			drawEdgeArrow(bar, relative > 0.0D ? bar.right - 2 : bar.left + 1, relative > 0.0D, markerColor);
 		}
 
-		drawBarReadout(poseStack, player, data.displayCoordinates, bar.centerX, bar.bottom,
+		drawBarReadout(guiGraphics, player, data.displayCoordinates, bar.centerX, bar.bottom,
 				targetX, targetY, targetZ, relative, inSpan, markerColor & 0xFFFFFF);
 	}
 
@@ -553,7 +558,7 @@ public class ClientEventHandler {
 	}
 
 	/** Names all eight wind points, with north picked out and the diagonals held back. */
-	private void drawBarLabels(PoseStack poseStack, BarLayout bar) {
+	private void drawBarLabels(GuiGraphics guiGraphics, BarLayout bar) {
 		for (int point = 0; point < WIND_POINT_KEYS.length; point++) {
 			final double relative = Mth.wrapDegrees(point * 45.0D - bar.playerBearing);
 			if (Math.abs(relative) > bar.halfSpan) {
@@ -569,7 +574,7 @@ public class ClientEventHandler {
 			final String label = windPoint(point);
 			final int color = point == 0 ? NORTH_LABEL_COLOR : (point % 2 == 0 ? CARDINAL_LABEL_COLOR : INTERCARDINAL_LABEL_COLOR);
 			// Shadowed rather than plain, since without a panel these letters can end up on a bright sky
-			mc.font.drawShadow(poseStack, label, x - mc.font.width(label) / 2.0F, bar.top + 2, fadeText(color, fade));
+			guiGraphics.drawCenteredString(mc.font, label, x, bar.top + 2, fadeText(color, fade));
 		}
 	}
 
@@ -652,7 +657,7 @@ public class ClientEventHandler {
 	 * What is left to travel, under the strip: the distance, how far up or down the structure sits
 	 * when that is known, and how far there is left to turn while it lies off the strip altogether.
 	 */
-	private void drawBarReadout(PoseStack poseStack, Player player,
+	private void drawBarReadout(GuiGraphics guiGraphics, Player player,
 			boolean displayCoordinates, int centerX, int bottom, int targetX, int targetY,
 			int targetZ, double relative, boolean inSpan, int color) {
 		final StringBuilder readout = new StringBuilder();
@@ -675,7 +680,7 @@ public class ClientEventHandler {
 			return;
 		}
 
-		mc.font.drawShadow(poseStack, readout.toString(), centerX - mc.font.width(readout.toString()) / 2.0F, bottom + 3, color);
+		guiGraphics.drawCenteredString(mc.font, readout.toString(), centerX, bottom + 3, color);
 	}
 
 }

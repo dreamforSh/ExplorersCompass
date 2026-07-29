@@ -32,7 +32,8 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> extend
 		this.placement = placement;
 
 		seed = level.getSeed();
-		finished = !level.getServer().getWorldData().worldGenSettings().generateStructures();
+		// The world generation settings were split out of the level data into options of their own
+		finished = !level.getServer().getWorldData().worldGenOptions().generateStructures();
 	}
 
 	/**
@@ -106,9 +107,9 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> extend
 	 * generation, can be skipped entirely.
 	 */
 	protected boolean canPlaceAt(ChunkPos chunkPos) {
-		final ServerChunkCache chunkSource = level.getChunkSource();
-		return placement.isStructureChunk(chunkSource.getGenerator(), chunkSource.randomState(), seed,
-				chunkPos.x, chunkPos.z);
+		// The generator, the random state and the seed this used to be handed one by one are all
+		// carried by the structure state now, so it is the only thing the placement still asks for
+		return placement.isStructureChunk(level.getChunkSource().getGeneratorState(), chunkPos.x, chunkPos.z);
 	}
 
 	protected void found(BlockPos pos, Structure structure) {

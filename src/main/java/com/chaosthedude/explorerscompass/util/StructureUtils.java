@@ -27,6 +27,7 @@ import net.minecraft.client.resources.language.I18n;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.Registry;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
@@ -392,11 +393,11 @@ public class StructureUtils {
 	}
 
 	private static Registry<Structure> getStructureRegistry(ServerLevel level) {
-		return level.registryAccess().ownedRegistryOrThrow(Registry.STRUCTURE_REGISTRY);
+		return level.registryAccess().registryOrThrow(Registries.STRUCTURE);
 	}
 
 	private static Registry<StructureSet> getStructureSetRegistry(ServerLevel level) {
-		return level.registryAccess().ownedRegistryOrThrow(Registry.STRUCTURE_SET_REGISTRY);
+		return level.registryAccess().registryOrThrow(Registries.STRUCTURE_SET);
 	}
 
 	/**

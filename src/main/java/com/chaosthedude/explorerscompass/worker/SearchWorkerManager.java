@@ -113,7 +113,9 @@ public class SearchWorkerManager implements SearchScheduler.SearchSlice {
 				continue;
 			}
 
-			for (StructurePlacement structureplacement : context.getLevel().getChunkSource().getGenerator().getPlacementsForStructure(holder, context.getLevel().getChunkSource().randomState())) {
+			// Which placements put a structure in the world is no longer asked of the generator but of
+			// the structure state beside it, which is also where the seed-derived positions now live
+			for (StructurePlacement structureplacement : context.getLevel().getChunkSource().getGeneratorState().getPlacementsForStructure(holder)) {
 				placementToStructuresMap.computeIfAbsent(structureplacement, (holderSet) -> {
 					return new ObjectArrayList<Structure>();
 				}).add(structure);

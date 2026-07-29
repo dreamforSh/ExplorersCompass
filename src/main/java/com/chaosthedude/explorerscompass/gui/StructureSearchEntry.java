@@ -7,11 +7,11 @@ import com.chaosthedude.explorerscompass.client.SearchHistory;
 import com.chaosthedude.explorerscompass.util.RenderUtils;
 import com.chaosthedude.explorerscompass.util.SearchTarget;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.vertex.PoseStack;
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.ObjectSelectionList;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.resources.language.I18n;
@@ -87,7 +87,7 @@ public class StructureSearchEntry extends ObjectSelectionList.Entry<StructureSea
 	}
 
 	@Override
-	public void render(PoseStack poseStack, int par1, int par2, int par3, int par4, int par5, int par6, int par7, boolean par8, float par9) {
+	public void render(GuiGraphics guiGraphics, int par1, int par2, int par3, int par4, int par5, int par6, int par7, boolean par8, float par9) {
 		final int left = par3 + 2;
 		final int right = par3 + par4;
 		final SearchTarget searchTarget = parentScreen.getSearchTarget();
@@ -103,22 +103,22 @@ public class StructureSearchEntry extends ObjectSelectionList.Entry<StructureSea
 		badgeTop = par2;
 		badgeBottom = par2 + 12;
 		final boolean overBadge = par8 && par6 >= badgeLeft && par6 < badgeRight && par7 >= badgeTop && par7 < badgeBottom;
-		RenderUtils.drawChip(poseStack, cachedBadgeText, badgeLeft, badgeTop,
+		RenderUtils.drawChip(guiGraphics, cachedBadgeText, badgeLeft, badgeTop,
 				filteredToThisMod || overBadge
 						? GuiTheme.CHIP_ACCENT_BACKGROUND : GuiTheme.CHIP_BACKGROUND,
 				filteredToThisMod || overBadge ? GuiTheme.ACCENT : GuiTheme.TEXT_SECONDARY);
 
 		int nameX = left;
 		if (SearchHistory.isFavorite(searchTarget, key)) {
-			mc.font.draw(poseStack, FAVORITE_GLYPH, nameX, par2 + 2, GuiTheme.ACCENT);
+			guiGraphics.drawString(mc.font, FAVORITE_GLYPH, nameX, par2 + 2, GuiTheme.ACCENT, false);
 			nameX += mc.font.width(FAVORITE_GLYPH) + 2;
 		}
-		mc.font.draw(poseStack, cachedName, nameX, par2 + 2, GuiTheme.TEXT_PRIMARY);
+		guiGraphics.drawString(mc.font, cachedName, nameX, par2 + 2, GuiTheme.TEXT_PRIMARY, false);
 
-		mc.font.draw(poseStack, cachedGroup, left, par2 + 14, GuiTheme.TEXT_MUTED);
+		guiGraphics.drawString(mc.font, cachedGroup, left, par2 + 14, GuiTheme.TEXT_MUTED, false);
 
-		mc.font.draw(poseStack, cachedDimensions, left, par2 + 25,
-				canGenerateHere() ? GuiTheme.TEXT_MUTED : GuiTheme.TEXT_WARNING);
+		guiGraphics.drawString(mc.font, cachedDimensions, left, par2 + 25,
+				canGenerateHere() ? GuiTheme.TEXT_MUTED : GuiTheme.TEXT_WARNING, false);
 
 		RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
 	}

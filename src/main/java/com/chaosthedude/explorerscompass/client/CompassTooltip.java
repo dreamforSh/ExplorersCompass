@@ -129,7 +129,7 @@ public class CompassTooltip {
 		// A compass from before the dimension was recorded cannot say it is anywhere else, and neither
 		// can one whose tooltip is being built with no player behind it
 		final ResourceLocation foundDimension = compass.getFoundDimension(stack);
-		final boolean here = foundDimension == null || player == null || foundDimension.equals(player.level.dimension().location());
+		final boolean here = foundDimension == null || player == null || foundDimension.equals(player.level().dimension().location());
 		final boolean coordinates = compass.shouldDisplayCoordinates(stack);
 
 		tooltip.add(headline("string.explorerscompass.found", name, here ? GuiTheme.TEXT_SUCCESS : GuiTheme.TEXT_WARNING));

@@ -8,11 +8,11 @@ import com.chaosthedude.explorerscompass.util.BookmarkEntry;
 import com.chaosthedude.explorerscompass.util.RenderUtils;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.vertex.PoseStack;
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.ObjectSelectionList;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
@@ -72,7 +72,7 @@ public class BookmarkListEntry extends ObjectSelectionList.Entry<BookmarkListEnt
 	}
 
 	@Override
-	public void render(PoseStack poseStack, int par1, int par2, int par3, int par4, int par5, int par6, int par7, boolean par8, float par9) {
+	public void render(GuiGraphics guiGraphics, int par1, int par2, int par3, int par4, int par5, int par6, int par7, boolean par8, float par9) {
 		final int left = par3 + 2;
 		final int right = par3 + par4;
 
@@ -82,13 +82,13 @@ public class BookmarkListEntry extends ObjectSelectionList.Entry<BookmarkListEnt
 		updateDynamicBadge(here);
 		updateLayout(par4, left);
 		final int badgeLeft = right - mc.font.width(cachedBadge) - 8;
-		RenderUtils.drawChip(poseStack, cachedBadge, badgeLeft, par2,
+		RenderUtils.drawChip(guiGraphics, cachedBadge, badgeLeft, par2,
 				here ? GuiTheme.CHIP_BACKGROUND : GuiTheme.CHIP_ACCENT_BACKGROUND,
 				here ? GuiTheme.TEXT_SECONDARY : GuiTheme.TEXT_WARNING);
 
-		mc.font.draw(poseStack, cachedName, left, par2 + 2, GuiTheme.TEXT_PRIMARY);
+		guiGraphics.drawString(mc.font, cachedName, left, par2 + 2, GuiTheme.TEXT_PRIMARY, false);
 
-		mc.font.draw(poseStack, cachedCoordinates, left, par2 + 14, GuiTheme.TEXT_MUTED);
+		guiGraphics.drawString(mc.font, cachedCoordinates, left, par2 + 14, GuiTheme.TEXT_MUTED, false);
 
 		RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
 	}

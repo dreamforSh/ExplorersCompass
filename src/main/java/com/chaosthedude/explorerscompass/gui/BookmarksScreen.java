@@ -10,9 +10,9 @@ import com.chaosthedude.explorerscompass.network.ShareLocationPacket;
 import com.chaosthedude.explorerscompass.network.TeleportPacket;
 import com.chaosthedude.explorerscompass.util.BookmarkEntry;
 import com.chaosthedude.explorerscompass.util.ItemUtils;
-import com.mojang.blaze3d.vertex.PoseStack;
 
 import net.minecraft.ChatFormatting;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.nbt.CompoundTag;
@@ -99,29 +99,29 @@ public class BookmarksScreen extends Screen {
 	}
 
 	@Override
-	public void render(PoseStack poseStack, int mouseX, int mouseY, float partialTicks) {
-		renderBackground(poseStack);
+	public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
+		renderBackground(guiGraphics);
 		GuiTheme.drawHeader(width);
 		GuiTheme.drawSidebar(height);
-		GuiTheme.drawTitle(poseStack, font, title.getString(), String.valueOf(bookmarks.size()), GuiTheme.SIDEBAR_CONTENT_X, 10);
-		super.render(poseStack, mouseX, mouseY, partialTicks);
+		GuiTheme.drawTitle(guiGraphics, font, title.getString(), String.valueOf(bookmarks.size()), GuiTheme.SIDEBAR_CONTENT_X, 10);
+		super.render(guiGraphics, mouseX, mouseY, partialTicks);
 		if (bookmarks.isEmpty()) {
-			drawCenteredString(poseStack, font, Component.translatable("string.explorerscompass.noBookmarks"), GuiTheme.contentLeft() + GuiTheme.contentWidth(width) / 2, height / 2 - 4, GuiTheme.TEXT_SECONDARY);
+			guiGraphics.drawCenteredString(font, Component.translatable("string.explorerscompass.noBookmarks"), GuiTheme.contentLeft() + GuiTheme.contentWidth(width) / 2, height / 2 - 4, GuiTheme.TEXT_SECONDARY);
 		}
-		renderButtonTooltip(poseStack, mouseX, mouseY);
+		renderButtonTooltip(guiGraphics, mouseX, mouseY);
 	}
 
 	/** Explains whatever the pointer is resting on, above everything else on the screen. */
-	private void renderButtonTooltip(PoseStack poseStack, int mouseX, int mouseY) {
+	private void renderButtonTooltip(GuiGraphics guiGraphics, int mouseX, int mouseY) {
 		for (Object widget : renderables) {
 			if (widget instanceof TransparentButton button && button.visible && button.isHoveredOrFocused() && !button.getTooltipLines().isEmpty()) {
-				renderComponentTooltip(poseStack, button.getTooltipLines(), mouseX, mouseY);
+				guiGraphics.renderComponentTooltip(font, button.getTooltipLines(), mouseX, mouseY);
 				return;
 			}
 		}
 		final BookmarkListEntry hovered = selectionList.getHoveredEntry(mouseX, mouseY);
 		if (hovered != null) {
-			renderComponentTooltip(poseStack, hovered.getTooltipLines(), mouseX, mouseY);
+			guiGraphics.renderComponentTooltip(font, hovered.getTooltipLines(), mouseX, mouseY);
 		}
 	}
 

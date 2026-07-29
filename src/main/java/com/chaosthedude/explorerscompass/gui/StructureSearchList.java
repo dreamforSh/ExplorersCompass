@@ -3,9 +3,9 @@ package com.chaosthedude.explorerscompass.gui;
 import java.util.Objects;
 
 import com.chaosthedude.explorerscompass.util.RenderUtils;
-import com.mojang.blaze3d.vertex.PoseStack;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.ObjectSelectionList;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
@@ -53,16 +53,16 @@ public class StructureSearchList extends ObjectSelectionList<StructureSearchEntr
 	}
 
 	@Override
-	public void render(PoseStack poseStack, int mouseX, int mouseY, float partialTicks) {
+	public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
 		// A row that is only half inside the list is still drawn whole, so without clipping the rows
 		// being scrolled past spill over the search field and the title above the list
-		RenderUtils.enableScissor(x0, y0, x1, y1);
-		renderList(poseStack, mouseX, mouseY, partialTicks);
-		RenderUtils.disableScissor();
+		RenderUtils.enableScissor(guiGraphics, x0, y0, x1, y1);
+		renderList(guiGraphics, mouseX, mouseY, partialTicks);
+		RenderUtils.disableScissor(guiGraphics);
 	}
 
 	@Override
-	protected void renderList(PoseStack poseStack, int mouseX, int mouseY, float partialTicks) {
+	protected void renderList(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
 		final int bandLeft = getRowLeft() - 3;
 		final int bandRight = getRowLeft() + getRowWidth() + 3;
 		final boolean overList = isMouseOver((double) mouseX, (double) mouseY);
@@ -100,7 +100,7 @@ public class StructureSearchList extends ObjectSelectionList<StructureSearchEntr
 				RenderUtils.drawRect(bandLeft + 2, bandBottom - 1, bandRight - 2, bandBottom, lastPinned ? GuiTheme.ROW_SECTION_SEPARATOR : GuiTheme.ROW_SEPARATOR);
 			}
 
-			entry.render(poseStack, j, rowTop, getRowLeft(), getRowWidth(), itemHeight - 4, mouseX, mouseY, hovered, partialTicks);
+			entry.render(guiGraphics, j, rowTop, getRowLeft(), getRowWidth(), itemHeight - 4, mouseX, mouseY, hovered, partialTicks);
 		}
 
 		if (getMaxScroll() > 0) {

@@ -8,9 +8,9 @@ import java.util.Map;
 
 import com.chaosthedude.explorerscompass.util.RenderUtils;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
-import com.mojang.blaze3d.vertex.PoseStack;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.resources.ResourceLocation;
@@ -158,13 +158,13 @@ public class ModFilterPanel {
 		return Math.max(0, options.size() - visibleRows());
 	}
 
-	public void render(PoseStack poseStack, int mouseX, int mouseY, String selectedNamespace) {
+	public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, String selectedNamespace) {
 		if (!open) {
 			return;
 		}
 
 		RenderUtils.drawPanel(x, y, x + WIDTH, y + height, BACKGROUND_TOP, BACKGROUND_BOTTOM, GuiTheme.PANEL_BORDER);
-		mc.font.draw(poseStack, I18n.get("string.explorerscompass.filterByMod"), x + PADDING + 2, y + PADDING + 1, GuiTheme.TEXT_MUTED);
+		guiGraphics.drawString(mc.font, I18n.get("string.explorerscompass.filterByMod"), x + PADDING + 2, y + PADDING + 1, GuiTheme.TEXT_MUTED, false);
 		RenderUtils.drawRect(x + PADDING, y + HEADER_HEIGHT - 1, x + WIDTH - PADDING, y + HEADER_HEIGHT, GuiTheme.ROW_SEPARATOR);
 
 		final boolean scrollable = maxScrollRow() > 0;
@@ -186,8 +186,8 @@ public class ModFilterPanel {
 			final String count = String.valueOf(option.getEntryCount());
 			final int countWidth = mc.font.width(count);
 			final String name = RenderUtils.trimToWidth(option.getDisplayName(), rowsRight - rowsLeft - countWidth - 12);
-			mc.font.draw(poseStack, name, rowsLeft + 4, rowTop + 3, selected ? GuiTheme.ACCENT : (hovered ? GuiTheme.TEXT_PRIMARY : GuiTheme.TEXT_SECONDARY));
-			mc.font.draw(poseStack, count, rowsRight - countWidth - 4, rowTop + 3, GuiTheme.TEXT_MUTED);
+			guiGraphics.drawString(mc.font, name, rowsLeft + 4, rowTop + 3, selected ? GuiTheme.ACCENT : (hovered ? GuiTheme.TEXT_PRIMARY : GuiTheme.TEXT_SECONDARY), false);
+			guiGraphics.drawString(mc.font, count, rowsRight - countWidth - 4, rowTop + 3, GuiTheme.TEXT_MUTED, false);
 		}
 
 		if (scrollable) {

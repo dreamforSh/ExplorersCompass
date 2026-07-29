@@ -32,7 +32,7 @@ public class CancelSearchPacket {
 
 			final ItemStack stack = ItemUtils.getHeldItem(player, ExplorersCompass.explorersCompass);
 			if (!stack.isEmpty()) {
-				((ExplorersCompassItem) stack.getItem()).cancelSearch(player.getLevel(), player, stack);
+				((ExplorersCompassItem) stack.getItem()).cancelSearch(player.serverLevel(), player, stack);
 			}
 		});
 		ctx.get().setPacketHandled(true);

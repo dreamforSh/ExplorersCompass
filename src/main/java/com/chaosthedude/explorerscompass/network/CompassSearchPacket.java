@@ -95,9 +95,9 @@ public class CompassSearchPacket {
 				final BlockPos startPos = player.blockPosition();
 				try {
 					if (isGroup) {
-						explorersCompass.searchForGroup(player.getLevel(), player, searchTarget, groupKey, startPos, stack);
+						explorersCompass.searchForGroup(player.serverLevel(), player, searchTarget, groupKey, startPos, stack);
 					} else {
-						explorersCompass.searchForTargets(player.getLevel(), player, searchTarget, targetKeys, startPos, stack);
+						explorersCompass.searchForTargets(player.serverLevel(), player, searchTarget, targetKeys, startPos, stack);
 					}
 				} catch (Throwable t) {
 					// This runs on the server thread, so an exception here would take down the server

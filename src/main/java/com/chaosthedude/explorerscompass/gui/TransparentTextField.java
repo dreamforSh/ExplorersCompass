@@ -1,16 +1,11 @@
 package com.chaosthedude.explorerscompass.gui;
 
 import com.chaosthedude.explorerscompass.util.RenderUtils;
-import com.mojang.blaze3d.platform.GlStateManager;
-import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.vertex.BufferBuilder;
-import com.mojang.blaze3d.vertex.DefaultVertexFormat;
-import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.blaze3d.vertex.Tesselator;
-import com.mojang.blaze3d.vertex.VertexFormat;
 
 import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.renderer.RenderType;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
 import net.minecraftforge.api.distmarker.Dist;
@@ -46,8 +41,10 @@ public class TransparentTextField extends EditBox {
 	}
 
 	@Override
-	public void render(PoseStack poseStack, int mouseX, int mouseY, float partialTicks) {
+	public void renderWidget(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
 		if (isVisible()) {
+			final int x = getX();
+			final int y = getY();
 			final boolean showClear = !getValue().isEmpty();
 			if (pseudoEnableBackgroundDrawing) {
 				RenderUtils.drawRect(x, y, x + width, y + height, BACKGROUND);
@@ -57,7 +54,7 @@ public class TransparentTextField extends EditBox {
 			}
 			if (showClear) {
 				final boolean overClear = isOverClearGlyph(mouseX, mouseY);
-				font.draw(poseStack, CLEAR_GLYPH, x + width - CLEAR_WIDTH + 1, y + (height - 8) / 2, overClear ? GuiTheme.ACCENT : GuiTheme.TEXT_MUTED);
+				guiGraphics.drawString(font, CLEAR_GLYPH, x + width - CLEAR_WIDTH + 1, y + (height - 8) / 2, overClear ? GuiTheme.ACCENT : GuiTheme.TEXT_MUTED, false);
 			}
 			boolean showLabel = !isFocused() && getValue().isEmpty();
             int i = showLabel ? labelColor : (pseudoIsEnabled ? pseudoEnabledColor : pseudoDisabledColor);
@@ -77,7 +74,7 @@ public class TransparentTextField extends EditBox {
 
 			if (!s.isEmpty()) {
 				String s1 = flag ? s.substring(0, j) : s;
-				j1 = font.drawShadow(poseStack, s1, (float) l, (float) i1, i);
+				j1 = guiGraphics.drawString(font, s1, l, i1, i, true);
 			}
 
 			boolean flag2 = getCursorPosition() < getValue().length() || getValue().length() >= pseudoMaxStringLength;
@@ -91,24 +88,24 @@ public class TransparentTextField extends EditBox {
 			}
 
 			if (!s.isEmpty() && flag && j < s.length()) {
-				j1 = font.drawShadow(poseStack, s.substring(j), (float) j1, (float) i1, i);
+				j1 = guiGraphics.drawString(font, s.substring(j), j1, i1, i, true);
 			}
 
 			if (flag1) {
 				if (flag2) {
 					RenderUtils.drawRect(k1, i1 - 1, k1 + 1, i1 + 1 + font.lineHeight, -3092272);
 				} else {
-					font.drawShadow(poseStack, "_", (float) k1, (float) i1, i);
+					guiGraphics.drawString(font, "_", k1, i1, i, true);
 				}
 			}
 
 			if (k != j) {
 				int l1 = l + font.width(s.substring(0, k));
-				drawSelectionBox(k1, i1 - 1, l1 - 1, i1 + 1 + font.lineHeight);
+				drawSelectionBox(guiGraphics, k1, i1 - 1, l1 - 1, i1 + 1 + font.lineHeight);
 			}
 		}
 	}
-	
+
 	@Override
 	public boolean mouseClicked(double mouseX, double mouseY, int button) {
 		// Emptying the field is a click away, rather than a held backspace, which matters when the
@@ -122,7 +119,7 @@ public class TransparentTextField extends EditBox {
 	}
 
 	private boolean isOverClearGlyph(int mouseX, int mouseY) {
-		return isVisible() && mouseX >= x + width - CLEAR_WIDTH && mouseX < x + width && mouseY >= y && mouseY < y + height;
+		return isVisible() && mouseX >= getX() + width - CLEAR_WIDTH && mouseX < getX() + width && mouseY >= getY() && mouseY < getY() + height;
 	}
 
 	@Override
@@ -204,7 +201,11 @@ public class TransparentTextField extends EditBox {
 		this.labelColor = labelColor;
 	}
 
-	private void drawSelectionBox(int startX, int startY, int endX, int endY) {
+	/**
+	 * Marks the selected run of text. The inverting blend this used to set up by hand is now a render
+	 * type of its own, which is what the vanilla field draws its own selection with.
+	 */
+	private void drawSelectionBox(GuiGraphics guiGraphics, int startX, int startY, int endX, int endY) {
 		if (startX < endX) {
 			int i = startX;
 			startX = endX;
@@ -217,28 +218,15 @@ public class TransparentTextField extends EditBox {
 			endY = j;
 		}
 
-		if (endX > x + width) {
-			endX = x + width;
+		if (endX > getX() + width) {
+			endX = getX() + width;
 		}
 
-		if (startX > x + width) {
-			startX = x + width;
+		if (startX > getX() + width) {
+			startX = getX() + width;
 		}
 
-		Tesselator tesselator = Tesselator.getInstance();
-		BufferBuilder bufferbuilder = tesselator.getBuilder();
-		RenderSystem.setShaderColor(0.0F, 0.0F, 255.0F, 255.0F);
-		RenderSystem.disableTexture();
-		RenderSystem.enableColorLogicOp();
-		RenderSystem.logicOp(GlStateManager.LogicOp.OR_REVERSE);
-		bufferbuilder.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION);
-		bufferbuilder.vertex((double) startX, (double) endY, 0.0D).endVertex();
-		bufferbuilder.vertex((double) endX, (double) endY, 0.0D).endVertex();
-		bufferbuilder.vertex((double) endX, (double) startY, 0.0D).endVertex();
-		bufferbuilder.vertex((double) startX, (double) startY, 0.0D).endVertex();
-		tesselator.end();
-		RenderSystem.disableColorLogicOp();
-		RenderSystem.enableTexture();
+		guiGraphics.fill(RenderType.guiTextHighlight(), endX, endY, startX, startY, -16776961);
 	}
 
 }

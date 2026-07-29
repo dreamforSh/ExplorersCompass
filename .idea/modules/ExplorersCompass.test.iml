@@ -14,9 +14,9 @@
   </component>
   <component name="McpModuleSettings">
     <option name="mappingFile" value="F:\CancriRecoleta\ExplorersCompass\build\createMcpToSrg\output.tsrg" />
-    <option name="mcpVersion" value="official_1.19.2" />
-    <option name="minecraftVersion" value="1.19.2" />
-    <option name="platformVersion" value="43.4.12" />
+    <option name="mcpVersion" value="official_1.20.1" />
+    <option name="minecraftVersion" value="1.20.1" />
+    <option name="platformVersion" value="47.4.0" />
     <option name="srgType" value="TSRG" />
   </component>
 </module>

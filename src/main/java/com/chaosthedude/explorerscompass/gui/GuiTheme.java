@@ -2,9 +2,9 @@ package com.chaosthedude.explorerscompass.gui;
 
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.util.RenderUtils;
-import com.mojang.blaze3d.vertex.PoseStack;
 
 import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
@@ -101,10 +101,10 @@ public class GuiTheme {
 	}
 
 	/** The title of a screen, with the number of things it is showing beside it. */
-	public static void drawTitle(PoseStack poseStack, Font font, String title, String subtitle, int x, int y) {
-		font.drawShadow(poseStack, title, x, y, TEXT_PRIMARY);
+	public static void drawTitle(GuiGraphics guiGraphics, Font font, String title, String subtitle, int x, int y) {
+		guiGraphics.drawString(font, title, x, y, TEXT_PRIMARY, true);
 		if (subtitle != null && !subtitle.isEmpty()) {
-			font.draw(poseStack, subtitle, x, y + font.lineHeight + 2, TEXT_MUTED);
+			guiGraphics.drawString(font, subtitle, x, y + font.lineHeight + 2, TEXT_MUTED, false);
 		}
 	}
 

@@ -31,10 +31,10 @@ import com.chaosthedude.explorerscompass.util.ItemUtils;
 import com.chaosthedude.explorerscompass.util.RenderUtils;
 import com.chaosthedude.explorerscompass.util.SearchTarget;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
-import com.mojang.blaze3d.vertex.PoseStack;
 
 import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.resources.language.I18n;
@@ -163,7 +163,7 @@ public class ExplorersCompassScreen extends Screen {
 		searchDataRevision = ExplorersCompass.clientSearchDataRevision;
 		// Recorded along with the documents that were resolved under it, so that opening the screen
 		// does not rebuild all of them again on its very first tick
-		languageCode = Minecraft.getInstance().getLanguageManager().getSelected().getCode();
+		languageCode = Minecraft.getInstance().getLanguageManager().getSelected();
 		sortingCategory = new NameSorting();
 		cachedLocations = explorersCompass.getPrevPosCount(stack);
 	}
@@ -200,7 +200,7 @@ public class ExplorersCompassScreen extends Screen {
 
 	@Override
 	protected void init() {
-		minecraft.keyboardHandler.setSendRepeatsToGui(true);
+		// Key repeats no longer have to be asked for: widgets receive them whenever one is focused
 		if (modFilterPanel == null) {
 			modFilterPanel = new ModFilterPanel(this, minecraft);
 		}
@@ -221,7 +221,7 @@ public class ExplorersCompassScreen extends Screen {
 		cachedLocations = explorersCompass.getPrevPosCount(stack);
 		updateButtons();
 
-		final String currentLanguage = minecraft.getLanguageManager().getSelected().getCode();
+		final String currentLanguage = minecraft.getLanguageManager().getSelected();
 		if (searchDataRevision != ExplorersCompass.clientSearchDataRevision
 				|| !currentLanguage.equals(languageCode)) {
 			rebuildList();
@@ -229,32 +229,32 @@ public class ExplorersCompassScreen extends Screen {
 	}
 
 	@Override
-	public void render(PoseStack poseStack, int mouseX, int mouseY, float partialTicks) {
-		renderBackground(poseStack);
+	public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
+		renderBackground(guiGraphics);
 		GuiTheme.drawHeader(width);
 		GuiTheme.drawSidebar(height);
 		// The status strip is drawn before the widgets so that the two buttons standing in it are not
 		// covered by its own background
-		renderStatusBar(poseStack);
-		renderHeaderContents(poseStack, mouseX, mouseY);
+		renderStatusBar(guiGraphics);
+		renderHeaderContents(guiGraphics, mouseX, mouseY);
 
-		super.render(poseStack, mouseX, mouseY, partialTicks);
+		super.render(guiGraphics, mouseX, mouseY, partialTicks);
 
 		if (keysMatchingSearch.isEmpty()) {
 			final int listCenterX = GuiTheme.contentLeft() + GuiTheme.contentWidth(width) / 2;
-			drawCenteredString(poseStack, font, Component.translatable(searchTarget.getNoneMatchTranslationKey()), listCenterX, height / 2 - 10, GuiTheme.TEXT_SECONDARY);
-			drawCenteredString(poseStack, font, Component.translatable("string.explorerscompass.clearFiltersHint"), listCenterX, height / 2 + 2, GuiTheme.TEXT_MUTED);
+			guiGraphics.drawCenteredString(font, Component.translatable(searchTarget.getNoneMatchTranslationKey()), listCenterX, height / 2 - 10, GuiTheme.TEXT_SECONDARY);
+			guiGraphics.drawCenteredString(font, Component.translatable("string.explorerscompass.clearFiltersHint"), listCenterX, height / 2 + 2, GuiTheme.TEXT_MUTED);
 		}
 
-		modFilterPanel.render(poseStack, mouseX, mouseY, modFilter);
-		renderButtonTooltip(poseStack, mouseX, mouseY);
+		modFilterPanel.render(guiGraphics, mouseX, mouseY, modFilter);
+		renderButtonTooltip(guiGraphics, mouseX, mouseY);
 	}
 
 	/** Draws the title, how much of the list is showing, and the filters that are cutting it down. */
-	private void renderHeaderContents(PoseStack poseStack, int mouseX, int mouseY) {
+	private void renderHeaderContents(GuiGraphics guiGraphics, int mouseX, int mouseY) {
 		// The title names what is being picked, which is whichever of the two lists is showing rather
 		// than the one this screen was opened on
-		GuiTheme.drawTitle(poseStack, font, I18n.get(searchTarget.getSelectTranslationKey()), keysMatchingSearch.size() + " / " + allowedKeys.size(), GuiTheme.SIDEBAR_CONTENT_X, 10);
+		GuiTheme.drawTitle(guiGraphics, font, I18n.get(searchTarget.getSelectTranslationKey()), keysMatchingSearch.size() + " / " + allowedKeys.size(), GuiTheme.SIDEBAR_CONTENT_X, 10);
 
 		updateFilterChips();
 
@@ -264,7 +264,7 @@ public class ExplorersCompassScreen extends Screen {
 		if (filterChips.isEmpty()) {
 			// The space the chips would take is worth more as a reminder of what the list can do than
 			// as empty header
-			font.draw(poseStack, RenderUtils.trimToWidth(I18n.get("string.explorerscompass.listHint"), chipsRight - chipsLeft), chipsLeft + 1, chipsY + 2, GuiTheme.TEXT_MUTED);
+			guiGraphics.drawString(font, RenderUtils.trimToWidth(I18n.get("string.explorerscompass.listHint"), chipsRight - chipsLeft), chipsLeft + 1, chipsY + 2, GuiTheme.TEXT_MUTED, false);
 			return;
 		}
 
@@ -280,7 +280,7 @@ public class ExplorersCompassScreen extends Screen {
 			chip.top = chipsY;
 			chip.bottom = chipsY + 12;
 			final boolean hovered = mouseX >= chip.left && mouseX < chip.right && mouseY >= chip.top && mouseY < chip.bottom;
-			RenderUtils.drawChip(poseStack, label, chipX, chipsY, GuiTheme.CHIP_ACCENT_BACKGROUND, hovered ? GuiTheme.TEXT_PRIMARY : GuiTheme.ACCENT);
+			RenderUtils.drawChip(guiGraphics, label, chipX, chipsY, GuiTheme.CHIP_ACCENT_BACKGROUND, hovered ? GuiTheme.TEXT_PRIMARY : GuiTheme.ACCENT);
 			chipX += chipWidth + 4;
 		}
 	}
@@ -318,7 +318,7 @@ public class ExplorersCompassScreen extends Screen {
 	 * Draws what the compass is currently doing along the bottom, so that the player does not have to
 	 * close this screen to read it off the HUD.
 	 */
-	private void renderStatusBar(PoseStack poseStack) {
+	private void renderStatusBar(GuiGraphics guiGraphics) {
 		final int top = statusBarTop();
 		final int left = GuiTheme.contentLeft();
 		final int right = left + GuiTheme.contentWidth(width);
@@ -326,7 +326,7 @@ public class ExplorersCompassScreen extends Screen {
 
 		final CompassState state = explorersCompass.getState(stack);
 		final ResourceLocation foundDimension = explorersCompass.getFoundDimension(stack);
-		final boolean inFoundDimension = foundDimension == null || foundDimension.equals(player.level.dimension().location());
+		final boolean inFoundDimension = foundDimension == null || foundDimension.equals(player.level().dimension().location());
 
 		String headline;
 		int dotColor;
@@ -347,9 +347,9 @@ public class ExplorersCompassScreen extends Screen {
 			dotColor = GuiTheme.TEXT_MUTED;
 		}
 
-		font.draw(poseStack, DOT_GLYPH, left + 6, top + 6, dotColor);
+		guiGraphics.drawString(font, DOT_GLYPH, left + 6, top + 6, dotColor, false);
 		int headlineX = left + 6 + font.width(DOT_GLYPH) + 4;
-		font.drawShadow(poseStack, headline, headlineX, top + 6, GuiTheme.TEXT_PRIMARY);
+		guiGraphics.drawString(font, headline, headlineX, top + 6, GuiTheme.TEXT_PRIMARY, true);
 		headlineX += font.width(headline) + 6;
 
 		// An inactive compass still remembers the last thing it was pointed at, which would read as if
@@ -357,13 +357,13 @@ public class ExplorersCompassScreen extends Screen {
 		if (state == CompassState.SEARCHING || state == CompassState.FOUND || state == CompassState.NOT_FOUND) {
 			final String target = state == CompassState.SEARCHING ? ClientEventHandler.searchTargetName(explorersCompass, stack) : explorersCompass.getSearchTarget(stack).getPrettyName(explorersCompass.getTargetKey(stack));
 			if (!target.isEmpty()) {
-				font.draw(poseStack, RenderUtils.trimToWidth(target, statusTextRight - headlineX), headlineX, top + 6, GuiTheme.TEXT_SECONDARY);
+				guiGraphics.drawString(font, RenderUtils.trimToWidth(target, statusTextRight - headlineX), headlineX, top + 6, GuiTheme.TEXT_SECONDARY, false);
 			}
 		}
 
 		final String details = statusDetails(state, foundDimension, inFoundDimension);
 		if (!details.isEmpty()) {
-			font.draw(poseStack, RenderUtils.trimToWidth(details, statusTextRight - left - 6), left + 6, top + 19, state == CompassState.FOUND && !inFoundDimension ? GuiTheme.TEXT_WARNING : GuiTheme.TEXT_MUTED);
+			guiGraphics.drawString(font, RenderUtils.trimToWidth(details, statusTextRight - left - 6), left + 6, top + 19, state == CompassState.FOUND && !inFoundDimension ? GuiTheme.TEXT_WARNING : GuiTheme.TEXT_MUTED, false);
 		}
 	}
 
@@ -399,12 +399,12 @@ public class ExplorersCompassScreen extends Screen {
 	}
 
 	/** Explains whatever button the pointer is resting on, above everything else on the screen. */
-	private void renderButtonTooltip(PoseStack poseStack, int mouseX, int mouseY) {
+	private void renderButtonTooltip(GuiGraphics guiGraphics, int mouseX, int mouseY) {
 		if (modFilterPanel.isOver(mouseX, mouseY)) {
 			return;
 		}
 		if (searchTextField.isMouseOver(mouseX, mouseY)) {
-			renderComponentTooltip(poseStack, List.of(
+			guiGraphics.renderComponentTooltip(font, List.of(
 					Component.translatable("string.explorerscompass.searchSyntax.fields"),
 					Component.translatable("string.explorerscompass.searchSyntax.combine"),
 					Component.translatable("string.explorerscompass.searchSyntax.example")),
@@ -413,13 +413,13 @@ public class ExplorersCompassScreen extends Screen {
 		}
 		for (Object widget : renderables) {
 			if (widget instanceof TransparentButton button && button.visible && button.isHoveredOrFocused() && !button.getTooltipLines().isEmpty()) {
-				renderComponentTooltip(poseStack, button.getTooltipLines(), mouseX, mouseY);
+				guiGraphics.renderComponentTooltip(font, button.getTooltipLines(), mouseX, mouseY);
 				return;
 			}
 		}
 		final StructureSearchEntry hovered = selectionList.getHoveredEntry(mouseX, mouseY);
 		if (hovered != null) {
-			renderComponentTooltip(poseStack, hovered.getTooltipLines(), mouseX, mouseY);
+			guiGraphics.renderComponentTooltip(font, hovered.getTooltipLines(), mouseX, mouseY);
 		}
 	}
 
@@ -501,12 +501,6 @@ public class ExplorersCompassScreen extends Screen {
 		return ret;
 	}
 
-	@Override
-	public void onClose() {
-		super.onClose();
-		minecraft.keyboardHandler.setSendRepeatsToGui(false);
-	}
-
 	public void selectEntry(StructureSearchEntry entry) {
 		updateButtons();
 	}
@@ -549,7 +543,7 @@ public class ExplorersCompassScreen extends Screen {
 		allowedKeys = new ArrayList<ResourceLocation>(searchTarget.getAllowedKeys());
 		searchDocuments = createSearchDocuments();
 		searchDataRevision = ExplorersCompass.clientSearchDataRevision;
-		languageCode = minecraft.getLanguageManager().getSelected().getCode();
+		languageCode = minecraft.getLanguageManager().getSelected();
 		multiSelectedKeys.retainAll(allowedKeys);
 		// A mod that contributes nothing to the list now showing is no longer something to filter by
 		if (modFilter != null && allowedKeys.stream().noneMatch((key) -> key.getNamespace().equals(modFilter))) {
@@ -689,7 +683,7 @@ public class ExplorersCompassScreen extends Screen {
 		}
 		// Entries with no known dimensions are kept: absent data is not proof they cannot generate here
 		final List<ResourceLocation> dimensionKeys = document.getDimensionKeys();
-		return dimensionKeys.isEmpty() || dimensionKeys.contains(player.level.dimension().location());
+		return dimensionKeys.isEmpty() || dimensionKeys.contains(player.level().dimension().location());
 	}
 
 	/** The cached searchable and displayable text belonging to the given key. */
@@ -838,7 +832,7 @@ public class ExplorersCompassScreen extends Screen {
 		dimensionFilterButton.setHighlighted(filterByCurrentDimension);
 		dimensionFilterButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.dimensionFilter"));
 		modFilterButton = addSidebarButton(modFilterButtonLabel(), (onPress) -> {
-			modFilterPanel.toggle(allowedKeys, GuiTheme.SIDEBAR_X + GuiTheme.SIDEBAR_WIDTH + 2, modFilterButton.y, width, height, modFilter);
+			modFilterPanel.toggle(allowedKeys, GuiTheme.SIDEBAR_X + GuiTheme.SIDEBAR_WIDTH + 2, modFilterButton.getY(), width, height, modFilter);
 		});
 		modFilterButton.setHighlighted(modFilter != null);
 		modFilterButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.modFilter"));
@@ -941,7 +935,7 @@ public class ExplorersCompassScreen extends Screen {
 		final CompassState state = explorersCompass.getState(stack);
 		final boolean located = state == CompassState.FOUND;
 		final ResourceLocation foundDimension = explorersCompass.getFoundDimension(stack);
-		final ResourceLocation currentDimension = player.level.dimension().location();
+		final ResourceLocation currentDimension = player.level().dimension().location();
 		final ButtonState buttonState = new ButtonState(hasSelection, multiSelected, state,
 				cachedLocations, ExplorersCompass.canTeleport,
 				ConfigHandler.GENERAL.allowSharing.get(), foundDimension, currentDimension);
@@ -979,14 +973,14 @@ public class ExplorersCompassScreen extends Screen {
 		// text beside them stops where they begin
 		statusTextRight = GuiTheme.contentLeft() + GuiTheme.contentWidth(width) - 6;
 		if (shareButton.visible) {
-			shareButton.x = statusTextRight - STATUS_BUTTON_WIDTH;
+			shareButton.setX(statusTextRight - STATUS_BUTTON_WIDTH);
 			statusTextRight -= STATUS_BUTTON_WIDTH + 4;
 		}
 		if (teleportButton.visible) {
-			teleportButton.x = statusTextRight - STATUS_BUTTON_WIDTH;
+			teleportButton.setX(statusTextRight - STATUS_BUTTON_WIDTH);
 			statusTextRight -= STATUS_BUTTON_WIDTH + 4;
 		}
-		stopButton.x = statusTextRight - STATUS_BUTTON_WIDTH;
+		stopButton.setX(statusTextRight - STATUS_BUTTON_WIDTH);
 		statusTextRight -= STATUS_BUTTON_WIDTH + 4;
 	}
 

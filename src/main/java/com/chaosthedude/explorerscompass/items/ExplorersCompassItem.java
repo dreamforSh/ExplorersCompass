@@ -45,7 +45,6 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.InteractionResultHolder;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.CreativeModeTab;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
@@ -54,7 +53,7 @@ import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.DistExecutor;
-import net.minecraftforge.network.NetworkDirection;
+import net.minecraftforge.network.PacketDistributor;
 
 public class ExplorersCompassItem extends Item {
 
@@ -80,7 +79,9 @@ public class ExplorersCompassItem extends Item {
 	private final Map<UUID, Long> lastShareTimes = new HashMap<UUID, Long>();
 
 	public ExplorersCompassItem() {
-		super(new Properties().stacksTo(1).tab(CreativeModeTab.TAB_TOOLS));
+		// Which creative tab this shows up in is no longer a property of the item; it is decided by
+		// whoever fills the tab, in ExplorersCompassRegistry
+		super(new Properties().stacksTo(1));
 	}
 
 	@Override
@@ -94,7 +95,9 @@ public class ExplorersCompassItem extends Item {
 				final ServerPlayer serverPlayer = (ServerPlayer) player;
 				final boolean canTeleport = ConfigHandler.GENERAL.allowTeleport.get() && PlayerUtils.canTeleport(player.getServer(), player);
 				for (SyncPacket packet : SyncPacket.createForPlayer(serverPlayer, canTeleport, serverLevel)) {
-					ExplorersCompass.network.sendTo(packet, serverPlayer.connection.getConnection(), NetworkDirection.PLAY_TO_CLIENT);
+					// Addressed to the player rather than to the raw connection behind them, which is no
+					// longer reachable from the packet listener
+					ExplorersCompass.network.send(PacketDistributor.PLAYER.with(() -> serverPlayer), packet);
 				}
 			}
 		} else {
@@ -602,7 +605,7 @@ public class ExplorersCompassItem extends Item {
 		}
 
 		// A compass from before the dimension was recorded reports where its holder is instead
-		final ResourceLocation dimension = dimensionKey != null ? dimensionKey : player.getLevel().dimension().location();
+		final ResourceLocation dimension = dimensionKey != null ? dimensionKey : player.serverLevel().dimension().location();
 		player.getServer().getPlayerList().broadcastSystemMessage(sharedLocationMessage(player, searchTarget, targetKey, x, y, z, dimension), false);
 	}
 

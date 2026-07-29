@@ -73,15 +73,15 @@ public class ConcentricRingsSearchWorker extends StructureSearchWorker<Concentri
 	 * structure, instead of having to check every location that could still be closer than the best
 	 * one found so far.
 	 *
-	 * <p>The generator computes the positions asynchronously, and its only public accessor joins
-	 * that computation, blocking the server thread for however long it still needs — seconds, for a
-	 * fresh world. Reading the future directly (opened up by the access transformer) lets this
-	 * worker wait by handing the turn on instead. The future is created for every placement of the
-	 * level when {@code getPlacementsForStructure} runs during worker creation, so it is already
-	 * present here.
+	 * <p>The positions are computed asynchronously, and the only public accessor
+	 * ({@code getRingPositionsFor}) joins that computation, blocking the server thread for however
+	 * long it still needs — seconds, for a fresh world. Reading the future directly (opened up by the
+	 * access transformer) lets this worker wait by handing the turn on instead. The future is created
+	 * for every placement of the level when {@code getPlacementsForStructure} runs during worker
+	 * creation, so it is already present here.
 	 */
 	private boolean tryResolvePotentialChunks() {
-		final CompletableFuture<List<ChunkPos>> future = level.getChunkSource().getGenerator().ringPositions.get(placement);
+		final CompletableFuture<List<ChunkPos>> future = level.getChunkSource().getGeneratorState().ringPositions.get(placement);
 		if (future != null && !future.isDone()) {
 			return false;
 		}

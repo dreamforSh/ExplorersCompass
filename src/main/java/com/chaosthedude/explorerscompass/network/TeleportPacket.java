@@ -53,7 +53,7 @@ public class TeleportPacket {
 						// anywhere else. Compasses from before the dimension was recorded have no way to
 						// tell, and keep the old behavior.
 						final ResourceLocation foundDimension = explorersCompass.getFoundDimension(stack);
-						if (foundDimension != null && !player.level.dimension().location().equals(foundDimension)) {
+						if (foundDimension != null && !player.level().dimension().location().equals(foundDimension)) {
 							player.displayClientMessage(Component.translatable("string.explorerscompass.wrongDimension"), true);
 							return;
 						}
@@ -76,14 +76,14 @@ public class TeleportPacket {
 	 * back on the server thread once they are done.
 	 */
 	private void teleportWhenChunkIsReady(ServerPlayer player, int x, int structureY, int z) {
-		final ServerLevel level = player.getLevel();
+		final ServerLevel level = player.serverLevel();
 		level.getChunkSource().getChunkFuture(SectionPos.blockToSectionCoord(x), SectionPos.blockToSectionCoord(z), ChunkStatus.FULL, true).thenAcceptAsync((either) -> {
 			if (either.left().isEmpty()) {
 				ExplorersCompass.LOGGER.warn("Could not load the chunk at " + x + ", " + z + " to teleport " + player.getDisplayName().getString());
 				return;
 			}
 			// The player may have logged out, died, or changed dimension while the chunk generated
-			if (player.hasDisconnected() || player.isRemoved() || player.getLevel() != level) {
+			if (player.hasDisconnected() || player.isRemoved() || player.serverLevel() != level) {
 				return;
 			}
 
@@ -143,9 +143,14 @@ public class TeleportPacket {
 		return states[index];
 	}
 
-	/** Whether the block puts up no physical barrier, so a player could occupy or sink through it. */
+	/**
+	 * Whether the block puts up no physical barrier, so a player could occupy or sink through it.
+	 * What used to be read off the block's material is asked of the state itself, since materials no
+	 * longer exist: liquids answer {@code liquid()}, and everything a block can be placed into
+	 * answers {@code canBeReplaced()}.
+	 */
 	private static boolean isPassable(BlockState state) {
-		return state.isAir() || state.getMaterial().isLiquid() || state.getMaterial().isReplaceable();
+		return state.isAir() || state.liquid() || state.canBeReplaced();
 	}
 
 	/** Passable and also harmless: fire and lava are passable, but must not be teleported into. */

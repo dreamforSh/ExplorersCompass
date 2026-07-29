@@ -24,6 +24,7 @@ import net.minecraft.Util;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.core.Holder;
 import net.minecraft.core.Registry;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
@@ -137,7 +138,7 @@ public class BiomeUtils {
 
 	/** The biome the given key names in this world, or null when it names none. */
 	public static Holder<Biome> getHolderForKey(ServerLevel level, ResourceLocation key) {
-		return getBiomeRegistry(level).getHolder(ResourceKey.create(Registry.BIOME_REGISTRY, key)).orElse(null);
+		return getBiomeRegistry(level).getHolder(ResourceKey.create(Registries.BIOME, key)).orElse(null);
 	}
 
 	public static boolean biomeIsBlacklisted(ResourceLocation biomeKey) {
@@ -291,7 +292,7 @@ public class BiomeUtils {
 	}
 
 	private static Registry<Biome> getBiomeRegistry(ServerLevel level) {
-		return level.registryAccess().registryOrThrow(Registry.BIOME_REGISTRY);
+		return level.registryAccess().registryOrThrow(Registries.BIOME);
 	}
 
 	/**

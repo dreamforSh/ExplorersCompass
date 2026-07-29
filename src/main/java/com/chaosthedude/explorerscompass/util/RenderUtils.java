@@ -1,15 +1,14 @@
 package com.chaosthedude.explorerscompass.util;
 
-import com.mojang.blaze3d.platform.Window;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
-import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexFormat;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
@@ -161,10 +160,10 @@ public class RenderUtils {
 	 * Draws a label on a filled pill, and answers how wide it came out, so that several of them can
 	 * be laid out in a row.
 	 */
-	public static int drawChip(PoseStack poseStack, String text, int x, int y, int backgroundColor, int textColor) {
+	public static int drawChip(GuiGraphics guiGraphics, String text, int x, int y, int backgroundColor, int textColor) {
 		final int chipWidth = font.width(text) + 8;
 		drawRect(x, y, x + chipWidth, y + 12, backgroundColor);
-		font.draw(poseStack, text, x + 4, y + 2, textColor);
+		guiGraphics.drawString(font, text, x + 4, y + 2, textColor, false);
 		return chipWidth;
 	}
 
@@ -177,19 +176,17 @@ public class RenderUtils {
 	}
 
 	/**
-	 * Confines everything drawn until {@link #disableScissor()} to the given rectangle, in the same
-	 * scaled coordinates the rest of the interface is laid out in.
+	 * Confines everything drawn until {@link #disableScissor(GuiGraphics)} to the given rectangle, in
+	 * the same scaled coordinates the rest of the interface is laid out in. The scaling and the flip
+	 * to framebuffer pixels this used to do by hand are now the graphics object's own, which also
+	 * keeps the rectangle stacked with whatever one is already in force rather than replacing it.
 	 */
-	public static void enableScissor(int left, int top, int right, int bottom) {
-		final Window window = mc.getWindow();
-		final double scale = window.getGuiScale();
-		final int scissorHeight = (int) Math.round((bottom - top) * scale);
-		// Scissor rectangles are in framebuffer pixels, measured from the bottom of the window
-		RenderSystem.enableScissor((int) Math.round(left * scale), window.getHeight() - (int) Math.round(top * scale) - scissorHeight, (int) Math.round((right - left) * scale), scissorHeight);
+	public static void enableScissor(GuiGraphics guiGraphics, int left, int top, int right, int bottom) {
+		guiGraphics.enableScissor(left, top, right, bottom);
 	}
 
-	public static void disableScissor() {
-		RenderSystem.disableScissor();
+	public static void disableScissor(GuiGraphics guiGraphics) {
+		guiGraphics.disableScissor();
 	}
 
 }
