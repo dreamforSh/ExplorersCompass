@@ -1,8 +1,10 @@
 package com.chaosthedude.explorerscompass.worker;
 
-import java.util.Deque;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
-import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 import com.chaosthedude.explorerscompass.ExplorersCompass;
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
@@ -24,17 +26,16 @@ import net.minecraft.world.level.levelgen.structure.placement.StructurePlacement
  * for each kind of placement only say how far apart the cells are and which location a cell stands
  * for.
  *
- * <p>The walk can run on a thread of its own, which is what {@code asyncStructureSearch} turns on.
- * It cannot ask chunk storage from there — see {@link StructurePrediction} for what it asks instead
- * and what that costs — so what it turns up is a list of locations that world generation says hold
- * something, nearest last. The server thread then puts those to storage one at a time, nearest
- * first, and the search settles on the first one storage agrees about. Only that last step reads a
- * chunk, so a search that used to spend a slice of every tick for as long as it ran now spends a
- * handful of tick slices at the end of it.
+ * <p>The walk can run off the server thread, which is what {@code asyncStructureSearch} turns on,
+ * shared out over as many threads as searching is allowed with each taking its own share of the
+ * rows. It cannot ask chunk storage from there — see {@link StructurePrediction} for what it asks
+ * instead and what that costs — so what it turns up is a list of locations that world generation
+ * says hold something. The server thread then puts those to storage one at a time, nearest first,
+ * and the search settles on the first one storage agrees about. Only that last step reads a chunk,
+ * so a search that used to spend a slice of every tick for as long as it ran now spends a handful of
+ * tick slices at the end of it.
  */
 public abstract class GridStructureSearchWorker<T extends StructurePlacement> extends StructureSearchWorker<T> {
-
-	private final DiscWalker walker = new DiscWalker();
 
 	/** How many chunks apart the cells of the grid being walked are. */
 	private final int strideChunks;
@@ -42,31 +43,22 @@ public abstract class GridStructureSearchWorker<T extends StructurePlacement> ex
 	private final int startChunkX;
 	private final int startChunkZ;
 
-	/** Whether the walk is running on a thread of its own. Set before either side starts. */
-	private volatile boolean background;
+	/** Whether the walk may be split between threads. Decided once, before either side starts. */
+	private final boolean async;
 
-	/**
-	 * How far the walk has covered. Written by whichever thread is walking and read by the server
-	 * thread for the readout on the compass, so it is published rather than derived from the walker.
-	 */
-	private volatile int coveredRadius;
+	/** The shares the walk is split into, one per thread it may be given. */
+	private final List<Shard> shards;
 
-	/**
-	 * What the walk turned up, nearest last. Each of these is nearer than the one before it, since the
-	 * walk narrows what is still worth looking at every time it finds something.
-	 */
-	private final Deque<Prediction> predictions = new ConcurrentLinkedDeque<Prediction>();
+	/** What the walk turned up, in whatever order the shares happened to turn it up in. */
+	private final Queue<Prediction> predictions = new ConcurrentLinkedQueue<Prediction>();
 
-	// That the walking thread is done. Publishing this last is what makes everything it wrote before
-	// it visible to the server thread that sees it set.
-	private volatile boolean backgroundDone;
-	private Throwable backgroundError;
-
-	/** Whether the server thread has finished acting on that. Only ever touched on the server thread. */
-	private boolean applied;
+	// The same, nearest first, and how far through them the server thread has got. Only ever touched
+	// on the server thread, and only once the walking threads are done.
+	private List<Prediction> ordered;
+	private int orderedIndex;
 
 	/** A location the walk believes holds a structure, until chunk storage has agreed. */
-	private record Prediction(ChunkPos chunkPos, Structure structure, BlockPos pos) {
+	private record Prediction(ChunkPos chunkPos, Structure structure, BlockPos pos, long distanceSqr) {
 	}
 
 	public GridStructureSearchWorker(SearchContext context, T placement, List<Structure> structureSet, int strideChunks) {
@@ -75,117 +67,50 @@ public abstract class GridStructureSearchWorker<T extends StructurePlacement> ex
 		this.strideChunks = strideChunks;
 		startChunkX = SectionPos.blockToSectionCoord(startPos.getX());
 		startChunkZ = SectionPos.blockToSectionCoord(startPos.getZ());
-	}
+		async = ConfigHandler.GENERAL.asyncStructureSearch.get();
 
-	@Override
-	protected void onBegin() {
-		if (!ConfigHandler.GENERAL.asyncStructureSearch.get()) {
-			return;
-		}
-
-		background = true;
-		try {
-			SearchExecutor.execute(this::walkInBackground);
-		} catch (Throwable t) {
-			// Nothing is going to run it, so answer as though it had run and failed rather than leaving
-			// the server thread watching for a result that will never arrive
-			backgroundError = t;
-			backgroundDone = true;
-		}
-	}
-
-	/** Walks until there is nothing left to look at, off the server thread. */
-	private void walkInBackground() {
-		try {
-			while (!Thread.currentThread().isInterrupted() && hasMoreToSample()) {
-				predictNext();
-			}
-		} catch (Throwable t) {
-			backgroundError = t;
-		} finally {
-			backgroundDone = true;
+		// As many shares as there are threads to walk them. A search looking through several placements
+		// has a worker each and so asks for this many again, which only queues them up behind one
+		// another: the threads stay busy either way, and each placement still has all of them while it
+		// is the one being walked.
+		final int shardCount = async ? Math.max(1, SearchExecutor.getThreadCount()) : 1;
+		final int shardSamples = (maxSamples + shardCount - 1) / shardCount;
+		shards = new ArrayList<Shard>(shardCount);
+		for (int i = 0; i < shardCount; i++) {
+			shards.add(new Shard(new DiscWalker(shardCount, i), shardSamples));
 		}
 	}
 
 	@Override
-	boolean isReady() {
-		// While the walk runs on a thread of its own there is nothing for the server thread to do until
-		// it has something to put to storage. Answering false hands the turn to another worker of the
-		// search rather than holding up everything else it is looking for.
-		return !background || backgroundDone;
+	protected boolean isBackgroundAllowed() {
+		return async;
 	}
 
 	@Override
-	boolean hasWork() {
-		// While the walk runs on a thread of its own, this stays true until the server thread has acted
-		// on what it turned up, however far it has got: what is left to walk is that thread's business,
-		// and reading it from here would be a race
-		return background ? !applied : super.hasWork();
-	}
-
-	@Override
-	protected boolean isExhausted() {
-		return background ? applied : super.isExhausted();
+	protected List<Runnable> createBackgroundTasks() {
+		final List<Runnable> tasks = new ArrayList<Runnable>(shards.size());
+		for (Shard shard : shards) {
+			tasks.add(shard::walk);
+		}
+		return tasks;
 	}
 
 	@Override
 	int getSamplesPerTurn() {
 		// Putting a location to storage can load a chunk, which is already as much as a turn is meant
 		// to hold
-		return background ? 1 : super.getSamplesPerTurn();
+		return isBackground() ? 1 : super.getSamplesPerTurn();
 	}
 
 	@Override
 	protected boolean doSample() {
-		if (background) {
+		if (isBackground()) {
 			return confirmNext();
 		}
 
-		sampleNext();
+		// On the server thread there is only ever the one share to walk
+		shards.get(0).sampleNext();
 		return hasWork();
-	}
-
-	/**
-	 * Asks chunk storage about the location the walk has reached and moves on to the next one. This is
-	 * what a search does when it is not allowed a thread of its own.
-	 */
-	private void sampleNext() {
-		final ChunkPos chunkPos = candidateChunk(currentChunkX(), currentChunkZ());
-		// A cell of the grid can stand for a location past the edge of the disc being walked, so part
-		// of the outer cells lies beyond the configured radius, and beyond anything already located
-		if (isWorthSampling(chunkPos)) {
-			final Pair<BlockPos, Structure> pair = getStructureGeneratingAt(chunkPos);
-			samples++;
-			if (pair != null) {
-				found(pair.getFirst(), pair.getSecond());
-			}
-		}
-
-		advance();
-	}
-
-	/**
-	 * Works out whether world generation would put a structure at the location the walk has reached,
-	 * and moves on to the next one. Touches nothing outside this worker, which is what lets it run off
-	 * the server thread.
-	 */
-	private void predictNext() {
-		final ChunkPos chunkPos = candidateChunk(currentChunkX(), currentChunkZ());
-		if (isWorthSampling(chunkPos)) {
-			samples++;
-
-			final Pair<BlockPos, Structure> pair = predictStructureGeneratingAt(chunkPos);
-			if (pair != null) {
-				final BlockPos pos = pair.getFirst();
-				predictions.addLast(new Prediction(chunkPos, pair.getSecond(), pos));
-				// Nothing further out than this can be what this worker answers with, so the radius it was
-				// allowed beyond that is no longer worth walking. It is not recorded as a find yet: chunk
-				// storage has the last word on that, and only the server thread may ask it.
-				setRadiusLimit(ceilSqrt(context.distanceSqrFromStart(pos.getX(), pos.getZ())));
-			}
-		}
-
-		advance();
 	}
 
 	/**
@@ -193,23 +118,31 @@ public abstract class GridStructureSearchWorker<T extends StructurePlacement> ex
 	 * storage agrees about. Runs on the server thread, which is the only one that may ask it.
 	 */
 	private boolean confirmNext() {
-		if (!backgroundDone || applied) {
+		if (!isBackgroundDone() || isApplied()) {
 			return false;
 		}
 
-		if (backgroundError != null) {
-			applied = true;
-			abort(backgroundError);
+		if (getBackgroundError() != null) {
+			markApplied();
+			abort(getBackgroundError());
 			return false;
 		}
 
-		final Prediction prediction = predictions.pollLast();
-		if (prediction == null) {
+		if (ordered == null) {
+			// Each share only narrows what is left to walk as it finds something, so what it turned up is
+			// in order within itself but says nothing about the other shares. Putting them in order once
+			// here is what makes the first location storage agrees about the nearest one there is.
+			ordered = new ArrayList<Prediction>(predictions);
+			ordered.sort(Comparator.comparingLong(Prediction::distanceSqr));
+		}
+
+		if (orderedIndex >= ordered.size()) {
 			// Everything the walk turned up has been passed over, so there is nothing left to answer with
-			applied = true;
+			markApplied();
 			return false;
 		}
 
+		final Prediction prediction = ordered.get(orderedIndex++);
 		final BlockPos confirmed = confirmStructureAt(prediction.chunkPos(), prediction.structure(), prediction.pos().getY());
 		if (confirmed == null) {
 			// The chunk there was generated under settings that no longer put a structure in it. Carry on
@@ -219,21 +152,42 @@ public abstract class GridStructureSearchWorker<T extends StructurePlacement> ex
 		}
 
 		found(confirmed, prediction.structure());
-		applied = true;
+		markApplied();
 		return false;
 	}
 
-	private void advance() {
-		walker.advance();
-		coveredRadius = Math.min(SectionPos.sectionToBlockCoord(walker.getCoveredLength() * strideChunks), maxRadius);
+	@Override
+	int getSamples() {
+		int total = 0;
+		for (Shard shard : shards) {
+			total += shard.samples;
+		}
+		return total;
 	}
 
-	private int currentChunkX() {
-		return startChunkX + strideChunks * walker.getX();
+	@Override
+	protected boolean hasMoreToSample() {
+		for (Shard shard : shards) {
+			if (shard.hasMoreToSample(getEffectiveRadiusLimit())) {
+				return true;
+			}
+		}
+		return false;
 	}
 
-	private int currentChunkZ() {
-		return startChunkZ + strideChunks * walker.getZ();
+	@Override
+	protected boolean isExhausted() {
+		if (isBackground()) {
+			return isApplied();
+		}
+
+		// The band a single turn is held to says nothing about whether there is anything left to search
+		for (Shard shard : shards) {
+			if (shard.hasMoreToSample(getRadiusLimit())) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	/** The location the cell of the grid at the given chunk coordinates stands for. */
@@ -241,25 +195,130 @@ public abstract class GridStructureSearchWorker<T extends StructurePlacement> ex
 
 	/**
 	 * The radius this worker has finished searching, which is what bounds the search and what the
-	 * compass reports.
+	 * compass reports: the least of what its shares have covered, since a row none of them has reached
+	 * yet is ground none of them has searched.
 	 *
 	 * <p>Deliberately not the distance to the location sampled last. The walk covers a disc a band at
 	 * a time, and a cell of the band being walked lies anywhere on it, so bounding the search by the
 	 * location sampled last would end it as soon as the walk reached the far side of a band and leave
 	 * the near side of it unsearched.
 	 *
-	 * <p>While the walk runs on a thread of its own, the server thread reads this for the readout on
+	 * <p>While the walk runs off the server thread, the server thread reads this for the readout on
 	 * the compass and may see a band it has already left behind. That is all it is used for there:
 	 * what is left to search is answered by {@link #hasWork()} without reading any of this.
 	 */
 	@Override
 	protected int getRadius() {
-		return coveredRadius;
+		int covered = Integer.MAX_VALUE;
+		for (Shard shard : shards) {
+			covered = Math.min(covered, shard.getRadius());
+		}
+		return covered;
 	}
 
 	@Override
 	public boolean shouldLogRadius() {
 		return true;
+	}
+
+	/**
+	 * One thread's share of the walk: the rows of the grid that fall to it, and how far along them it
+	 * has got.
+	 *
+	 * <p>A share is only ever walked by one thread, so what it counts is its own and is read once the
+	 * threads are done. How far it has covered is read while it walks, for the readout on the compass,
+	 * so that is published — but only when it changes, since paying for a write every other thread has
+	 * to see at every single location is most of what a location costs to look at.
+	 */
+	private final class Shard {
+
+		private final DiscWalker walker;
+		private final int maxSamples;
+
+		private int samples;
+		private volatile int coveredLength;
+
+		private Shard(DiscWalker walker, int maxSamples) {
+			this.walker = walker;
+			this.maxSamples = maxSamples;
+		}
+
+		/** Walks until there is nothing left to look at. */
+		private void walk() {
+			while (!Thread.currentThread().isInterrupted() && hasMoreToSample(getEffectiveRadiusLimit())) {
+				predictNext();
+			}
+		}
+
+		/**
+		 * Asks chunk storage about the location this share has reached and moves on to the next one.
+		 * This is what a search does when it is not allowed a thread of its own.
+		 */
+		private void sampleNext() {
+			final ChunkPos chunkPos = candidateChunk(currentChunkX(), currentChunkZ());
+			// A cell of the grid can stand for a location past the edge of the disc being walked, so part
+			// of the outer cells lies beyond the configured radius, and beyond anything already located
+			if (isWorthSampling(chunkPos)) {
+				final Pair<BlockPos, Structure> pair = getStructureGeneratingAt(chunkPos);
+				samples++;
+				if (pair != null) {
+					found(pair.getFirst(), pair.getSecond());
+				}
+			}
+
+			advance();
+		}
+
+		/**
+		 * Works out whether world generation would put a structure at the location this share has
+		 * reached, and moves on to the next one. Touches nothing outside its own worker, which is what
+		 * lets it run off the server thread.
+		 */
+		private void predictNext() {
+			final ChunkPos chunkPos = candidateChunk(currentChunkX(), currentChunkZ());
+			if (isWorthSampling(chunkPos)) {
+				samples++;
+
+				final Pair<BlockPos, Structure> pair = predictStructureGeneratingAt(chunkPos);
+				if (pair != null) {
+					final BlockPos pos = pair.getFirst();
+					final long distanceSqr = context.distanceSqrFromStart(pos.getX(), pos.getZ());
+					predictions.add(new Prediction(chunkPos, pair.getSecond(), pos, distanceSqr));
+					// Nothing further out than this can be what this worker answers with, whichever share
+					// turned it up, so the radius they were allowed beyond that is no longer worth walking.
+					// It is not recorded as a find yet: chunk storage has the last word on that, and only
+					// the server thread may ask it.
+					setRadiusLimit(ceilSqrt(distanceSqr));
+				}
+			}
+
+			advance();
+		}
+
+		private void advance() {
+			walker.advance();
+			final int covered = walker.getCoveredLength();
+			if (covered != coveredLength) {
+				coveredLength = covered;
+			}
+		}
+
+		private int currentChunkX() {
+			return startChunkX + strideChunks * walker.getX();
+		}
+
+		private int currentChunkZ() {
+			return startChunkZ + strideChunks * walker.getZ();
+		}
+
+		private int getRadius() {
+			return Math.min(SectionPos.sectionToBlockCoord(coveredLength * strideChunks), maxRadius);
+		}
+
+		private boolean hasMoreToSample(int limit) {
+			return !finished && getRadius() < limit && samples < maxSamples;
+		}
+
 	}
 
 }

@@ -20,7 +20,7 @@ import net.minecraft.world.level.levelgen.structure.StructureCheckResult;
 import net.minecraft.world.level.levelgen.structure.StructureStart;
 import net.minecraft.world.level.levelgen.structure.placement.StructurePlacement;
 
-public abstract class StructureSearchWorker<T extends StructurePlacement> extends SearchWorker {
+public abstract class StructureSearchWorker<T extends StructurePlacement> extends BackgroundSearchWorker {
 
 	/**
 	 * How many locations one turn covers. A location that has already been answered for costs a map

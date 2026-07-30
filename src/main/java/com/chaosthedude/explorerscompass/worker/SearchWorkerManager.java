@@ -140,12 +140,13 @@ public class SearchWorkerManager implements SearchScheduler.SearchSlice {
 	}
 
 	/**
-	 * Creates the single worker a biome search takes. Where structures are split up by the placement
+	 * Creates the workers a biome search is made of. Where structures are split up by the placement
 	 * that puts them in the world, every biome of a dimension comes out of the one biome source, so
-	 * looking for several of them at once costs no more than looking for one.
+	 * looking for several of them at once costs no more than looking for one; what a biome search is
+	 * split by instead is the height being looked at. See {@link BiomeSearchWorker}.
 	 */
-	public void createBiomeWorker(SearchContext context, List<Holder<Biome>> biomes) {
-		createWorkers(context, List.<SearchWorker>of(new BiomeSearchWorker(context, biomes)));
+	public void createBiomeWorkers(SearchContext context, List<Holder<Biome>> biomes) {
+		createWorkers(context, BiomeSearchWorker.createLayers(context, biomes));
 	}
 
 	private void reset(SearchContext context) {
@@ -302,16 +303,18 @@ public class SearchWorkerManager implements SearchScheduler.SearchSlice {
 	 * what lets the workers that have not run be cut down to it.
 	 */
 	private void onCandidate(SearchWorker worker) {
-		final BlockPos pos = worker.getBestPos();
-		if (pos == null) {
+		// Read once: a worker searching on several threads has them replacing this while the server
+		// thread reads it, and reading the parts one at a time could pair a location with another
+		// location's key
+		final SearchWorker.Found found = worker.getBest();
+		if (found == null) {
 			return;
 		}
 
-		final long distanceSqr = worker.getBestDistanceSqr();
-		if (locatedPos == null || distanceSqr < locatedDistanceSqr) {
-			locatedPos = pos;
-			locatedKey = worker.getBestKey();
-			locatedDistanceSqr = distanceSqr;
+		if (locatedPos == null || found.distanceSqr() < locatedDistanceSqr) {
+			locatedPos = found.pos();
+			locatedKey = found.key();
+			locatedDistanceSqr = found.distanceSqr();
 		}
 	}
 

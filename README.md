@@ -70,13 +70,13 @@ Things worth knowing about:
   up. Raising them finds more distant targets at a higher cost.
 - `maxSearchTimePerTick` — the slice of each server tick that searching may consume, shared by every
   search running at once. Lower keeps the server responsive; higher finishes sooner.
-- `asyncBiomeSearch` — runs biome searches off the server thread, which finishes them several times
-  sooner and costs the server nothing. Safe because which biome generates somewhere follows from the
-  seed and the generator's noise alone. Turn it off if a biome-source mod turns out not to be
-  thread-safe.
-- `asyncStructureSearch` — the same for structure searches, by working out where a structure would
-  generate the way world generation decides it rather than asking chunk storage about every location
-  looked at. That question is almost all of what a structure search costs, and answering it this way
+- `asyncBiomeSearch` — runs biome searches off the server thread, shared out over as many threads as
+  searching is allowed, which finishes them several times sooner and costs the server nothing. Safe
+  because which biome generates somewhere follows from the seed and the generator's noise alone. Turn
+  it off if a biome-source mod turns out not to be thread-safe.
+- `asyncStructureSearch` — the same for structure searches, also shared out over threads, by working
+  out where a structure would generate the way world generation decides it rather than asking chunk
+  storage about every location looked at. That question is almost all of what a structure search costs, and answering it this way
   reads no part of the world. The location the search settles on is still checked against chunk
   storage before the compass points at it; where the two can differ is ground generated under
   settings that have since changed, and there the compass answers with where a structure would

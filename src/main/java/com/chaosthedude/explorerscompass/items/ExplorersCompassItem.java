@@ -265,7 +265,7 @@ public class ExplorersCompassItem extends Item {
 
 		final SearchContext context = new SearchContext(level, player, stack, pos, prevPos, isGroup, ignoreNearStart);
 		if (searchTarget == SearchTarget.BIOME) {
-			workerManager.createBiomeWorker(context, biomes);
+			workerManager.createBiomeWorkers(context, biomes);
 		} else {
 			workerManager.createStructureWorkers(context, structures);
 		}

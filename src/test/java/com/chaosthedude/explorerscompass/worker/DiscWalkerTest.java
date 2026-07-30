@@ -78,6 +78,43 @@ class DiscWalkerTest {
 		}
 	}
 
+	@Test
+	void theStripesOfAWalkShareOutEveryCellBetweenThem() {
+		final int stripes = 4;
+		final Set<String> visited = new HashSet<String>();
+
+		for (int stripe = 0; stripe < stripes; stripe++) {
+			final DiscWalker walker = new DiscWalker(stripes, stripe);
+			for (int i = 0; i < CELL_LIMIT && walker.getCoveredLength() <= CELLS; i++) {
+				final String cell = cell(walker);
+				// Each thread of a search walks one of these, so a cell two of them walk is a location
+				// sampled twice over, and one none of them walks is a location never sampled at all
+				assertTrue(visited.add(cell), "cell " + cell + " walked by more than one stripe");
+				walker.advance();
+			}
+		}
+
+		for (int x = -CELLS; x <= CELLS; x++) {
+			for (int z = -CELLS; z <= CELLS; z++) {
+				if (x * x + z * z <= CELLS * CELLS) {
+					assertTrue(visited.contains(x + "," + z), "cell " + x + "," + z + " walked by no stripe");
+				}
+			}
+		}
+	}
+
+	@Test
+	void aStripeOnlyWalksItsOwnRows() {
+		final int stripes = 3;
+		final int stripe = 2;
+		final DiscWalker walker = new DiscWalker(stripes, stripe);
+
+		for (int i = 0; i < CELL_LIMIT && walker.getCoveredLength() <= CELLS; i++) {
+			assertEquals(stripe, Math.floorMod(walker.getX(), stripes), "cell " + cell(walker) + " is not on a row of this stripe");
+			walker.advance();
+		}
+	}
+
 	private static long distanceSqr(DiscWalker walker) {
 		return (long) walker.getX() * walker.getX() + (long) walker.getZ() * walker.getZ();
 	}

@@ -40,12 +40,20 @@ public abstract class SearchWorker {
 	/** Set by the server thread to stop a search, and read by whichever thread is sampling. */
 	protected volatile boolean finished;
 
-	// The nearest location this worker has turned up so far. A worker carries on sampling after a
-	// find until it has covered as far as that location: the cells of a ring are walked row by row,
-	// so the first cell of a ring to hold something is not necessarily the nearest one on it.
-	private volatile BlockPos bestPos;
-	private volatile ResourceLocation bestKey;
-	private volatile long bestDistanceSqr;
+	/** A location a worker has turned up, and what stands there. */
+	record Found(BlockPos pos, ResourceLocation key, long distanceSqr) {
+	}
+
+	/**
+	 * The nearest location this worker has turned up so far. A worker carries on sampling after a
+	 * find until it has covered as far as that location: a cell of the band being walked lies anywhere
+	 * on it, so the first cell of a band to hold something is not necessarily the nearest one on it.
+	 *
+	 * <p>Held as one value rather than as a position, a key and a distance of its own, because a
+	 * search running on several threads has all of them reading it while one of them replaces it, and
+	 * three fields could be read as a location from one find and a key from another.
+	 */
+	private volatile Found best;
 
 	/**
 	 * How far this worker may ever search. It starts out as the configured maximum and is narrowed
@@ -157,14 +165,22 @@ public abstract class SearchWorker {
 	/**
 	 * Cuts this worker down to the given radius for good. Called when something has been located,
 	 * since anything this one turns up beyond that distance cannot be the answer.
+	 *
+	 * <p>Held against the same lock as a find, so that several threads narrowing it at once cannot
+	 * leave it wider than the nearest of what they found.
 	 */
-	void setRadiusLimit(int limit) {
+	synchronized void setRadiusLimit(int limit) {
 		radiusLimit = Math.min(radiusLimit, limit);
 	}
 
 	/** Sets how far the turn this worker is about to take searches. */
 	void setBandLimit(int limit) {
 		bandLimit = limit;
+	}
+
+	/** How far this worker may ever search, whatever the turn it is currently taking allows. */
+	protected int getRadiusLimit() {
+		return radiusLimit;
 	}
 
 	/** How far this worker may search before it has to hand back, for whichever reason. */
@@ -207,42 +223,40 @@ public abstract class SearchWorker {
 	 */
 	protected boolean isWorthSampling(int x, int z) {
 		final long distanceSqr = context.distanceSqrFromStart(x, z);
-		if (distanceSqr > (long) radiusLimit * radiusLimit) {
+		final int limit = radiusLimit;
+		if (distanceSqr > (long) limit * limit) {
 			return false;
 		}
-		return bestPos == null || distanceSqr < bestDistanceSqr;
+
+		final Found located = best;
+		return located == null || distanceSqr < located.distanceSqr();
 	}
 
 	/**
 	 * Takes note of a location this worker has turned up. It is not the answer yet: what is left of
-	 * the ring it was found on may hold a nearer one, and so may a worker searching a different
+	 * the band it was found on may hold a nearer one, and so may a worker searching a different
 	 * placement.
+	 *
+	 * <p>Reached from every thread a search is running on, and only when one of them has actually
+	 * found something, so holding a lock over it costs a search nothing and keeps two finds arriving
+	 * at once from leaving a location from one beside a key from the other.
 	 */
-	protected void found(BlockPos pos, ResourceLocation key) {
+	protected synchronized void found(BlockPos pos, ResourceLocation key) {
 		final long distanceSqr = context.distanceSqrFromStart(pos.getX(), pos.getZ());
-		if (bestPos != null && distanceSqr >= bestDistanceSqr) {
+		if (best != null && distanceSqr >= best.distanceSqr()) {
 			return;
 		}
 
-		ExplorersCompass.LOGGER.info("Search " + context.getId() + ": " + getName() + " located " + key + " with " + (shouldLogRadius() ? getRadius() + " radius, " : "") + samples + " samples");
-		bestPos = pos;
-		bestKey = key;
-		bestDistanceSqr = distanceSqr;
+		ExplorersCompass.LOGGER.info("Search " + context.getId() + ": " + getName() + " located " + key + " with " + (shouldLogRadius() ? getRadius() + " radius, " : "") + getSamples() + " samples");
+		best = new Found(pos, key, distanceSqr);
 		// Nothing further out than this can be what this worker answers with, so the radius it was
 		// allowed beyond that is no longer worth covering
 		setRadiusLimit(ceilSqrt(distanceSqr));
 	}
 
-	BlockPos getBestPos() {
-		return bestPos;
-	}
-
-	ResourceLocation getBestKey() {
-		return bestKey;
-	}
-
-	long getBestDistanceSqr() {
-		return bestDistanceSqr;
+	/** The nearest location this worker has turned up, or null when it has turned up nothing. */
+	Found getBest() {
+		return best;
 	}
 
 	int getSamples() {
@@ -251,13 +265,13 @@ public abstract class SearchWorker {
 
 	/** Notes that this worker has nothing left to search. The manager reports the outcome. */
 	void finish() {
-		final BlockPos located = bestPos;
-		ExplorersCompass.LOGGER.info("Search " + context.getId() + ": " + getName() + (located == null ? " located nothing" : " finished on " + bestKey) + " with " + (shouldLogRadius() ? getRadius() + " radius, " : "") + samples + " samples");
+		final Found located = best;
+		ExplorersCompass.LOGGER.info("Search " + context.getId() + ": " + getName() + (located == null ? " located nothing" : " finished on " + located.key()) + " with " + (shouldLogRadius() ? getRadius() + " radius, " : "") + getSamples() + " samples");
 		finished = true;
 	}
 
 	void stop() {
-		ExplorersCompass.LOGGER.info("Search " + context.getId() + ": " + getName() + " stopped with " + (shouldLogRadius() ? getRadius() + " radius, " : "") + samples + " samples");
+		ExplorersCompass.LOGGER.info("Search " + context.getId() + ": " + getName() + " stopped with " + (shouldLogRadius() ? getRadius() + " radius, " : "") + getSamples() + " samples");
 		finished = true;
 	}
 

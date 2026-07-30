@@ -1,5 +1,6 @@
 package com.chaosthedude.explorerscompass.worker;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import org.apache.commons.lang3.RandomStringUtils;
@@ -9,6 +10,8 @@ import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.items.ExplorersCompassItem;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
 
+import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -29,6 +32,12 @@ import net.minecraft.world.item.ItemStack;
  */
 public class SearchContext {
 
+	// How wide the cells the already located places are bucketed into are, in blocks, and the shift
+	// that divides by that. Wide enough that the furthest two places can be apart and still count as
+	// the same one fits inside a cell and the ones around it.
+	private static final int LOCATED_CELL_SIZE = 512;
+	private static final int LOCATED_CELL_SHIFT = 9;
+
 	private final String id = RandomStringUtils.random(8, "0123456789abcdef");
 
 	private final ServerLevel level;
@@ -41,6 +50,17 @@ public class SearchContext {
 	 * on is added to.
 	 */
 	private final List<BlockPos> prevPos;
+
+	/**
+	 * The same locations, bucketed by where they are, so that asking whether one of them is already
+	 * known walks the handful near the location asked about rather than all of them. A search asks
+	 * this for every location it samples, and there can be thousands of locations to walk.
+	 *
+	 * <p>Built once, from the locations the search started with, and read from every thread the search
+	 * runs on. The location the search settles on is added to {@link #prevPos} for the compass to
+	 * remember, but not to this: by then there is nothing left to ask.
+	 */
+	private final Long2ObjectMap<List<BlockPos>> locatedCells;
 
 	private final boolean isGroup;
 	private final boolean ignoreNearStart;
@@ -66,6 +86,17 @@ public class SearchContext {
 		this.ignoreNearStart = ignoreNearStart;
 		this.maxRadius = maxRadius;
 		this.displayCoordinates = displayCoordinates;
+
+		locatedCells = new Long2ObjectOpenHashMap<List<BlockPos>>();
+		for (BlockPos pos : prevPos) {
+			final long cell = cellKey(pos.getX() >> LOCATED_CELL_SHIFT, pos.getZ() >> LOCATED_CELL_SHIFT);
+			List<BlockPos> located = locatedCells.get(cell);
+			if (located == null) {
+				located = new ArrayList<BlockPos>();
+				locatedCells.put(cell, located);
+			}
+			located.add(pos);
+		}
 	}
 
 	/** Identifies this search in the log. */
@@ -105,9 +136,29 @@ public class SearchContext {
 			return true;
 		}
 
-		for (BlockPos prev : prevPos) {
-			if (isSameLocation(prev, pos, sameLocationDistance)) {
-				return true;
+		if (locatedCells.isEmpty()) {
+			return false;
+		}
+
+		// Only the cells the location asked about can reach into are walked. Worked out from the corners
+		// of what it reaches rather than assumed to be the cell it is in and the ones around it, so that
+		// this stays right whatever distance counts as the same location.
+		final int minCellX = (int) (((long) pos.getX() - sameLocationDistance) >> LOCATED_CELL_SHIFT);
+		final int maxCellX = (int) (((long) pos.getX() + sameLocationDistance) >> LOCATED_CELL_SHIFT);
+		final int minCellZ = (int) (((long) pos.getZ() - sameLocationDistance) >> LOCATED_CELL_SHIFT);
+		final int maxCellZ = (int) (((long) pos.getZ() + sameLocationDistance) >> LOCATED_CELL_SHIFT);
+		for (int cellX = minCellX; cellX <= maxCellX; cellX++) {
+			for (int cellZ = minCellZ; cellZ <= maxCellZ; cellZ++) {
+				final List<BlockPos> located = locatedCells.get(cellKey(cellX, cellZ));
+				if (located == null) {
+					continue;
+				}
+
+				for (BlockPos prev : located) {
+					if (isSameLocation(prev, pos, sameLocationDistance)) {
+						return true;
+					}
+				}
 			}
 		}
 
@@ -116,6 +167,10 @@ public class SearchContext {
 
 	private boolean isSameLocation(BlockPos other, BlockPos pos, int distance) {
 		return StructureUtils.getHorizontalDistanceSqrToLocation(other, pos.getX(), pos.getZ()) <= (long) distance * distance;
+	}
+
+	private static long cellKey(int cellX, int cellZ) {
+		return ((long) cellX << 32) | (cellZ & 0xFFFFFFFFL);
 	}
 
 	/**

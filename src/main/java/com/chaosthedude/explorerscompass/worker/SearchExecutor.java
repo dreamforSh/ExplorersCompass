@@ -36,6 +36,14 @@ public class SearchExecutor {
 	private SearchExecutor() {
 	}
 
+	/**
+	 * How many searches can run here at once. A search that can be split into pieces splits itself
+	 * into this many: fewer would leave threads idle, and more would only queue up behind them.
+	 */
+	public static int getThreadCount() {
+		return MAX_THREADS;
+	}
+
 	/** Runs a search on one of these threads, waiting for a free one when they are all busy. */
 	static synchronized void execute(Runnable search) {
 		if (executor == null) {

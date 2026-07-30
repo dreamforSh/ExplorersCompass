@@ -14,8 +14,18 @@ package com.chaosthedude.explorerscompass.worker;
  * already walked to reach it. It also visits the corners at all: a square of side twice the radius
  * holds about a quarter more cells than the disc it encloses, and every one of them is outside the
  * radius the search was given.
+ *
+ * <p>A walk can be given one stripe of the rows to walk rather than all of them, which is how a
+ * search spreads itself over several threads: as many walks as there are threads, each taking every
+ * so many rows. Skipping a row costs one division, where skipping its cells one at a time would cost
+ * as much as walking them, and the rows of a band alternate between the threads often enough that
+ * none of them ends up with the long ones.
  */
 public class DiscWalker {
+
+	// Which rows this walk takes, out of how many the rows are shared between
+	private final int stripes;
+	private final int stripe;
 
 	/** Which band is being walked, in cells. */
 	private int band;
@@ -32,9 +42,21 @@ public class DiscWalker {
 	private int pendingRunStart;
 	private int pendingRunEnd;
 
+	/** A walk over every cell. The centre is the whole of the first band, so it starts there. */
 	public DiscWalker() {
-		// The centre is the whole of the first band, so this starts where the search started
-		beginRow();
+		this(1, 0);
+	}
+
+	/**
+	 * A walk over one stripe of the rows: those whose distance east of the centre leaves the given
+	 * remainder when divided by the number of stripes.
+	 */
+	public DiscWalker(int stripes, int stripe) {
+		this.stripes = stripes;
+		this.stripe = stripe;
+		// One before the first row, which is where seeking the next one starts from
+		x = -1;
+		seekRow();
 	}
 
 	/** How many cells east of the centre the current cell lies, negative for west of it. */
@@ -48,9 +70,12 @@ public class DiscWalker {
 	}
 
 	/**
-	 * How far out from the centre has been walked all the way round, in cells. Every cell nearer than
-	 * this has been visited, and every cell still to come is at least this far out, so a search that
-	 * has covered this far can no longer improve on anything it found within it.
+	 * How far out from the centre this walk has covered all the way round, in cells. Every cell of it
+	 * nearer than this has been visited, and every cell still to come is at least this far out, so a
+	 * search that has covered this far can no longer improve on anything it found within it.
+	 *
+	 * <p>A walk over one stripe of the rows answers for its own rows alone, so a search made of
+	 * several of them has covered as far as the least of what they answer.
 	 */
 	public int getCoveredLength() {
 		return band;
@@ -70,15 +95,25 @@ public class DiscWalker {
 			return;
 		}
 
-		// Rows that hold no cell of this band are stepped over rather than visited: a band that no
-		// longer encloses the centre has none along the rows nearest it that reach far enough out
+		seekRow();
+	}
+
+	/**
+	 * Moves to the first cell of the next row this walk takes that holds any, growing to the next band
+	 * once the rows run out.
+	 *
+	 * <p>Rows are stepped over rather than visited both when they belong to another stripe and when
+	 * they hold no cell of this band, which the rows nearest the centre no longer do once the band has
+	 * grown past them.
+	 */
+	private void seekRow() {
 		while (true) {
 			x++;
 			if (x > band) {
 				band++;
 				x = -band;
 			}
-			if (beginRow()) {
+			if (Math.floorMod(x, stripes) == stripe && beginRow()) {
 				return;
 			}
 		}
