@@ -106,6 +106,19 @@ public abstract class SearchWorker {
 		return true;
 	}
 
+	/**
+	 * How many locations this worker samples before the turn passes on.
+	 *
+	 * <p>Handing the turn back costs something of its own: the clock the budget is measured against is
+	 * read twice, the settings are consulted, and every search on the server is looked over. Paid for
+	 * every single location, that is a large part of what a cheap sample costs at all. It is only
+	 * worth batching so far, though — nothing else on the server thread runs until the batch is done,
+	 * so a worker answers with a count its most expensive sample still fits a batch of inside a tick.
+	 */
+	int getSamplesPerTurn() {
+		return 1;
+	}
+
 	/** Whether there is anything left for this worker to sample under the limits it currently has. */
 	boolean hasWork() {
 		return hasMoreToSample();

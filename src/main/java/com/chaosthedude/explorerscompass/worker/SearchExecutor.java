@@ -10,11 +10,12 @@ import com.chaosthedude.explorerscompass.ExplorersCompass;
 /**
  * The threads searches run on when they are allowed off the server thread.
  *
- * <p>Only a biome search ever gets here. Which biome generates somewhere follows from the world
- * seed and the generator's noise alone, so sampling it reads nothing the server is writing to, and
- * the game does the same from its own worldgen threads. A structure search cannot: answering
- * whether one is present reads chunks from storage and may run structure generation, neither of
- * which is safe anywhere but the server thread.
+ * <p>What runs here is the part of a search that follows from the world seed and the generator's
+ * noise alone: which biome generates somewhere, and where world generation would put a structure.
+ * Neither reads any part of the world the server is writing to, and the game works both of them out
+ * from its own worldgen threads while generating chunks. What never runs here is asking chunk
+ * storage what a chunk already holds, which only the server thread may do — so a structure search
+ * still comes back to it for the location it settles on.
  *
  * <p>The threads are created as they are needed and dropped again once nothing has used them for a
  * while, so a server on which nobody is searching keeps none of them around.
@@ -22,8 +23,10 @@ import com.chaosthedude.explorerscompass.ExplorersCompass;
 public class SearchExecutor {
 
 	// Enough for a handful of searches at once without them and the server itself ending up fighting
-	// over the machine
-	private static final int MAX_THREADS = Math.max(1, Math.min(4, Runtime.getRuntime().availableProcessors() / 4));
+	// over the machine. Never fewer than two: a search for several kinds of structure at once is split
+	// into a walk per placement, and one player's search waiting on another's would read as a compass
+	// that has stopped doing anything.
+	private static final int MAX_THREADS = Math.max(2, Math.min(4, Runtime.getRuntime().availableProcessors() / 2));
 	private static final long KEEP_ALIVE_SECONDS = 60L;
 
 	private static final AtomicInteger threadCount = new AtomicInteger();

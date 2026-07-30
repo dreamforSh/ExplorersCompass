@@ -43,6 +43,11 @@ import net.minecraft.world.level.levelgen.structure.placement.StructurePlacement
  * search whose first placement holds nothing at all would pay the whole radius for it before the
  * one with the answer had sampled anything.
  *
+ * <p>A worker searching on a thread of its own has no need of any of that: it is not waiting for a
+ * turn to make progress, and the ones beside it are not waiting for it. Those hand the turn back
+ * until their thread is done, so the turn goes round them until each has been started, and then
+ * round them again as each finishes and has something to report.
+ *
  * <p>The manager is what the server thread schedules, not the workers: it is registered with
  * {@link SearchScheduler} as one search, and hands the turn on internally. A worker therefore only
  * ever runs while its search holds the turn, and one belonging to a search that has been stopped or
@@ -187,6 +192,11 @@ public class SearchWorkerManager implements SearchScheduler.SearchSlice {
 			return false;
 		}
 
+		// Anything further out than what has already been located cannot be the answer, whichever
+		// worker turned it up. Handed to all of them rather than only to whoever takes the turn next,
+		// since a worker searching on a thread of its own is not waiting for one.
+		applyLocatedLimit();
+
 		// Every pass either hands the turn to a worker, drops one that has finished, or moves one that
 		// cannot use the turn to the back of the queue. Moving them all round widens the band, which
 		// gives the worker that comes back to the front something to do, so this always ends; the
@@ -194,6 +204,12 @@ public class SearchWorkerManager implements SearchScheduler.SearchSlice {
 		int notReady = 0;
 		for (int pass = workers.size() + 1; pass > 0 && !workers.isEmpty(); pass--) {
 			final SearchWorker worker = workers.get(0);
+			// Both of these come before it is asked whether it can sample, since a worker searching on a
+			// thread of its own answers no for as long as it runs: starting that thread is what putting it
+			// to work does, and how far it has got is the only sign the compass has that anything is
+			// happening at all
+			worker.begin();
+			reportRadius(worker.getRadius());
 
 			if (!worker.isReady()) {
 				// Waiting for something of its own, such as the positions a placement is still computing.
@@ -217,15 +233,42 @@ public class SearchWorkerManager implements SearchScheduler.SearchSlice {
 				continue;
 			}
 
-			worker.begin();
-			reportRadius(worker.getRadius());
-			return worker.doWork();
+			return sampleTurn(worker);
 		}
 
 		if (workers.isEmpty()) {
 			report();
 		}
 		return false;
+	}
+
+	/**
+	 * Runs the worker holding the turn for as many locations as one of its turns covers, and takes
+	 * note of whatever it turned up. Returns whether it could have carried straight on.
+	 *
+	 * <p>Sampling several locations per turn is what keeps what it costs to hand the turn out from
+	 * being most of what a cheap location costs. See {@link SearchWorker#getSamplesPerTurn}.
+	 */
+	private boolean sampleTurn(SearchWorker worker) {
+		boolean again = worker.doWork();
+		for (int sample = worker.getSamplesPerTurn(); again && sample > 1; sample--) {
+			again = worker.doWork();
+		}
+
+		onCandidate(worker);
+		return again;
+	}
+
+	/** Cuts every worker of the search down to the nearest location any of them has located. */
+	private void applyLocatedLimit() {
+		if (locatedPos == null) {
+			return;
+		}
+
+		final int limit = SearchWorker.ceilSqrt(locatedDistanceSqr);
+		for (SearchWorker worker : workers) {
+			worker.setRadiusLimit(limit);
+		}
 	}
 
 	/**
@@ -273,15 +316,11 @@ public class SearchWorkerManager implements SearchScheduler.SearchSlice {
 	}
 
 	/**
-	 * Sets how far the worker about to take its turn may search: never past what has already been
-	 * located, and no further than the band the search has reached. Reaching the front of the queue
-	 * having already covered the current band means every worker has, so the band widens.
+	 * Sets how far the worker about to take its turn may search: no further than the band the search
+	 * has reached. Reaching the front of the queue having already covered the current band means every
+	 * worker has, so the band widens.
 	 */
 	private void applyLimits(SearchWorker next) {
-		if (locatedPos != null) {
-			// Anything further out than what has already been located cannot be the answer
-			next.setRadiusLimit(SearchWorker.ceilSqrt(locatedDistanceSqr));
-		}
 		while (bandRadius < maxRadius && next.getRadius() >= bandRadius) {
 			bandRadius = Math.min(bandRadius * 2, maxRadius);
 		}

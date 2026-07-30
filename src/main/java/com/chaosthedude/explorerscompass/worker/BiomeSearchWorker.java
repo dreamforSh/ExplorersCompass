@@ -48,7 +48,7 @@ public class BiomeSearchWorker extends SearchWorker {
 	 * of the tick on passing it round than on the search; a batch this size is still a small part of
 	 * the time one turn is given.
 	 */
-	private static final int SYNC_SAMPLE_BATCH = 64;
+	private static final int SAMPLES_PER_TURN = 64;
 
 	private final BiomeSource biomeSource;
 	private final Climate.Sampler sampler;
@@ -61,7 +61,7 @@ public class BiomeSearchWorker extends SearchWorker {
 	// search started at first
 	private final int[] depthQuartYLevels;
 	private final int depthInterval;
-	private final RingWalker ring = new RingWalker();
+	private final DiscWalker walker = new DiscWalker();
 
 	/** Whether the sampling is running on a thread of its own. Set before either side starts. */
 	private volatile boolean background;
@@ -150,15 +150,17 @@ public class BiomeSearchWorker extends SearchWorker {
 	}
 
 	@Override
+	int getSamplesPerTurn() {
+		return SAMPLES_PER_TURN;
+	}
+
+	@Override
 	protected boolean doSample() {
 		if (background) {
 			return applyBackgroundResult();
 		}
 
-		for (int i = 0; i < SYNC_SAMPLE_BATCH && hasMoreToSample(); i++) {
-			sampleNext();
-		}
-
+		sampleNext();
 		return hasWork();
 	}
 
@@ -185,10 +187,10 @@ public class BiomeSearchWorker extends SearchWorker {
 	 * server thread.
 	 */
 	private void sampleNext() {
-		final int sampleX = startPos.getX() + spacing * ring.getX();
-		final int sampleZ = startPos.getZ() + spacing * ring.getZ();
+		final int sampleX = startPos.getX() + spacing * walker.getX();
+		final int sampleZ = startPos.getZ() + spacing * walker.getZ();
 
-		// The corners of a ring reach past its edges, so part of the outer rings lies beyond the
+		// The walk covers a disc a band at a time, so part of the band being walked lies beyond the
 		// configured radius, and beyond anything already located
 		if (isWorthSampling(sampleX, sampleZ)) {
 			final Pair<BlockPos, ResourceLocation> pair = getTargetBiomeAt(sampleX, sampleZ, isDepthSampleLocation());
@@ -197,8 +199,8 @@ public class BiomeSearchWorker extends SearchWorker {
 			}
 		}
 
-		ring.advance();
-		coveredRadius = Math.min(ring.getCoveredLength() * spacing, maxRadius);
+		walker.advance();
+		coveredRadius = Math.min(walker.getCoveredLength() * spacing, maxRadius);
 	}
 
 	/**
@@ -262,7 +264,7 @@ public class BiomeSearchWorker extends SearchWorker {
 	 * with the cave.
 	 */
 	private boolean isDepthSampleLocation() {
-		return depthQuartYLevels.length > 0 && Math.floorMod(ring.getX(), depthInterval) == 0 && Math.floorMod(ring.getZ(), depthInterval) == 0;
+		return depthQuartYLevels.length > 0 && Math.floorMod(walker.getX(), depthInterval) == 0 && Math.floorMod(walker.getZ(), depthInterval) == 0;
 	}
 
 	/**
@@ -299,11 +301,11 @@ public class BiomeSearchWorker extends SearchWorker {
 
 	/**
 	 * The radius this worker has finished searching. Like the search for a randomly spread structure
-	 * this is the ring that has been walked all the way around rather than the location sampled
-	 * last, since the cells of a ring are walked row by row and the first of them is a corner.
+	 * this is the band that has been walked all the way round rather than the location sampled last,
+	 * since a location of the band being walked lies anywhere on it.
 	 *
 	 * <p>While the search runs on a thread of its own, the server thread reads this for the readout
-	 * on the compass and may see a ring it has already left behind. That is all it is used for
+	 * on the compass and may see a band it has already left behind. That is all it is used for
 	 * there: what is left to search is answered by {@link #hasWork()} without reading any of this,
 	 * and the value the search ends on is read only once it has published that it finished.
 	 */
