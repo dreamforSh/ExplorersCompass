@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import com.chaosthedude.explorerscompass.ExplorersCompass;
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.items.ExplorersCompassItem;
 import com.mojang.datafixers.util.Pair;
@@ -70,7 +71,6 @@ public class BiomeSearchWorker extends BackgroundSearchWorker {
 
 	private final String name;
 	private final BiomeSource biomeSource;
-	private final Climate.Sampler sampler;
 	// The biomes being searched for that this dimension can actually produce, against their keys
 	private final Map<Biome, ResourceLocation> targets;
 	private final int spacing;
@@ -125,8 +125,15 @@ public class BiomeSearchWorker extends BackgroundSearchWorker {
 		this.atSearchHeight = atSearchHeight;
 
 		biomeSource = level.getChunkSource().getGenerator().getBiomeSource();
-		sampler = level.getChunkSource().randomState().sampler();
 		async = ConfigHandler.GENERAL.asyncBiomeSearch.get();
+
+		// Only worth anything to a layer that asks about several heights of the same column, and only
+		// when this world's climate really does stay the same down one
+		final Climate.Sampler worldSampler = level.getChunkSource().randomState().sampler();
+		final boolean cacheColumns = quartYLevels.length > 1 && ColumnClimateSampler.climateIsSameDownAColumn(worldSampler, level, startPos);
+		if (quartYLevels.length > 1 && !cacheColumns) {
+			ExplorersCompass.LOGGER.info("Search " + context.getId() + ": this world's climate changes with height, so " + name + " will sample every height in full");
+		}
 
 		// As many shares as there are threads to walk them: fewer would leave threads idle, and more
 		// would only queue up behind each other. On the server thread there is one of everything.
@@ -134,7 +141,9 @@ public class BiomeSearchWorker extends BackgroundSearchWorker {
 		final int shardSamples = (maxSamples + shardCount - 1) / shardCount;
 		shards = new Shard[shardCount];
 		for (int i = 0; i < shardCount; i++) {
-			shards[i] = new Shard(new DiscWalker(shardCount, i), shardSamples);
+			// A cache holds one column, so each share needs one of its own; without one they can all
+			// read the same sampler, which is what the game itself does from its worldgen threads
+			shards[i] = new Shard(new DiscWalker(shardCount, i), shardSamples, cacheColumns ? ColumnClimateSampler.cachedByColumn(worldSampler) : worldSampler);
 		}
 
 		finished = targets.isEmpty();
@@ -230,7 +239,7 @@ public class BiomeSearchWorker extends BackgroundSearchWorker {
 		final int quartZ = QuartPos.fromBlock(z);
 
 		for (int quartY : quartYLevels) {
-			final Holder<Biome> biome = biomeSource.getNoiseBiome(quartX, quartY, quartZ, sampler);
+			final Holder<Biome> biome = biomeSource.getNoiseBiome(quartX, quartY, quartZ, shard.sampler);
 			shard.samples++;
 			final ResourceLocation key = targets.get(biome.value());
 			if (key != null) {
@@ -346,12 +355,16 @@ public class BiomeSearchWorker extends BackgroundSearchWorker {
 		private final DiscWalker walker;
 		private final int maxSamples;
 
+		/** This share's own view of the climate, which may be one that remembers a column. */
+		private final Climate.Sampler sampler;
+
 		private int samples;
 		private volatile int coveredLength;
 
-		private Shard(DiscWalker walker, int maxSamples) {
+		private Shard(DiscWalker walker, int maxSamples, Climate.Sampler sampler) {
 			this.walker = walker;
 			this.maxSamples = maxSamples;
+			this.sampler = sampler;
 		}
 
 		/** Samples until there is nothing left to look at. */

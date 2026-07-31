@@ -2,5 +2,8 @@ pluginManagement {
     repositories {
         gradlePluginPortal()
         maven { url = 'https://maven.minecraftforge.net/' }
+        // MixinGradle, which generates the reference map a mixin needs to find its targets in a
+        // production build, where Minecraft's members are named differently than they are here
+        maven { url = 'https://repo.spongepowered.org/repository/maven-public/' }
     }
 }

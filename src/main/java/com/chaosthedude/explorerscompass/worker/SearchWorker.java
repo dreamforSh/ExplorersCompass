@@ -266,7 +266,10 @@ public abstract class SearchWorker {
 	/** Notes that this worker has nothing left to search. The manager reports the outcome. */
 	void finish() {
 		final Found located = best;
-		ExplorersCompass.LOGGER.info("Search " + context.getId() + ": " + getName() + (located == null ? " located nothing" : " finished on " + located.key()) + " with " + (shouldLogRadius() ? getRadius() + " radius, " : "") + getSamples() + " samples");
+		// Giving up on the samples rather than on the radius means the search stopped short of what it
+		// was asked for, which the radius it reports is the only other sign of
+		final boolean outOfSamples = located == null && getSamples() >= maxSamples && getRadius() < maxRadius;
+		ExplorersCompass.LOGGER.info("Search " + context.getId() + ": " + getName() + (located == null ? " located nothing" : " finished on " + located.key()) + " with " + (shouldLogRadius() ? getRadius() + " radius, " : "") + getSamples() + " samples" + (outOfSamples ? ", having run out of the samples it was allowed before it reached the " + maxRadius + " it was given" : ""));
 		finished = true;
 	}
 

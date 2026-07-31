@@ -132,6 +132,13 @@ public class SearchWorkerManager implements SearchScheduler.SearchSlice {
 			} else if (placement instanceof RandomSpreadStructurePlacement) {
 				created.add(new RandomSpreadSearchWorker(context, (RandomSpreadStructurePlacement) placement, entry.getValue()));
 			} else {
+				// Nothing is known about the shape of a placement of this kind, and stepping over a chunk
+				// that might hold a structure would quietly fail to find it, so it has to be walked a
+				// chunk at a time — which covers a thousandth of the ground per location looked at that a
+				// placement with a grid of its own does, and runs out of the samples it is allowed long
+				// before it reaches the configured radius. Worth saying out loud, since only a mod adding
+				// a placement type of its own can put a search on this path.
+				ExplorersCompass.LOGGER.info("Search " + context.getId() + ": " + placement.getClass().getName() + " is a kind of placement this mod knows no shortcut for, so it will be searched a chunk at a time and will not reach as far as the configured radius");
 				created.add(new GenericSearchWorker(context, placement, entry.getValue()));
 			}
 		}

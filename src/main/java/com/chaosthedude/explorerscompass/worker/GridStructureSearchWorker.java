@@ -245,8 +245,16 @@ public abstract class GridStructureSearchWorker<T extends StructurePlacement> ex
 
 		/** Walks until there is nothing left to look at. */
 		private void walk() {
-			while (!Thread.currentThread().isInterrupted() && hasMoreToSample(getEffectiveRadiusLimit())) {
-				predictNext();
+			// Held only for as long as this thread is walking: what it holds is worked out for the world
+			// this search is in, and a thread that went on holding it after the walk would carry it into
+			// whatever it did next
+			TerrainHeightCache.start();
+			try {
+				while (!Thread.currentThread().isInterrupted() && hasMoreToSample(getEffectiveRadiusLimit())) {
+					predictNext();
+				}
+			} finally {
+				TerrainHeightCache.stop();
 			}
 		}
 
@@ -278,6 +286,9 @@ public abstract class GridStructureSearchWorker<T extends StructurePlacement> ex
 			final ChunkPos chunkPos = candidateChunk(currentChunkX(), currentChunkZ());
 			if (isWorthSampling(chunkPos)) {
 				samples++;
+				// The structures sharing this placement are about to be asked about this one location, and
+				// each of them works out how high the ground is at the same few columns of it
+				TerrainHeightCache.nextLocation();
 
 				final Pair<BlockPos, Structure> pair = predictStructureGeneratingAt(chunkPos);
 				if (pair != null) {
