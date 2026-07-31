@@ -156,7 +156,15 @@ public class ExplorersCompassItem extends Item {
 	 * is dropped and the search starts over from the closest one again.
 	 */
 	public void searchForNext(Level level, Player player, BlockPos pos, ItemStack stack) {
-		if (!(level instanceof ServerLevel) || ConfigHandler.GENERAL.maxNextSearches.get() <= 0 || SearchService.isOnCooldown(player)) {
+		if (!(level instanceof ServerLevel) || ConfigHandler.GENERAL.maxNextSearches.get() <= 0) {
+			return;
+		}
+
+		// Every way of refusing this leaves the compass pointing exactly where it already was, which
+		// reads as a search that ran and came back with the same place. Saying which of them it was is
+		// the difference between that and knowing no search ran at all.
+		if (SearchService.isOnCooldown(player)) {
+			ExplorersCompass.LOGGER.info("Ignoring a search for a further instance from " + player.getName().getString() + ": another search was started less than " + ConfigHandler.GENERAL.searchRequestCooldownMillis.get() + "ms ago");
 			return;
 		}
 
@@ -164,11 +172,13 @@ public class ExplorersCompassItem extends Item {
 		SearchTarget searchTarget = getSearchTarget(stack);
 		ResourceLocation targetKey = getTargetKey(stack);
 		if (targetKey == null || getState(stack) != CompassState.FOUND) {
+			ExplorersCompass.LOGGER.info("Ignoring a search for a further instance from " + player.getName().getString() + ": the compass has not located anything to look past");
 			return;
 		}
 
 		List<BlockPos> prevPos = getPrevPos(stack);
 		if (prevPos.size() >= ConfigHandler.GENERAL.maxNextSearches.get()) {
+			ExplorersCompass.LOGGER.info("Forgetting the " + prevPos.size() + " locations this compass had collected: it has been asked for a further instance as many times as it is allowed, so the next search starts over from the closest one again");
 			prevPos.clear();
 		}
 

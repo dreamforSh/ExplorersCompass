@@ -55,9 +55,15 @@ public class BiomeSearchWorker extends BackgroundSearchWorker {
 
 	/**
 	 * How far a location has to be from an already located one to count as a different patch of the
-	 * same biome. A biome fills a region rather than sitting at a point, so the two chunks that tell
-	 * two structures apart would have a search for a further instance answering with the next sample
-	 * along, still inside the biome it was told to look past.
+	 * same biome, before the region that was found is taken into account at all. A biome fills a
+	 * region rather than sitting at a point, so the two chunks that tell two structures apart would
+	 * have a search for a further instance answering with the next sample along, still inside the
+	 * biome it was told to look past.
+	 *
+	 * <p>What actually passes over a biome already found is {@link LocatedBiomePatches}, which walks
+	 * the region out to where the biome ends. This is what is left when that cannot: a region larger
+	 * than it may cover, or a location that no longer samples as the biome it was found as. Keeping
+	 * it means such a search is no worse than it was before the regions were walked at all.
 	 */
 	private static final int SAME_BIOME_DISTANCE = 512;
 
@@ -86,6 +92,13 @@ public class BiomeSearchWorker extends BackgroundSearchWorker {
 	private final Shard[] shards;
 
 	/**
+	 * The regions earlier searches already answered with, which this layer passes over. Shared with
+	 * the other layer of the same search: which ground has already been answered for is the search's
+	 * rather than one layer's, and working it out twice would only cost twice as much.
+	 */
+	private final LocatedBiomePatches locatedPatches;
+
+	/**
 	 * The workers a biome search is made of. See the note on this class for what each of them covers
 	 * and why they are kept apart.
 	 */
@@ -107,15 +120,24 @@ public class BiomeSearchWorker extends BackgroundSearchWorker {
 		final long depthWeight = depthQuartYLevels.length;
 		final int surfaceSamples = (int) (maxSamples * surfaceWeight / (surfaceWeight + depthWeight));
 
+		// Built on the finer of the two grids, which the coarser one steps along by a whole number of
+		// samples from the same place, so a location either layer looks at falls on it
+		final BiomeSource biomeSource = level.getChunkSource().getGenerator().getBiomeSource();
+		final Climate.Sampler sampler = level.getChunkSource().randomState().sampler();
+		final LocatedBiomePatches locatedPatches = new LocatedBiomePatches(context,
+				(blockX, blockZ, quartY) -> targets.get(biomeSource.getNoiseBiome(QuartPos.fromBlock(blockX), quartY, QuartPos.fromBlock(blockZ), sampler).value()) != null,
+				spacing, surfaceQuartY, QuartPos.fromBlock(level.getMinBuildHeight()),
+				QuartPos.fromBlock(level.getMaxBuildHeight() - 1));
+
 		final List<SearchWorker> layers = new ArrayList<SearchWorker>();
-		layers.add(new BiomeSearchWorker(context, "SurfaceBiomeSearchWorker", targets, spacing, new int[] { surfaceQuartY }, true, surfaceSamples));
+		layers.add(new BiomeSearchWorker(context, "SurfaceBiomeSearchWorker", targets, spacing, new int[] { surfaceQuartY }, true, surfaceSamples, locatedPatches));
 		if (depthQuartYLevels.length > 0) {
-			layers.add(new BiomeSearchWorker(context, "DepthBiomeSearchWorker", targets, spacing * depthInterval, depthQuartYLevels, false, maxSamples - surfaceSamples));
+			layers.add(new BiomeSearchWorker(context, "DepthBiomeSearchWorker", targets, spacing * depthInterval, depthQuartYLevels, false, maxSamples - surfaceSamples, locatedPatches));
 		}
 		return layers;
 	}
 
-	private BiomeSearchWorker(SearchContext context, String name, Map<Biome, ResourceLocation> targets, int spacing, int[] quartYLevels, boolean atSearchHeight, int maxSamples) {
+	private BiomeSearchWorker(SearchContext context, String name, Map<Biome, ResourceLocation> targets, int spacing, int[] quartYLevels, boolean atSearchHeight, int maxSamples, LocatedBiomePatches locatedPatches) {
 		super(context, maxSamples);
 
 		this.name = name;
@@ -123,6 +145,7 @@ public class BiomeSearchWorker extends BackgroundSearchWorker {
 		this.spacing = spacing;
 		this.quartYLevels = quartYLevels;
 		this.atSearchHeight = atSearchHeight;
+		this.locatedPatches = locatedPatches;
 
 		biomeSource = level.getChunkSource().getGenerator().getBiomeSource();
 		async = ConfigHandler.GENERAL.asyncBiomeSearch.get();
@@ -158,7 +181,13 @@ public class BiomeSearchWorker extends BackgroundSearchWorker {
 	protected List<Runnable> createBackgroundTasks() {
 		final List<Runnable> tasks = new ArrayList<Runnable>(shards.length);
 		for (Shard shard : shards) {
-			tasks.add(shard::walk);
+			// Which regions this search is to pass over has to be known before any of it is walked, and
+			// is worked out by whichever thread gets here first; the rest wait for it rather than each
+			// working out the same thing
+			tasks.add(() -> {
+				locatedPatches.build();
+				shard.walk();
+			});
 		}
 		return tasks;
 	}
@@ -172,6 +201,13 @@ public class BiomeSearchWorker extends BackgroundSearchWorker {
 	protected boolean doSample() {
 		if (isBackground()) {
 			return applyBackgroundResult();
+		}
+
+		// Where the regions already found end has to be known before anything is answered for, so a
+		// search without threads of its own spends its first turns working that out
+		if (!locatedPatches.isBuilt()) {
+			locatedPatches.advance(LocatedBiomePatches.CELLS_PER_TURN);
+			return hasWork();
 		}
 
 		// On the server thread there is only ever the one share to walk
@@ -309,6 +345,16 @@ public class BiomeSearchWorker extends BackgroundSearchWorker {
 	@Override
 	protected int getSameLocationDistance() {
 		return SAME_BIOME_DISTANCE;
+	}
+
+	/**
+	 * Whether a location is one an earlier search already answered for. Unlike a structure that is
+	 * passed over by how near it lies, a biome is passed over by the region it belongs to: anywhere in
+	 * one already found is the same find, however far across it the search has walked.
+	 */
+	@Override
+	protected boolean shouldIgnore(BlockPos pos) {
+		return super.shouldIgnore(pos) || locatedPatches.contains(pos.getX(), pos.getZ());
 	}
 
 	/**

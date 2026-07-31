@@ -1,6 +1,7 @@
 package com.chaosthedude.explorerscompass.worker;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import org.apache.commons.lang3.RandomStringUtils;
@@ -110,6 +111,14 @@ public class SearchContext {
 
 	public BlockPos getStartPos() {
 		return startPos;
+	}
+
+	/**
+	 * The locations earlier searches already answered with, which this one passes over. Read when a
+	 * search is being set up, before it has anything of its own to add to them.
+	 */
+	public List<BlockPos> getAlreadyLocated() {
+		return Collections.unmodifiableList(prevPos);
 	}
 
 	public int getMaxRadius() {

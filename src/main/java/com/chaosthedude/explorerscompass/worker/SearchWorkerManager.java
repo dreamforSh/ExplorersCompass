@@ -181,6 +181,14 @@ public class SearchWorkerManager implements SearchScheduler.SearchSlice {
 		// one worker simply runs it to the end
 		bandRadius = workers.size() > 1 ? Math.min(INITIAL_BAND_RADIUS, maxRadius) : maxRadius;
 
+		// What a search for a further instance is passing over, which is the one thing that tells such
+		// a search apart from a fresh one and the first thing to know when it answers with somewhere it
+		// was meant to look past
+		final int alreadyLocated = context.getAlreadyLocated().size();
+		if (alreadyLocated > 0) {
+			ExplorersCompass.LOGGER.info("Search " + context.getId() + ": passing over " + alreadyLocated + " location(s) earlier searches already answered with");
+		}
+
 		SearchScheduler.add(this);
 		return true;
 	}
@@ -356,6 +364,7 @@ public class SearchWorkerManager implements SearchScheduler.SearchSlice {
 	/** Hands the outcome of the whole search to the compass. */
 	private void report() {
 		if (locatedPos != null) {
+			ExplorersCompass.LOGGER.info("Search " + context.getId() + ": answering with " + locatedKey + " at " + locatedPos.getX() + ", " + locatedPos.getZ() + " after " + samples + " samples");
 			context.reportLocated(locatedPos, locatedKey, samples);
 		} else {
 			context.reportNotFound(radius, samples);
