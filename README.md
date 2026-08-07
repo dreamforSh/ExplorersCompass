@@ -40,7 +40,10 @@ alone are what the upstream mod covers; biomes are its sister mod,
   dimension or source mod.
 - See what a structure looks like before spending a search on it: the server assembles it the way
   world generation would, without placing any of it anywhere, and the compass draws it as a model
-  you can turn, zoom and cut layers off to look inside.
+  you can turn, zoom and cut layers off to look inside. It is one cell to one block: what you see is
+  the structure at its own size, not a sketch of it. Small ones are drawn from the blocks' own
+  models, chests and beds and banners included; large ones are drawn as coloured blocks instead, at
+  the same size, so that a mansion or a stronghold can be looked over rather than waited on.
 
 **After a search**
 
@@ -90,7 +93,8 @@ Things worth knowing about:
 - `allowStructurePreview`, `structurePreviewResolution`, `structurePreviewMaxBlocks` — whether players
   may see what a structure looks like, how finely it is shown, and how much of it is drawn. Each
   structure is assembled once and then kept for as long as the server runs, so a preview costs
-  nothing to open again.
+  nothing to open again. `structurePreviewDetailLimit`, client side, is where a preview stops being
+  drawn from real blocks and starts being drawn as coloured ones.
 - `showDirectionBar`, `directionBarWidth`, `directionBarSpan` — the horizon strip. Pair a wide strip
   with a large span to have the whole horizon on screen at once.
 - `overlayBackground`, `guiHeaderBackground`, `guiSidebarBackground`, `guiStatusBarBackground` — each

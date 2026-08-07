@@ -72,6 +72,8 @@
     "string.explorerscompass.previewPieces": "Piezas",
     "string.explorerscompass.previewScale": "Escala",
     "string.explorerscompass.previewCell": "%s bloques por celda",
+    "string.explorerscompass.previewComponents": "Componentes",
+    "string.explorerscompass.previewSimplified": "Simplificado",
     "string.explorerscompass.previewCutaway": "Mostrando %1$s de %2$s capas",
     "string.explorerscompass.previewOutlineOnly": "No se pudo leer nada de ella, así que solo se muestra la forma de sus piezas",
     "string.explorerscompass.previewPartialOutline": "%s piezas solo pudieron mostrarse como contorno",

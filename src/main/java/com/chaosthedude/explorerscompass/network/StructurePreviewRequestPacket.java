@@ -70,9 +70,15 @@ public class StructurePreviewRequestPacket {
 		ctx.get().setPacketHandled(true);
 	}
 
-	/** Answers the player, with nothing when there is nothing to show, so no request goes unanswered. */
+	/**
+	 * Answers the player, with nothing when there is nothing to show, so no request goes unanswered.
+	 * A preview shown one cell to one block is larger than a single packet may be, so it goes out as
+	 * the run of packets that carries it.
+	 */
 	private void answer(ServerPlayer player, StructurePreview preview) {
-		ExplorersCompass.network.sendTo(new StructurePreviewPacket(structureKey, preview), player.connection.getConnection(), NetworkDirection.PLAY_TO_CLIENT);
+		for (StructurePreviewPacket packet : StructurePreviewPacket.createFor(structureKey, preview)) {
+			ExplorersCompass.network.sendTo(packet, player.connection.getConnection(), NetworkDirection.PLAY_TO_CLIENT);
+		}
 	}
 
 }

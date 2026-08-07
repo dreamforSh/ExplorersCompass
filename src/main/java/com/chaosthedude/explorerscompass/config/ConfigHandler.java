@@ -106,11 +106,11 @@ public class ConfigHandler {
 			desc = "Allows players to see what a structure looks like before searching for one. The server assembles the structure the way world generation would, without placing any of it anywhere, and sends back a small model of it. This is done once per structure and then kept for as long as the server runs, so looking at the same structure again costs nothing. Turn it off to have the compass answer that there is nothing to show.";
 			allowStructurePreview = builder.comment(desc).define("allowStructurePreview", true);
 
-			desc = "How many cells across a structure preview may be. A structure larger than this is shrunk to fit, with each cell of the model standing for several blocks, so higher values show more detail on large structures at the cost of a larger model to send and to draw.";
-			structurePreviewResolution = builder.comment(desc).defineInRange("structurePreviewResolution", 48, 8, 64);
+			desc = "How many cells across a structure preview may be. The default is large enough that no structure is shrunk to fit it, so a preview is one cell to one block and shows the structure at its own size; lower it to cap how large a preview may be however large the structure is. What actually decides whether a preview is shown one to one is the cell budget below.";
+			structurePreviewResolution = builder.comment(desc).defineInRange("structurePreviewResolution", 1024, 8, 1024);
 
-			desc = "How many cells of a structure preview may be sent at once. Only the cells that can be seen from outside the structure are ever sent, and a structure whose surface does not fit inside this is shrunk further until it does. The client builds them into a single model once, so this decides how detailed a preview is and how large it is to send, rather than what showing it costs each frame.";
-			structurePreviewMaxBlocks = builder.comment(desc).defineInRange("structurePreviewMaxBlocks", 12000, 512, 32768);
+			desc = "How many cells of a structure preview may be sent. Only the cells that can be seen from outside the structure are ever sent, and a structure whose surface does not fit inside this is shrunk until it does, at which point it is no longer one cell to one block. The default clears every structure the game itself adds by several times over: the largest of them, a bastion, comes to under 60000 solid blocks even counting every piece it could possibly be assembled from, and only part of that is ever visible from outside. A structure that does not fit is named in the log. Previews are sent in pieces and each is built once and then kept, so this is what one costs the first time it is opened rather than what it costs to show.";
+			structurePreviewMaxBlocks = builder.comment(desc).defineInRange("structurePreviewMaxBlocks", 200000, 512, 400000);
 
 			builder.pop();
 		}
@@ -135,6 +135,7 @@ public class ConfigHandler {
 		public final ForgeConfigSpec.IntValue directionBarSpan;
 		public final ForgeConfigSpec.BooleanValue directionBarBackground;
 		public final ForgeConfigSpec.BooleanValue structurePreviewAutoSpin;
+		public final ForgeConfigSpec.IntValue structurePreviewDetailLimit;
 
 		Client(ForgeConfigSpec.Builder builder) {
 			String desc;
@@ -195,6 +196,9 @@ public class ConfigHandler {
 
 			desc = "Turns a structure preview slowly on its own, so that it is seen from more than one side without being dragged around. The button on the preview screen switches this on and off as well.";
 			structurePreviewAutoSpin = builder.comment(desc).define("structurePreviewAutoSpin", true);
+
+			desc = "How many cells a structure preview may hold before it is drawn as coloured blocks instead of real ones. Both are one cell to one block; what the coloured tier gives up is the textures, not the detail. Real blocks take far longer to assemble into a model, so a large structure is shown as its shape and its colours rather than after a long wait. Raise this to see real blocks on larger structures, at the cost of that wait when a preview opens; set it to 0 to always show colours.";
+			structurePreviewDetailLimit = builder.comment(desc).defineInRange("structurePreviewDetailLimit", 20000, 0, 400000);
 
 			builder.pop();
 		}

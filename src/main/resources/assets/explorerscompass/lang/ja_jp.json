@@ -72,6 +72,8 @@
     "string.explorerscompass.previewPieces": "パーツ",
     "string.explorerscompass.previewScale": "精度",
     "string.explorerscompass.previewCell": "1マスあたり %s ブロック",
+    "string.explorerscompass.previewComponents": "設備",
+    "string.explorerscompass.previewSimplified": "簡略表示",
     "string.explorerscompass.previewCutaway": "表示中の層: %1$s / %2$s",
     "string.explorerscompass.previewOutlineOnly": "ブロックを読み取れなかったため、パーツの形のみ表示しています",
     "string.explorerscompass.previewPartialOutline": "%s 個のパーツは輪郭のみの表示です",

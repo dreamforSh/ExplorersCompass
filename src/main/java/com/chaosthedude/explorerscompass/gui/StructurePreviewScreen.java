@@ -37,6 +37,8 @@ public class StructurePreviewScreen extends Screen {
 
 	/** The strip along the bottom that says what is being shown. */
 	private static final int INFO_BAR_HEIGHT = 34;
+	/** One cell to one block, written the way a scale is written in every language. */
+	private static final String ONE_TO_ONE = "1:1";
 
 	private final Screen parentScreen;
 	private final ResourceLocation structureKey;
@@ -81,9 +83,9 @@ public class StructurePreviewScreen extends Screen {
 		GuiTheme.drawScreenPanel(left, top, right, bottom, ConfigHandler.CLIENT.guiSidebarBackground.get());
 
 		final StructurePreview preview = StructurePreviewCache.get(structureKey);
-		if (preview != null && preview.getCellCount() > 0) {
+		if (preview != null && (preview.getCellCount() > 0 || preview.getComponentCount() > 0)) {
 			// Inside the panel border, so that the model is never drawn over its own edges
-			view.render(poseStack, preview, left + 1, top + 1, right - 1, bottom - 1);
+			view.render(preview, left + 1, top + 1, right - 1, bottom - 1);
 		} else {
 			// A preview that arrived holding nothing has as little to draw as one that never arrived
 			drawWaitingMessage(poseStack, left, top, right, bottom);
@@ -134,8 +136,17 @@ public class StructurePreviewScreen extends Screen {
 		final List<String> parts = new ArrayList<String>();
 		parts.add(labeled("string.explorerscompass.previewSize", preview.getBlockX() + " × " + preview.getBlockY() + " × " + preview.getBlockZ()));
 		parts.add(labeled("string.explorerscompass.previewPieces", String.valueOf(preview.getPieces())));
-		if (preview.getStep() > 1) {
-			parts.add(labeled("string.explorerscompass.previewScale", I18n.get("string.explorerscompass.previewCell", String.valueOf(preview.getStep()))));
+		// Said either way round: that a preview is one cell to one block is the thing worth knowing
+		// about it, and its absence is what says the structure had to be shrunk to be shown
+		parts.add(labeled("string.explorerscompass.previewScale", preview.getStep() > 1
+				? I18n.get("string.explorerscompass.previewCell", String.valueOf(preview.getStep()))
+				: ONE_TO_ONE));
+		if (view.getDrawnComponents() > 0) {
+			parts.add(labeled("string.explorerscompass.previewComponents", String.valueOf(view.getDrawnComponents())));
+		}
+		if (view.isSimplified()) {
+			// Worth saying outright: a structure shown in flat colours is not one made of one material
+			parts.add(I18n.get("string.explorerscompass.previewSimplified"));
 		}
 		if (view.isCutAway(preview)) {
 			parts.add(I18n.get("string.explorerscompass.previewCutaway", String.valueOf(view.layersShown(preview)), String.valueOf(preview.getGridY())));

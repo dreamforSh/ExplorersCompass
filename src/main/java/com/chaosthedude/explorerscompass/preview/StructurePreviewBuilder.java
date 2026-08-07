@@ -1,6 +1,7 @@
 package com.chaosthedude.explorerscompass.preview;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import com.chaosthedude.explorerscompass.ExplorersCompass;
@@ -9,8 +10,10 @@ import com.chaosthedude.explorerscompass.mixin.SinglePoolElementTemplateAccessor
 import com.chaosthedude.explorerscompass.mixin.StructureTemplatePalettesAccessor;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
 
+import it.unimi.dsi.fastutil.ints.Int2IntMap;
 import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.ints.IntIterator;
 import it.unimi.dsi.fastutil.longs.Long2IntMap;
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import net.minecraft.core.BlockPos;
@@ -22,6 +25,7 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.StructureManager;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkGenerator;
@@ -82,9 +86,15 @@ public final class StructurePreviewBuilder {
 	private static final int FLAT_ENOUGH_Y_SPAN = 32;
 
 	/** A ceiling on how much of a structure is read, so that no one structure can hold up a tick. */
-	private static final int MAX_SOURCE_BLOCKS = 400000;
+	private static final int MAX_SOURCE_BLOCKS = 1000000;
 	/** How many times the grid is coarsened when what it holds does not fit inside the cell budget. */
 	private static final int MAX_SHRINK_ATTEMPTS = 4;
+	/**
+	 * How many of the blocks drawn by a renderer of their own are carried. Each one is a block entity
+	 * the client builds and draws for itself every frame, which is far more than a cell costs, and a
+	 * building has only so many chests and beds worth seeing from outside it anyway.
+	 */
+	private static final int MAX_COMPONENTS = 512;
 
 	private StructurePreviewBuilder() {
 	}
@@ -115,7 +125,15 @@ public final class StructurePreviewBuilder {
 		}
 
 		try {
-			return draw(level, start);
+			final StructurePreview preview = draw(level, start);
+			// Said outright rather than left to be noticed on the screen. Every structure the game
+			// itself adds fits inside the budget several times over, so anything that does not is
+			// either a structure from a mod or a budget that has been turned down, and either way it
+			// is the one thing about a preview that a server owner would want to know.
+			if (preview.getStep() > 1 || preview.isTruncated()) {
+				ExplorersCompass.LOGGER.info("Preview of " + structureKey + " is not one cell to one block: " + preview.getCellCount() + " cells at " + preview.getStep() + " blocks each" + (preview.isTruncated() ? ", and more of it than that" : "") + ". Raise structurePreviewMaxBlocks to show it at its own size.");
+			}
+			return preview;
 		} catch (Throwable t) {
 			// A structure from a mod can hold pieces of its own, and reading one is running its code
 			ExplorersCompass.LOGGER.warn("Could not draw a preview of " + structureKey, t);
@@ -234,7 +252,7 @@ public final class StructurePreviewBuilder {
 		}
 
 		if (!procedural.isEmpty()) {
-			buildProcedural(level, start, procedural, recordingLevel, outlined);
+			buildProcedural(level, start, bounds, procedural, recordingLevel, outlined);
 		}
 
 		return new Assembly(recordingLevel.getRecorded(), outlined, recordingLevel.isFull());
@@ -282,6 +300,15 @@ public final class StructurePreviewBuilder {
 		// first: it shows what the structure is rather than what one instance of it turned out as
 		for (StructureTemplate.StructureBlockInfo info : palettes.get(0).blocks()) {
 			final BlockState state = info.state.mirror(settings.getMirror()).rotate(settings.getRotation());
+			// Only what could end up in the preview is taken down. A template records every position in
+			// the box it was cut from, air included, and the largest of them are almost nothing else:
+			// the bastions and the ancient city are assembled partly out of templates that exist to
+			// carve space rather than to fill it, and taking those down would spend the whole of what
+			// one structure may be read on air.
+			if (!isDrawable(state) && !isComponent(state)) {
+				continue;
+			}
+
 			final BlockPos pos = StructureTemplate.calculateRelativePosition(settings, info.pos).offset(origin);
 			if (!recordingLevel.record(pos, state)) {
 				break;
@@ -294,14 +321,22 @@ public final class StructurePreviewBuilder {
 	 * Lets each of the pieces that has no template build itself into the recording level, and notes
 	 * the ones that laid no blocks at all, which are left to be outlined.
 	 *
-	 * <p>A piece is handed its own bounding box as the space it may build in, where world generation
-	 * would hand it the chunk being generated, so that it lays itself out in one go rather than a
-	 * chunk at a time. Running one is running that structure's own code, so each is guarded on its
-	 * own: a piece that throws costs its own detail and nothing else.
+	 * <p>The space a piece may build in has to be given the same shape world generation gives it: the
+	 * whole structure across, and the whole world tall. What world generation hands a piece is the
+	 * chunk being generated, which is a column reaching from the bottom of the world to the top, and
+	 * some of the older pieces measure themselves against that. The scattered temples ask how high the
+	 * ground is by probing a fixed height inside it and give up on building anything at all when that
+	 * probe falls outside — so a piece handed its own bounding box, which is only as tall as the
+	 * building, would answer for a swamp hut or a jungle temple with nothing whatsoever.
+	 *
+	 * <p>All of the pieces are run in one go rather than a chunk at a time. Running one is running
+	 * that structure's own code, so each is guarded on its own: a piece that throws, or that lays no
+	 * blocks anyway, costs its own detail and nothing else.
 	 */
-	private static void buildProcedural(ServerLevel level, StructureStart start, List<StructurePiece> pieces, RecordingLevel recordingLevel, List<StructurePiece> outlined) {
+	private static void buildProcedural(ServerLevel level, StructureStart start, BoundingBox bounds, List<StructurePiece> pieces, RecordingLevel recordingLevel, List<StructurePiece> outlined) {
 		final ChunkGenerator generator = level.getChunkSource().getGenerator();
 		final StructureManager structureManager = level.structureManager();
+		final BoundingBox buildableSpace = new BoundingBox(bounds.minX(), level.getMinBuildHeight(), bounds.minZ(), bounds.maxX(), level.getMaxBuildHeight(), bounds.maxZ());
 		// Where world generation says a structure stands: the middle of its first piece, at that
 		// piece's base. Some pieces measure themselves against it.
 		final BoundingBox firstBox = start.getPieces().get(0).getBoundingBox();
@@ -314,28 +349,37 @@ public final class StructurePreviewBuilder {
 				// Seeded off the piece rather than off nothing, so that a preview of the same structure
 				// comes out the same way every time it is built
 				final RandomSource random = RandomSource.create(level.getSeed() + box.minX() * 31L + box.minZ() * 17L + box.minY());
-				piece.postProcess(recordingLevel, structureManager, generator, random, box, new ChunkPos(box.getCenter()), reference);
+				piece.postProcess(recordingLevel, structureManager, generator, random, buildableSpace, new ChunkPos(box.getCenter()), reference);
 			} catch (Throwable t) {
 				ExplorersCompass.LOGGER.debug("A structure piece could not build itself for a preview; it will be outlined instead", t);
 			}
 
 			if (recordingLevel.getRecordedCount() == before) {
+				// Worth naming: this is the one thing that turns a building into a plain box, and which
+				// piece it was is the whole of what anyone would need to look into it
+				ExplorersCompass.LOGGER.debug("Preview: " + piece.getClass().getName() + " laid no blocks and will be outlined instead");
 				outlined.add(piece);
 			}
 		}
 	}
 
 	/**
-	 * Whether a block is worth carrying: one drawn from a model, which is what the preview draws.
-	 *
-	 * <p>Air, the fluids and the markers a template is wired together with all draw as nothing. So do
-	 * the chests, beds and banners, which are drawn by a renderer of their own rather than from a
-	 * model and have nothing but a particle texture to their name. Carrying any of them would take a
-	 * cell that something visible could have had, and would leave a hole in the surface where the
-	 * cell behind it should have shown through instead.
+	 * Whether a block belongs in the shell: one drawn from a model, which is what the shell is built
+	 * out of. Air, the fluids and the markers a template is wired together with all draw as nothing,
+	 * and each of them would take a cell that something visible could have had.
 	 */
 	private static boolean isDrawable(BlockState state) {
 		return !state.isAir() && state.getRenderShape() == RenderShape.MODEL && !state.is(Blocks.JIGSAW) && !state.is(Blocks.STRUCTURE_BLOCK);
+	}
+
+	/**
+	 * Whether a block is one of the ones drawn by a renderer of its own — a chest, a bed, a banner, a
+	 * sign, a shulker box. These have nothing but a particle texture to their name as a model, so
+	 * leaving one in the shell would put a hole where it stands rather than a chest. They are carried
+	 * apart from the shell and built into real block entities by whoever draws them.
+	 */
+	private static boolean isComponent(BlockState state) {
+		return state.getRenderShape() == RenderShape.ENTITYBLOCK_ANIMATED && state.getBlock() instanceof EntityBlock;
 	}
 
 	/** How many blocks one cell has to stand for, for a structure of this size to fit the grid. */
@@ -353,8 +397,14 @@ public final class StructurePreviewBuilder {
 	}
 
 	/**
-	 * The grid a structure is drawn onto. Cells hold block state ids, and zero stands for an empty
-	 * one: id zero is air, which is never carried.
+	 * The grid a structure is drawn onto, as the cells that actually hold something.
+	 *
+	 * <p>Held as a map from packed cell to block state id rather than as an array over the whole
+	 * grid. A preview is meant to be one cell to one block, which makes the grid as large as the
+	 * structure, and an array over a structure a few hundred blocks each way would be hundreds of
+	 * megabytes of mostly nothing. What is actually filled is a building's walls and roof, which is a
+	 * small fraction of the space it stands in, so this grows with the structure rather than with the
+	 * cube around it.
 	 */
 	private static final class Grid {
 
@@ -363,7 +413,10 @@ public final class StructurePreviewBuilder {
 		private final int sizeX;
 		private final int sizeY;
 		private final int sizeZ;
-		private final int[] cells;
+		/** The filled cells, packed cell to block state id. */
+		private final Int2IntOpenHashMap cells = new Int2IntOpenHashMap();
+		/** Where the blocks drawn by a renderer of their own stand, packed cell to block state id. */
+		private final Int2IntOpenHashMap components = new Int2IntOpenHashMap();
 
 		private Grid(BoundingBox bounds, int step, int resolution) {
 			this.bounds = bounds;
@@ -371,18 +424,21 @@ public final class StructurePreviewBuilder {
 			sizeX = Math.min(resolution, divideCeil(bounds.getXSpan(), step));
 			sizeY = Math.min(resolution, divideCeil(bounds.getYSpan(), step));
 			sizeZ = Math.min(resolution, divideCeil(bounds.getZSpan(), step));
-			cells = new int[sizeX * sizeY * sizeZ];
 		}
 
 		/** Throws everything an assembly holds onto this grid, outlines last. */
 		private void fill(Assembly assembly) {
 			for (Long2IntMap.Entry entry : assembly.blocks().long2IntEntrySet()) {
 				final BlockState state = Block.stateById(entry.getIntValue());
-				if (!isDrawable(state)) {
-					continue;
-				}
 				final long packed = entry.getLongKey();
-				put(BlockPos.getX(packed), BlockPos.getY(packed), BlockPos.getZ(packed), state);
+				final int blockX = BlockPos.getX(packed);
+				final int blockY = BlockPos.getY(packed);
+				final int blockZ = BlockPos.getZ(packed);
+				if (isDrawable(state)) {
+					put(blockX, blockY, blockZ, state);
+				} else if (isComponent(state)) {
+					putComponent(blockX, blockY, blockZ, entry.getIntValue());
+				}
 			}
 
 			// Outlines are drawn after every block that is actually known, so that a piece standing
@@ -392,27 +448,36 @@ public final class StructurePreviewBuilder {
 			}
 		}
 
-		private int index(int x, int y, int z) {
-			return (y * sizeZ + z) * sizeX + x;
-		}
-
 		private int cellOf(int offset, int size) {
 			return Mth.clamp(offset / step, 0, size - 1);
 		}
 
+		/** The cell a block falls in, packed. */
+		private int cellAt(int blockX, int blockY, int blockZ) {
+			return StructurePreview.pack(cellOf(blockX - bounds.minX(), sizeX), cellOf(blockY - bounds.minY(), sizeY), cellOf(blockZ - bounds.minZ(), sizeZ));
+		}
+
 		private boolean isEmptyAt(int x, int y, int z) {
 			// Anything just outside the grid is open air, which is what makes the outermost cells show
-			return x < 0 || y < 0 || z < 0 || x >= sizeX || y >= sizeY || z >= sizeZ || cells[index(x, y, z)] == 0;
+			return x < 0 || y < 0 || z < 0 || x >= sizeX || y >= sizeY || z >= sizeZ || !cells.containsKey(StructurePreview.pack(x, y, z));
+		}
+
+		/** Notes one of the blocks drawn by a renderer of its own, in whichever cell holds it. */
+		private void putComponent(int blockX, int blockY, int blockZ, int stateId) {
+			if (components.size() >= MAX_COMPONENTS) {
+				return;
+			}
+			final int cell = cellAt(blockX, blockY, blockZ);
+			if (!components.containsKey(cell)) {
+				components.put(cell, stateId);
+			}
 		}
 
 		/** Puts a block in whichever cell holds it, leaving a cell that already holds one alone. */
 		private void put(int blockX, int blockY, int blockZ, BlockState state) {
-			final int x = cellOf(blockX - bounds.minX(), sizeX);
-			final int y = cellOf(blockY - bounds.minY(), sizeY);
-			final int z = cellOf(blockZ - bounds.minZ(), sizeZ);
-			final int index = index(x, y, z);
-			if (cells[index] == 0) {
-				cells[index] = Block.getId(state);
+			final int cell = cellAt(blockX, blockY, blockZ);
+			if (!cells.containsKey(cell)) {
+				cells.put(cell, Block.getId(state));
 			}
 		}
 
@@ -430,9 +495,9 @@ public final class StructurePreviewBuilder {
 				for (int z = minZ; z <= maxZ; z++) {
 					for (int x = minX; x <= maxX; x++) {
 						final boolean onAFace = x == minX || x == maxX || y == minY || y == maxY || z == minZ || z == maxZ;
-						final int index = index(x, y, z);
-						if (onAFace && cells[index] == 0) {
-							cells[index] = outlineId;
+						final int cell = StructurePreview.pack(x, y, z);
+						if (onAFace && !cells.containsKey(cell)) {
+							cells.put(cell, outlineId);
 						}
 					}
 				}
@@ -442,13 +507,11 @@ public final class StructurePreviewBuilder {
 		/** How many cells have at least one open side, which is everything a preview draws. */
 		private int countVisible() {
 			int visible = 0;
-			for (int y = 0; y < sizeY; y++) {
-				for (int z = 0; z < sizeZ; z++) {
-					for (int x = 0; x < sizeX; x++) {
-						if (cells[index(x, y, z)] != 0 && isVisible(x, y, z)) {
-							visible++;
-						}
-					}
+			final IntIterator filled = cells.keySet().iterator();
+			while (filled.hasNext()) {
+				final int cell = filled.nextInt();
+				if (isVisible(StructurePreview.unpackX(cell), StructurePreview.unpackY(cell), StructurePreview.unpackZ(cell))) {
+					visible++;
 				}
 			}
 			return visible;
@@ -459,9 +522,12 @@ public final class StructurePreviewBuilder {
 		}
 
 		/**
-		 * Collects what is visible into the preview. Cells are walked from the ground up, so that a
-		 * structure that still does not fit the budget loses its roof rather than the ground it stands
-		 * on, which is what makes it recognizable.
+		 * Collects what is visible into the preview.
+		 *
+		 * <p>The cells are sorted before they are walked, which puts them in the order the packing
+		 * sorts in: from the ground up, and along each layer. That order is what lets the positions
+		 * travel as the steps between them, and it is also what makes a structure that still does not
+		 * fit the budget lose its roof rather than the ground it stands on.
 		 */
 		private StructurePreview toPreview(BoundingBox structureBounds, int pieces, int outlinedPieces, boolean truncated, int maxCells) {
 			final Int2IntOpenHashMap paletteIndices = new Int2IntOpenHashMap();
@@ -471,32 +537,42 @@ public final class StructurePreviewBuilder {
 			final IntArrayList positions = new IntArrayList();
 			final IntArrayList indices = new IntArrayList();
 
-			boolean overflowed = false;
-			for (int y = 0; y < sizeY && !overflowed; y++) {
-				for (int z = 0; z < sizeZ && !overflowed; z++) {
-					for (int x = 0; x < sizeX; x++) {
-						final int stateId = cells[index(x, y, z)];
-						if (stateId == 0 || !isVisible(x, y, z)) {
-							continue;
-						}
-						if (positions.size() >= maxCells) {
-							overflowed = true;
-							break;
-						}
+			final int[] ordered = cells.keySet().toIntArray();
+			Arrays.sort(ordered);
 
-						int paletteIndex = paletteIndices.get(stateId);
-						if (paletteIndex < 0) {
-							paletteIndex = palette.size();
-							paletteIndices.put(stateId, paletteIndex);
-							palette.add(stateId);
-						}
-						positions.add(StructurePreview.pack(x, y, z));
-						indices.add(paletteIndex);
-					}
+			boolean overflowed = false;
+			for (int cell : ordered) {
+				if (!isVisible(StructurePreview.unpackX(cell), StructurePreview.unpackY(cell), StructurePreview.unpackZ(cell))) {
+					continue;
+				}
+				if (positions.size() >= maxCells) {
+					overflowed = true;
+					break;
+				}
+
+				final int stateId = cells.get(cell);
+				int paletteIndex = paletteIndices.get(stateId);
+				if (paletteIndex < 0) {
+					paletteIndex = palette.size();
+					paletteIndices.put(stateId, paletteIndex);
+					palette.add(stateId);
+				}
+				positions.add(cell);
+				indices.add(paletteIndex);
+			}
+
+			final IntArrayList componentPositions = new IntArrayList();
+			final IntArrayList componentStates = new IntArrayList();
+			for (Int2IntMap.Entry component : components.int2IntEntrySet()) {
+				// A cell the shell already fills is one nothing could be seen inside anyway, and drawing
+				// a chest into the middle of a wall would put it half inside the blocks around it
+				if (!cells.containsKey(component.getIntKey())) {
+					componentPositions.add(component.getIntKey());
+					componentStates.add(component.getIntValue());
 				}
 			}
 
-			return new StructurePreview(sizeX, sizeY, sizeZ, step, structureBounds.getXSpan(), structureBounds.getYSpan(), structureBounds.getZSpan(), pieces, outlinedPieces, truncated || overflowed, palette.toIntArray(), positions.toIntArray(), indices.toIntArray());
+			return new StructurePreview(sizeX, sizeY, sizeZ, step, structureBounds.getXSpan(), structureBounds.getYSpan(), structureBounds.getZSpan(), pieces, outlinedPieces, truncated || overflowed, palette.toIntArray(), positions.toIntArray(), indices.toIntArray(), componentPositions.toIntArray(), componentStates.toIntArray());
 		}
 
 	}

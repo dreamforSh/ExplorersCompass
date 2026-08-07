@@ -72,6 +72,8 @@
     "string.explorerscompass.previewPieces": "Teile",
     "string.explorerscompass.previewScale": "Auflösung",
     "string.explorerscompass.previewCell": "%s Blöcke je Zelle",
+    "string.explorerscompass.previewComponents": "Einbauten",
+    "string.explorerscompass.previewSimplified": "Vereinfacht",
     "string.explorerscompass.previewCutaway": "%1$s von %2$s Schichten sichtbar",
     "string.explorerscompass.previewOutlineOnly": "Nichts davon war lesbar, daher wird nur die Form seiner Teile gezeigt",
     "string.explorerscompass.previewPartialOutline": "%s Teile konnten nur umrissen werden",

@@ -9,7 +9,9 @@ import com.chaosthedude.explorerscompass.ExplorersCompass;
 import com.chaosthedude.explorerscompass.network.StructurePreviewRequestPacket;
 import com.chaosthedude.explorerscompass.preview.StructurePreview;
 
+import io.netty.buffer.Unpooled;
 import net.minecraft.Util;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
@@ -43,8 +45,12 @@ public class StructurePreviewCache {
 	 */
 	private static final int MAX_CACHED = 8;
 
-	/** How long to wait for an answer before asking again, and how many times to bother. */
-	private static final long RETRY_AFTER_MILLIS = 1500L;
+	/**
+	 * How long to wait for an answer before asking again, and how many times to bother. Measured from
+	 * the last thing that arrived rather than from the request, so that a preview arriving over many
+	 * packets is not asked for again halfway through.
+	 */
+	private static final long RETRY_AFTER_MILLIS = 3000L;
 	private static final int MAX_ATTEMPTS = 3;
 
 	private static final Map<ResourceLocation, StructurePreview> previews = new LinkedHashMap<ResourceLocation, StructurePreview>(16, 0.75F, true) {
@@ -64,6 +70,11 @@ public class StructurePreviewCache {
 	private static ResourceLocation pendingKey;
 	private static long lastRequestedAt;
 	private static int attempts;
+
+	/** The preview being pieced together out of the packets carrying it, and how much has arrived. */
+	private static ResourceLocation assemblingKey;
+	private static byte[] assembling;
+	private static int assembled;
 
 	private StructurePreviewCache() {
 	}
@@ -90,7 +101,65 @@ public class StructurePreviewCache {
 
 		attempts++;
 		lastRequestedAt = Util.getMillis();
+		// Half of an answer to the question being asked again is no use, and the run that carries the
+		// new answer starts over from the beginning
+		discardAssembly();
 		ExplorersCompass.network.sendToServer(new StructurePreviewRequestPacket(structureKey));
+	}
+
+	/**
+	 * Takes in one packet of a preview arriving over several, and reads the preview once the last of
+	 * them says it is all there. A total of nothing means the server has nothing to show.
+	 */
+	public static void receiveChunk(ResourceLocation structureKey, int totalBytes, byte[] chunk, boolean last) {
+		// Anything arriving counts as the answer coming, which is what holds off asking again
+		lastRequestedAt = Util.getMillis();
+
+		if (totalBytes <= 0) {
+			discardAssembly();
+			receive(structureKey, null);
+			return;
+		}
+
+		if (!structureKey.equals(assemblingKey) || assembling == null || assembling.length != totalBytes) {
+			assemblingKey = structureKey;
+			assembling = new byte[totalBytes];
+			assembled = 0;
+		}
+
+		if (assembled + chunk.length > assembling.length) {
+			// More than was promised: whatever this is, it is not the preview that was asked for
+			ExplorersCompass.LOGGER.warn("Discarding a preview of " + structureKey + ": it carried more than the " + totalBytes + " bytes it declared");
+			discardAssembly();
+			receive(structureKey, null);
+			return;
+		}
+
+		System.arraycopy(chunk, 0, assembling, assembled, chunk.length);
+		assembled += chunk.length;
+		if (!last) {
+			return;
+		}
+
+		StructurePreview preview = null;
+		if (assembled == assembling.length) {
+			try {
+				preview = StructurePreview.read(new FriendlyByteBuf(Unpooled.wrappedBuffer(assembling)));
+			} catch (RuntimeException e) {
+				ExplorersCompass.LOGGER.warn("Could not read the preview of " + structureKey, e);
+			}
+		} else {
+			ExplorersCompass.LOGGER.warn("Discarding a preview of " + structureKey + ": " + assembled + " of " + assembling.length + " bytes arrived");
+		}
+
+		discardAssembly();
+		receive(structureKey, preview);
+	}
+
+	private static void discardAssembly() {
+		assemblingKey = null;
+		assembling = null;
+		assembled = 0;
 	}
 
 	/** Takes in what the server answered. A null preview means it has nothing to show. */
@@ -139,6 +208,7 @@ public class StructurePreviewCache {
 		unavailable.clear();
 		pendingKey = null;
 		attempts = 0;
+		discardAssembly();
 	}
 
 }

@@ -72,6 +72,8 @@
     "string.explorerscompass.previewPieces": "部件",
     "string.explorerscompass.previewScale": "精度",
     "string.explorerscompass.previewCell": "每格 %s 個方塊",
+    "string.explorerscompass.previewComponents": "組件",
+    "string.explorerscompass.previewSimplified": "簡化顯示",
     "string.explorerscompass.previewCutaway": "已顯示 %1$s / %2$s 層",
     "string.explorerscompass.previewOutlineOnly": "此結構未能讀出任何方塊，只能顯示部件輪廓",
     "string.explorerscompass.previewPartialOutline": "有 %s 個部件只能顯示輪廓",

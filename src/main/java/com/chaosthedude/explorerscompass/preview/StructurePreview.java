@@ -12,21 +12,34 @@ import net.minecraft.world.level.block.state.BlockState;
  * holds whichever block fell into it. Cells with a block on every side of them are dropped, since
  * nothing inside a building is visible from outside it, and what is left is the shell that gets
  * drawn. A preview is therefore a fixed amount of data no matter how large the structure it stands
- * for is: a village and an igloo both arrive as at most a few thousand cells.
+ * for is: a village and an igloo both arrive as a shell of at most so many cells.
  *
  * <p>Positions are grid cells rather than blocks. One cell is {@link #getStep()} blocks along each
  * axis, which is 1 for anything that fits the grid outright and more for anything that has to be
  * shrunk to fit. Blocks are carried as ids into the block state registry, which both sides of a
  * connection agree on for as long as they are connected.
+ *
+ * <p>The chests, beds, banners and signs are carried apart from the rest. They are drawn by a
+ * renderer of their own rather than from a block model, so they can neither be built into the
+ * model the rest of the shell becomes nor left in it as holes: see {@link #getComponentCount}.
  */
 public class StructurePreview {
 
-	/** The largest grid a preview is ever built on, so that a cell position fits in 18 bits. */
-	public static final int MAX_GRID = 64;
+	/**
+	 * The largest grid a preview is ever built on. Ten bits an axis, which is what leaves all three
+	 * inside a positive int, and which is larger than any structure that has to be shrunk to fit it:
+	 * a preview is meant to be one cell to one block, and only something over a thousand blocks
+	 * across is too large for that to be possible at all.
+	 */
+	public static final int MAX_GRID = 1024;
 
-	/** Far more of either than any preview built here holds; more than this is a malformed packet. */
-	private static final int MAX_CELLS = 1 << 17;
+	private static final int AXIS_BITS = 10;
+	private static final int AXIS_MASK = (1 << AXIS_BITS) - 1;
+
+	/** Far more of any of these than a preview built here holds; more than this is a malformed packet. */
+	private static final int MAX_CELLS = 1 << 20;
 	private static final int MAX_PALETTE = 1 << 14;
+	private static final int MAX_COMPONENTS = 1 << 12;
 
 	private final int gridX;
 	private final int gridY;
@@ -39,20 +52,24 @@ public class StructurePreview {
 	private final int blockZ;
 	private final int pieces;
 	/**
-	 * How many of the pieces could only be outlined. A piece that builds itself block by block as it
-	 * generates has no template to read, so all a preview can show of one is the space it occupies.
+	 * How many of the pieces could only be outlined. A piece that neither carries a template nor
+	 * builds itself into anything has only the space it occupies to show for it.
 	 */
 	private final int outlinedPieces;
 	/** Whether the structure had more visible cells than a preview may carry. */
 	private final boolean truncated;
 	/** The distinct blocks that appear, as ids into the block state registry. */
 	private final int[] palette;
-	/** Cell positions, packed by {@link #pack}. */
+	/** Cell positions, packed by {@link #pack}, in ascending order. */
 	private final int[] positions;
 	/** Which entry of the palette stands at each position, parallel to it. */
 	private final int[] paletteIndices;
+	/** Where the blocks drawn by a renderer of their own stand, packed the same way. */
+	private final int[] componentPositions;
+	/** What each of them is, as an id into the block state registry, parallel to it. */
+	private final int[] componentStates;
 
-	StructurePreview(int gridX, int gridY, int gridZ, int step, int blockX, int blockY, int blockZ, int pieces, int outlinedPieces, boolean truncated, int[] palette, int[] positions, int[] paletteIndices) {
+	StructurePreview(int gridX, int gridY, int gridZ, int step, int blockX, int blockY, int blockZ, int pieces, int outlinedPieces, boolean truncated, int[] palette, int[] positions, int[] paletteIndices, int[] componentPositions, int[] componentStates) {
 		this.gridX = gridX;
 		this.gridY = gridY;
 		this.gridZ = gridZ;
@@ -66,11 +83,17 @@ public class StructurePreview {
 		this.palette = palette;
 		this.positions = positions;
 		this.paletteIndices = paletteIndices;
+		this.componentPositions = componentPositions;
+		this.componentStates = componentStates;
 	}
 
-	/** Packs a cell position into one number. Each axis is under {@link #MAX_GRID}, so six bits fit it. */
-	static int pack(int x, int y, int z) {
-		return (x << 12) | (y << 6) | z;
+	/**
+	 * Packs a cell position into one number. Height comes first and width last, which is the order
+	 * the cells are collected in, so that a preview's positions come out ascending and can be sent as
+	 * the steps between them rather than outright.
+	 */
+	public static int pack(int x, int y, int z) {
+		return (y << (AXIS_BITS * 2)) | (z << AXIS_BITS) | x;
 	}
 
 	public int getGridX() {
@@ -113,9 +136,7 @@ public class StructurePreview {
 
 	/**
 	 * Whether nothing about this structure could be read block by block, so that everything drawn is
-	 * the shape of its pieces rather than what it is built out of. Worth saying outright, since an
-	 * outline looks like a structure made of one material rather than like a structure nothing is
-	 * known about.
+	 * the shape of its pieces rather than what it is built out of.
 	 */
 	public boolean isOutlineOnly() {
 		return pieces > 0 && outlinedPieces == pieces;
@@ -136,15 +157,20 @@ public class StructurePreview {
 	}
 
 	public int getCellX(int index) {
-		return (positions[index] >> 12) & 63;
+		return unpackX(positions[index]);
 	}
 
 	public int getCellY(int index) {
-		return (positions[index] >> 6) & 63;
+		return unpackY(positions[index]);
 	}
 
 	public int getCellZ(int index) {
-		return positions[index] & 63;
+		return unpackZ(positions[index]);
+	}
+
+	/** The packed position of a cell, for looking up whether a neighbouring one is filled. */
+	public int getCellPosition(int index) {
+		return positions[index];
 	}
 
 	/**
@@ -153,6 +179,56 @@ public class StructurePreview {
 	 */
 	public BlockState getCellState(int index) {
 		return Block.stateById(palette[paletteIndices[index]]);
+	}
+
+	/** Which entry of the palette stands in the given cell, for colouring a cell without resolving it. */
+	public int getCellPaletteIndex(int index) {
+		return paletteIndices[index];
+	}
+
+	/** The block behind the given palette entry. */
+	public BlockState getPaletteState(int paletteIndex) {
+		return Block.stateById(palette[paletteIndex]);
+	}
+
+	/**
+	 * How many of the blocks that are drawn by a renderer of their own — chests, beds, banners,
+	 * signs, shulker boxes — this preview carries.
+	 */
+	public int getComponentCount() {
+		return componentPositions.length;
+	}
+
+	public int getComponentX(int index) {
+		return unpackX(componentPositions[index]);
+	}
+
+	public int getComponentY(int index) {
+		return unpackY(componentPositions[index]);
+	}
+
+	public int getComponentZ(int index) {
+		return unpackZ(componentPositions[index]);
+	}
+
+	public int getComponentPosition(int index) {
+		return componentPositions[index];
+	}
+
+	public BlockState getComponentState(int index) {
+		return Block.stateById(componentStates[index]);
+	}
+
+	static int unpackX(int packed) {
+		return packed & AXIS_MASK;
+	}
+
+	static int unpackY(int packed) {
+		return (packed >>> (AXIS_BITS * 2)) & AXIS_MASK;
+	}
+
+	static int unpackZ(int packed) {
+		return (packed >>> AXIS_BITS) & AXIS_MASK;
 	}
 
 	public void write(FriendlyByteBuf buf) {
@@ -172,10 +248,21 @@ public class StructurePreview {
 			buf.writeVarInt(stateId);
 		}
 
+		// The step from one cell to the next rather than the cell itself: the cells are collected in
+		// ascending order, and the steps between neighbours in a shell are small enough to spend one
+		// byte on where a position would spend three
 		buf.writeVarInt(positions.length);
+		int previous = 0;
 		for (int i = 0; i < positions.length; i++) {
-			buf.writeVarInt(positions[i]);
+			buf.writeVarInt(positions[i] - previous);
+			previous = positions[i];
 			buf.writeVarInt(paletteIndices[i]);
+		}
+
+		buf.writeVarInt(componentPositions.length);
+		for (int i = 0; i < componentPositions.length; i++) {
+			buf.writeVarInt(componentPositions[i]);
+			buf.writeVarInt(componentStates[i]);
 		}
 	}
 
@@ -206,8 +293,10 @@ public class StructurePreview {
 		}
 		final int[] positions = new int[cellCount];
 		final int[] paletteIndices = new int[cellCount];
+		int previous = 0;
 		for (int i = 0; i < cellCount; i++) {
-			positions[i] = buf.readVarInt();
+			previous += buf.readVarInt();
+			positions[i] = previous;
 			final int paletteIndex = buf.readVarInt();
 			if (paletteIndex < 0 || paletteIndex >= paletteSize) {
 				throw new DecoderException("Structure preview names palette entry " + paletteIndex + " of " + paletteSize);
@@ -215,7 +304,18 @@ public class StructurePreview {
 			paletteIndices[i] = paletteIndex;
 		}
 
-		return new StructurePreview(gridX, gridY, gridZ, step, blockX, blockY, blockZ, pieces, outlinedPieces, truncated, palette, positions, paletteIndices);
+		final int componentCount = buf.readVarInt();
+		if (componentCount < 0 || componentCount > MAX_COMPONENTS) {
+			throw new DecoderException("Structure preview carries " + componentCount + " components");
+		}
+		final int[] componentPositions = new int[componentCount];
+		final int[] componentStates = new int[componentCount];
+		for (int i = 0; i < componentCount; i++) {
+			componentPositions[i] = buf.readVarInt();
+			componentStates[i] = buf.readVarInt();
+		}
+
+		return new StructurePreview(gridX, gridY, gridZ, step, blockX, blockY, blockZ, pieces, outlinedPieces, truncated, palette, positions, paletteIndices, componentPositions, componentStates);
 	}
 
 }

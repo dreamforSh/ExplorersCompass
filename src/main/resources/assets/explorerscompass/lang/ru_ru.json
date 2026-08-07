@@ -72,6 +72,8 @@
     "string.explorerscompass.previewPieces": "Части",
     "string.explorerscompass.previewScale": "Точность",
     "string.explorerscompass.previewCell": "%s блоков на ячейку",
+    "string.explorerscompass.previewComponents": "Элементы",
+    "string.explorerscompass.previewSimplified": "Упрощённо",
     "string.explorerscompass.previewCutaway": "Показано слоёв: %1$s из %2$s",
     "string.explorerscompass.previewOutlineOnly": "Из неё не удалось прочитать ни одного блока, показана только форма частей",
     "string.explorerscompass.previewPartialOutline": "Частей, показанных только контуром: %s",
