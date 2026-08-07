@@ -19,6 +19,8 @@ import com.chaosthedude.explorerscompass.network.ClearCachePacket;
 import com.chaosthedude.explorerscompass.network.CompassSearchForNextPacket;
 import com.chaosthedude.explorerscompass.network.CompassSearchPacket;
 import com.chaosthedude.explorerscompass.network.ShareLocationPacket;
+import com.chaosthedude.explorerscompass.network.StructurePreviewPacket;
+import com.chaosthedude.explorerscompass.network.StructurePreviewRequestPacket;
 import com.chaosthedude.explorerscompass.network.SyncPacket;
 import com.chaosthedude.explorerscompass.network.TeleportPacket;
 import com.chaosthedude.explorerscompass.util.CompassState;
@@ -61,7 +63,7 @@ public class ExplorersCompass {
 	 * is then refused during the handshake with a clear message, instead of connecting and failing
 	 * to decode later.
 	 */
-	public static final String PROTOCOL_VERSION = "2.3";
+	public static final String PROTOCOL_VERSION = "2.4";
 
 	public static final Logger LOGGER = LogManager.getLogger(MODID);
 
@@ -69,6 +71,8 @@ public class ExplorersCompass {
 	public static ExplorersCompassItem explorersCompass;
 
 	public static boolean canTeleport;
+	/** Whether this server will show a player what a structure looks like. */
+	public static boolean canPreviewStructures;
 	public static List<ResourceLocation> allowedStructureKeys;
 	public static ListMultimap<ResourceLocation, ResourceLocation> dimensionKeysForAllowedStructureKeys;
 	public static Map<ResourceLocation, ResourceLocation> structureKeysToTypeKeys;
@@ -110,9 +114,11 @@ public class ExplorersCompass {
 		network.registerMessage(5, BookmarkActionPacket.class, BookmarkActionPacket::toBytes, BookmarkActionPacket::new, BookmarkActionPacket::handle);
 		network.registerMessage(6, ShareLocationPacket.class, ShareLocationPacket::toBytes, ShareLocationPacket::new, ShareLocationPacket::handle);
 		network.registerMessage(7, CancelSearchPacket.class, CancelSearchPacket::toBytes, CancelSearchPacket::new, CancelSearchPacket::handle);
+		network.registerMessage(8, StructurePreviewRequestPacket.class, StructurePreviewRequestPacket::toBytes, StructurePreviewRequestPacket::new, StructurePreviewRequestPacket::handle);
 
-		// Client packet
+		// Client packets
 		network.registerMessage(2, SyncPacket.class, SyncPacket::toBytes, SyncPacket::new, SyncPacket::handle);
+		network.registerMessage(9, StructurePreviewPacket.class, StructurePreviewPacket::toBytes, StructurePreviewPacket::new, StructurePreviewPacket::handle);
 
 		CustomModelDataConfig.load();
 		StructureGroupsConfig.load();

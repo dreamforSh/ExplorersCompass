@@ -63,6 +63,16 @@ public class ExplorersCompassScreen extends Screen {
 	private static final String DOT_GLYPH = "●";
 	private static final String CLEAR_GLYPH = "✕";
 	private static final String SWITCH_GLYPH = "⇄";
+	private static final String PREVIEW_GLYPH = "▣";
+	/**
+	 * The control that shows what a structure looks like stands beside the filter field rather than in
+	 * the column of controls, which on the shortest screen the game scales itself down to has no room
+	 * left in it. Wide enough that the glyph on it still has room once the button has taken its own
+	 * padding out of it.
+	 */
+	private static final int PREVIEW_BUTTON_WIDTH = 24;
+	private static final int PREVIEW_BUTTON_HEIGHT = 18;
+	private static final int PREVIEW_BUTTON_GAP = 4;
 
 	private Level level;
 	private Player player;
@@ -76,6 +86,7 @@ public class ExplorersCompassScreen extends Screen {
 	private ItemStack stack;
 	private ExplorersCompassItem explorersCompass;
 	private TransparentButton targetButton;
+	private TransparentButton previewButton;
 	private TransparentButton searchButton;
 	private TransparentButton searchGroupButton;
 	private TransparentButton searchNextButton;
@@ -130,9 +141,11 @@ public class ExplorersCompassScreen extends Screen {
 	private record ButtonState(
 			boolean hasSelection,
 			int multiSelected,
+			SearchTarget searchTarget,
 			CompassState compassState,
 			int cachedLocations,
 			boolean canTeleport,
+			boolean canPreviewStructures,
 			boolean allowSharing,
 			ResourceLocation foundDimension,
 			ResourceLocation currentDimension) {
@@ -632,6 +645,18 @@ public class ExplorersCompassScreen extends Screen {
 		minecraft.setScreen(null);
 	}
 
+	/**
+	 * Shows what the selected structure looks like, so that the choice of what to search for can be
+	 * made by looking rather than by reading a name. Biomes have nothing to show: a biome is where a
+	 * structure stands rather than a thing that was built.
+	 */
+	private void openPreview() {
+		if (searchTarget != SearchTarget.STRUCTURE || !selectionList.hasSelection()) {
+			return;
+		}
+		minecraft.setScreen(new StructurePreviewScreen(this, selectionList.getSelected().getKey()));
+	}
+
 	public void clearCache() {
 		ExplorersCompass.network.sendToServer(new ClearCachePacket());
 		// Applied to this copy of the stack as well as asked for, so that the count on the button, the
@@ -785,6 +810,13 @@ public class ExplorersCompassScreen extends Screen {
 		}));
 		targetButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.searchTarget"));
 
+		// Beside the filter field, where it sits with the list it acts on rather than with the controls
+		// that act on the compass
+		previewButton = addRenderableWidget(new TransparentButton(columnLeft(), 8, PREVIEW_BUTTON_WIDTH, PREVIEW_BUTTON_HEIGHT, Component.literal(PREVIEW_GLYPH), (onPress) -> {
+			openPreview();
+		}));
+		previewButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.preview"), Component.translatable("string.explorerscompass.tooltip.previewStructuresOnly"));
+
 		searchButton = addSidebarButton(Component.translatable("string.explorerscompass.search"), (onPress) -> {
 			if (multiSelectedKeys.size() > 1) {
 				searchForMultiSelection();
@@ -877,7 +909,8 @@ public class ExplorersCompassScreen extends Screen {
 		final ResourceLocation previousSelectionKey = selectionList != null && selectionList.hasSelection() ? selectionList.getSelected().getKey() : null;
 		selectionList = null;
 
-		searchTextField = new TransparentTextField(font, columnLeft(), 8, columnWidth(), 18, Component.translatable("string.explorerscompass.searchHint"));
+		final int fieldLeft = columnLeft() + PREVIEW_BUTTON_WIDTH + PREVIEW_BUTTON_GAP;
+		searchTextField = new TransparentTextField(font, fieldLeft, 8, columnWidth() - PREVIEW_BUTTON_WIDTH - PREVIEW_BUTTON_GAP, 18, Component.translatable("string.explorerscompass.searchHint"));
 		searchTextField.setValue(previousSearchTerm);
 		// Filtering as the field changes covers every way it can: typing, pasting, and the button that
 		// empties it
@@ -942,8 +975,8 @@ public class ExplorersCompassScreen extends Screen {
 		final boolean located = state == CompassState.FOUND;
 		final ResourceLocation foundDimension = explorersCompass.getFoundDimension(stack);
 		final ResourceLocation currentDimension = player.level.dimension().location();
-		final ButtonState buttonState = new ButtonState(hasSelection, multiSelected, state,
-				cachedLocations, ExplorersCompass.canTeleport,
+		final ButtonState buttonState = new ButtonState(hasSelection, multiSelected, searchTarget, state,
+				cachedLocations, ExplorersCompass.canTeleport, ExplorersCompass.canPreviewStructures,
 				ConfigHandler.GENERAL.allowSharing.get(), foundDimension, currentDimension);
 		if (buttonState.equals(lastButtonState)) {
 			return;
@@ -951,6 +984,9 @@ public class ExplorersCompassScreen extends Screen {
 		lastButtonState = buttonState;
 
 		searchButton.active = hasSelection || multiSelected > 0;
+		// Nothing to show for a biome, nothing to show without something picked, and nothing to show at
+		// all where the server has switched previews off
+		previewButton.active = searchTarget == SearchTarget.STRUCTURE && hasSelection && ExplorersCompass.canPreviewStructures;
 		searchButton.setMessage(multiSelected > 1 ? Component.translatable("string.explorerscompass.search").append(Component.literal(" (" + multiSelected + ")")) : Component.translatable("string.explorerscompass.search"));
 		// A group search applies to the group of a single entry
 		searchGroupButton.active = hasSelection && multiSelected <= 1;

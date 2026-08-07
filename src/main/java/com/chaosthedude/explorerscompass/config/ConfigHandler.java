@@ -41,6 +41,9 @@ public class ConfigHandler {
 		public final ForgeConfigSpec.IntValue maxBookmarks;
 		public final ForgeConfigSpec.BooleanValue allowSharing;
 		public final ForgeConfigSpec.IntValue shareCooldownMillis;
+		public final ForgeConfigSpec.BooleanValue allowStructurePreview;
+		public final ForgeConfigSpec.IntValue structurePreviewResolution;
+		public final ForgeConfigSpec.IntValue structurePreviewMaxBlocks;
 
 		General(ForgeConfigSpec.Builder builder) {
 			String desc;
@@ -100,6 +103,15 @@ public class ConfigHandler {
 			desc = "The minimum time in milliseconds between locations shared by the same player, so that sharing cannot be used to flood chat. Set to 0 to disable.";
 			shareCooldownMillis = builder.comment(desc).defineInRange("shareCooldownMillis", 3000, 0, 60000);
 
+			desc = "Allows players to see what a structure looks like before searching for one. The server assembles the structure the way world generation would, without placing any of it anywhere, and sends back a small model of it. This is done once per structure and then kept for as long as the server runs, so looking at the same structure again costs nothing. Turn it off to have the compass answer that there is nothing to show.";
+			allowStructurePreview = builder.comment(desc).define("allowStructurePreview", true);
+
+			desc = "How many cells across a structure preview may be. A structure larger than this is shrunk to fit, with each cell of the model standing for several blocks, so higher values show more detail on large structures at the cost of a larger model to send and to draw.";
+			structurePreviewResolution = builder.comment(desc).defineInRange("structurePreviewResolution", 48, 8, 64);
+
+			desc = "How many cells of a structure preview may be sent at once. Only the cells that can be seen from outside the structure are ever sent, and a structure whose surface does not fit inside this is shrunk further until it does. Every cell is a block model the client draws on each frame of the preview screen, so this is also what caps what showing one costs.";
+			structurePreviewMaxBlocks = builder.comment(desc).defineInRange("structurePreviewMaxBlocks", 6000, 512, 32768);
+
 			builder.pop();
 		}
 	}
@@ -122,6 +134,7 @@ public class ConfigHandler {
 		public final ForgeConfigSpec.IntValue directionBarWidth;
 		public final ForgeConfigSpec.IntValue directionBarSpan;
 		public final ForgeConfigSpec.BooleanValue directionBarBackground;
+		public final ForgeConfigSpec.BooleanValue structurePreviewAutoSpin;
 
 		Client(ForgeConfigSpec.Builder builder) {
 			String desc;
@@ -179,6 +192,9 @@ public class ConfigHandler {
 
 			desc = "Draws the direction strip on a panel of its own. Turn this off to leave only the marks, the compass points and the readout, with nothing behind them: they carry their own shadows, and fade out towards the ends of the strip on their own.";
 			directionBarBackground = builder.comment(desc).define("directionBarBackground", true);
+
+			desc = "Turns a structure preview slowly on its own, so that it is seen from more than one side without being dragged around. The button on the preview screen switches this on and off as well.";
+			structurePreviewAutoSpin = builder.comment(desc).define("structurePreviewAutoSpin", true);
 
 			builder.pop();
 		}

@@ -167,6 +167,10 @@ public class ClientEventHandler {
 			lastState = null;
 			lastPrevPosTag = null;
 			cachedPrevPos = List.of();
+			// Not in a world any more, so nothing held about the last one still means anything. What a
+			// structure looks like follows from a server's data packs, and the next server joined may
+			// load different ones.
+			StructurePreviewCache.clear();
 			return;
 		}
 

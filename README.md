@@ -38,6 +38,9 @@ alone are what the upstream mod covers; biomes are its sister mod,
 - Search past what you already found for the next instance of it, and the one after that.
 - Filter the list by mod, by dimension, or with a small query language; sort by name, group,
   dimension or source mod.
+- See what a structure looks like before spending a search on it: the server assembles it the way
+  world generation would, without placing any of it anywhere, and the compass draws it as a model
+  you can turn, zoom and cut layers off to look inside.
 
 **After a search**
 
@@ -84,6 +87,10 @@ Things worth knowing about:
 - `structureBlacklist` / `biomeBlacklist` — what the compass will not show or search for. `*` matches
   any number of characters and `?` matches one, so `minecraft:*village*` works.
 - `allowTeleport`, `allowSharing`, and their cooldowns — what players are allowed to do with a result.
+- `allowStructurePreview`, `structurePreviewResolution`, `structurePreviewMaxBlocks` — whether players
+  may see what a structure looks like, how finely it is shown, and how much of it is drawn. Each
+  structure is assembled once and then kept for as long as the server runs, so a preview costs
+  nothing to open again.
 - `showDirectionBar`, `directionBarWidth`, `directionBarSpan` — the horizon strip. Pair a wide strip
   with a large span to have the whole horizon on screen at once.
 - `overlayBackground`, `guiHeaderBackground`, `guiSidebarBackground`, `guiStatusBarBackground` — each
