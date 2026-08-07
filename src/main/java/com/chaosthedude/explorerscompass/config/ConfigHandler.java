@@ -109,8 +109,8 @@ public class ConfigHandler {
 			desc = "How many cells across a structure preview may be. A structure larger than this is shrunk to fit, with each cell of the model standing for several blocks, so higher values show more detail on large structures at the cost of a larger model to send and to draw.";
 			structurePreviewResolution = builder.comment(desc).defineInRange("structurePreviewResolution", 48, 8, 64);
 
-			desc = "How many cells of a structure preview may be sent at once. Only the cells that can be seen from outside the structure are ever sent, and a structure whose surface does not fit inside this is shrunk further until it does. Every cell is a block model the client draws on each frame of the preview screen, so this is also what caps what showing one costs.";
-			structurePreviewMaxBlocks = builder.comment(desc).defineInRange("structurePreviewMaxBlocks", 6000, 512, 32768);
+			desc = "How many cells of a structure preview may be sent at once. Only the cells that can be seen from outside the structure are ever sent, and a structure whose surface does not fit inside this is shrunk further until it does. The client builds them into a single model once, so this decides how detailed a preview is and how large it is to send, rather than what showing it costs each frame.";
+			structurePreviewMaxBlocks = builder.comment(desc).defineInRange("structurePreviewMaxBlocks", 12000, 512, 32768);
 
 			builder.pop();
 		}

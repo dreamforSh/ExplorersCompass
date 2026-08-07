@@ -73,7 +73,7 @@
     "string.explorerscompass.previewScale": "Escala",
     "string.explorerscompass.previewCell": "%s bloques por celda",
     "string.explorerscompass.previewCutaway": "Mostrando %1$s de %2$s capas",
-    "string.explorerscompass.previewOutlineOnly": "Se construye al generarse, así que solo se conoce su forma",
+    "string.explorerscompass.previewOutlineOnly": "No se pudo leer nada de ella, así que solo se muestra la forma de sus piezas",
     "string.explorerscompass.previewPartialOutline": "%s piezas solo pudieron mostrarse como contorno",
     "string.explorerscompass.previewTruncated": "Demasiado grande para mostrarse por completo",
     "string.explorerscompass.tooltip.preview": "Muestra el aspecto de la estructura seleccionada.",

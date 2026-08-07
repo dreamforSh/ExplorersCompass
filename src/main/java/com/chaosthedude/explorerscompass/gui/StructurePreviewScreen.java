@@ -235,6 +235,12 @@ public class StructurePreviewScreen extends Screen {
 		minecraft.setScreen(parentScreen);
 	}
 
+	@Override
+	public void removed() {
+		// The built model is memory on the graphics card, which nothing else would ever give back
+		view.close();
+	}
+
 	/** Searches for this structure, which is what a preview is looked at in order to decide. */
 	private void search() {
 		SearchHistory.pushRecent(SearchTarget.STRUCTURE, structureKey);

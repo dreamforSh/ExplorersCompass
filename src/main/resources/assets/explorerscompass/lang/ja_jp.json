@@ -73,7 +73,7 @@
     "string.explorerscompass.previewScale": "精度",
     "string.explorerscompass.previewCell": "1マスあたり %s ブロック",
     "string.explorerscompass.previewCutaway": "表示中の層: %1$s / %2$s",
-    "string.explorerscompass.previewOutlineOnly": "生成時に組み上がる構造物のため、形しか分かりません",
+    "string.explorerscompass.previewOutlineOnly": "ブロックを読み取れなかったため、パーツの形のみ表示しています",
     "string.explorerscompass.previewPartialOutline": "%s 個のパーツは輪郭のみの表示です",
     "string.explorerscompass.previewTruncated": "大きすぎるため、すべては表示できません",
     "string.explorerscompass.tooltip.preview": "選択中の構造物の見た目を表示します。",

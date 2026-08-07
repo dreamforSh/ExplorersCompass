@@ -73,7 +73,7 @@
     "string.explorerscompass.previewScale": "Точность",
     "string.explorerscompass.previewCell": "%s блоков на ячейку",
     "string.explorerscompass.previewCutaway": "Показано слоёв: %1$s из %2$s",
-    "string.explorerscompass.previewOutlineOnly": "Собирается при генерации, поэтому известна только её форма",
+    "string.explorerscompass.previewOutlineOnly": "Из неё не удалось прочитать ни одного блока, показана только форма частей",
     "string.explorerscompass.previewPartialOutline": "Частей, показанных только контуром: %s",
     "string.explorerscompass.previewTruncated": "Слишком велика, чтобы показать целиком",
     "string.explorerscompass.tooltip.preview": "Показывает, как выглядит выбранная структура.",

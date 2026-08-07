@@ -74,7 +74,7 @@
     "string.explorerscompass.previewScale": "Scale",
     "string.explorerscompass.previewCell": "%s blocks per cell",
     "string.explorerscompass.previewCutaway": "Showing %1$s of %2$s layers",
-    "string.explorerscompass.previewOutlineOnly": "Built as it generates, so only its shape is known",
+    "string.explorerscompass.previewOutlineOnly": "None of it could be read, so only the shape of its pieces is shown",
     "string.explorerscompass.previewPartialOutline": "%s pieces could only be outlined",
     "string.explorerscompass.previewTruncated": "Too large to show in full",
     "string.explorerscompass.tooltip.preview": "Shows what the selected structure looks like.",
