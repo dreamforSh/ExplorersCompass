@@ -20,11 +20,22 @@ import net.minecraft.world.level.levelgen.structure.StructureCheckResult;
 import net.minecraft.world.level.levelgen.structure.StructureStart;
 import net.minecraft.world.level.levelgen.structure.placement.StructurePlacement;
 
-public abstract class StructureSearchWorker<T extends StructurePlacement> extends SearchWorker {
+public abstract class StructureSearchWorker<T extends StructurePlacement> extends BackgroundSearchWorker {
+
+	/**
+	 * How many locations one turn covers. A location that has already been answered for costs a map
+	 * lookup, so handing the turn back after each of them spends much of a search on passing the turn
+	 * round; one that has not can read a chunk off the disk, so a batch has to stay small enough that
+	 * a whole batch of those still fits inside the tick it is taken in.
+	 */
+	private static final int SAMPLES_PER_TURN = 16;
 
 	protected final T placement;
 	protected final List<Structure> structureSet;
 	protected final long seed;
+
+	/** Where these structures would generate, asked of world generation rather than of storage. */
+	protected final StructurePrediction prediction;
 
 	public StructureSearchWorker(SearchContext context, T placement, List<Structure> structureSet) {
 		super(context, ConfigHandler.GENERAL.maxSamples.get());
@@ -32,8 +43,14 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> extend
 		this.placement = placement;
 
 		seed = level.getSeed();
+		prediction = new StructurePrediction(level, structureSet);
 		// The world generation settings were split out of the level data into options of their own
 		finished = !level.getServer().getWorldData().worldGenOptions().generateStructures();
+	}
+
+	@Override
+	int getSamplesPerTurn() {
+		return SAMPLES_PER_TURN;
 	}
 
 	/**
@@ -85,6 +102,64 @@ public abstract class StructureSearchWorker<T extends StructurePlacement> extend
 		}
 
 		return null;
+	}
+
+	/**
+	 * Returns the position and structure world generation would put in the given chunk, or null if
+	 * there is none.
+	 *
+	 * <p>Reads no part of the world, so unlike {@link #getStructureGeneratingAt} this may be asked off
+	 * the server thread — which is the whole point of it, since the cost of a structure search is the
+	 * cost of answering this. What it cannot do is have the last word on a chunk that was generated
+	 * already: see {@link StructurePrediction} and {@link #confirmStructureAt}.
+	 */
+	protected Pair<BlockPos, Structure> predictStructureGeneratingAt(ChunkPos chunkPos) {
+		if (!canPlaceAt(chunkPos)) {
+			return null;
+		}
+
+		final BlockPos locatePos = placement.getLocatePos(chunkPos);
+		if (shouldIgnore(locatePos)) {
+			return null;
+		}
+
+		for (Structure structure : structureSet) {
+			final BlockPos generationPoint = prediction.generationPointAt(structure, chunkPos);
+			if (generationPoint != null) {
+				// Reported where this chunk's structure stands rather than where it was worked out to
+				// settle, since that is where an already generated one would be reported, but at the
+				// height world generation settled on, which storage only knows once a chunk is loaded
+				return Pair.of(new BlockPos(locatePos.getX(), generationPoint.getY(), locatePos.getZ()), structure);
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Puts a structure a prediction turned up to chunk storage, and answers with where it stands, or
+	 * null when storage does not hold it after all. Reads chunks, so this runs on the server thread.
+	 */
+	protected BlockPos confirmStructureAt(ChunkPos chunkPos, Structure structure, int predictedY) {
+		final BlockPos locatePos = placement.getLocatePos(chunkPos);
+		final StructureCheckResult result = level.structureManager().checkStructurePresence(chunkPos, structure, false);
+		if (result == StructureCheckResult.START_NOT_PRESENT) {
+			return null;
+		}
+		if (result == StructureCheckResult.START_PRESENT) {
+			// The start itself was not loaded on this path, so the height world generation would settle
+			// on is the best there is to answer with
+			return new BlockPos(locatePos.getX(), predictedY, locatePos.getZ());
+		}
+
+		final ChunkAccess chunkAccess = level.getChunk(chunkPos.x, chunkPos.z, ChunkStatus.STRUCTURE_STARTS);
+		final StructureStart structureStart = level.structureManager().getStartForStructure(SectionPos.bottomOf(chunkAccess), structure, chunkAccess);
+		if (structureStart == null || !structureStart.isValid()) {
+			return null;
+		}
+
+		// The loaded start knows where it generates, so record its height as well
+		return new BlockPos(locatePos.getX(), structureStart.getBoundingBox().getCenter().getY(), locatePos.getZ());
 	}
 
 	/**

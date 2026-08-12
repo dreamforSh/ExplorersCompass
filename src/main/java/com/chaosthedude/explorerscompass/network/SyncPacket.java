@@ -8,6 +8,7 @@ import java.util.UUID;
 import java.util.function.Supplier;
 
 import com.chaosthedude.explorerscompass.ExplorersCompass;
+import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.config.StructureGroupsConfig;
 import com.chaosthedude.explorerscompass.util.BiomeUtils;
 import com.chaosthedude.explorerscompass.util.SearchTarget;
@@ -45,6 +46,11 @@ public class SyncPacket {
 	private static final Map<UUID, Long> lastSyncedVersions = new HashMap<UUID, Long>();
 
 	private boolean canTeleport;
+	/**
+	 * Whether this server will show a player what a structure looks like. Read from the config rather
+	 * than passed in: unlike teleporting, it is the same answer for every player.
+	 */
+	private boolean allowStructurePreview;
 	private boolean listUnchanged;
 	private boolean firstBatch;
 	private boolean lastBatch;
@@ -53,6 +59,7 @@ public class SyncPacket {
 
 	private SyncPacket(boolean canTeleport, boolean listUnchanged, boolean firstBatch, boolean lastBatch, List<Entry> entries) {
 		this.canTeleport = canTeleport;
+		allowStructurePreview = ConfigHandler.GENERAL.allowStructurePreview.get();
 		this.listUnchanged = listUnchanged;
 		this.firstBatch = firstBatch;
 		this.lastBatch = lastBatch;
@@ -62,6 +69,7 @@ public class SyncPacket {
 
 	public SyncPacket(FriendlyByteBuf buf) {
 		canTeleport = buf.readBoolean();
+		allowStructurePreview = buf.readBoolean();
 		listUnchanged = buf.readBoolean();
 		entries = new ArrayList<Entry>();
 		groupNames = new HashMap<ResourceLocation, String>();
@@ -95,6 +103,7 @@ public class SyncPacket {
 
 	public void toBytes(FriendlyByteBuf buf) {
 		buf.writeBoolean(canTeleport);
+		buf.writeBoolean(allowStructurePreview);
 		buf.writeBoolean(listUnchanged);
 		if (listUnchanged) {
 			return;
@@ -208,8 +217,9 @@ public class SyncPacket {
 
 	void apply() {
 		if (listUnchanged) {
-			// The client already holds the current lists; only this can have changed
+			// The client already holds the current lists; only these can have changed
 			ExplorersCompass.canTeleport = canTeleport;
+			ExplorersCompass.canPreviewStructures = allowStructurePreview;
 			return;
 		}
 
@@ -232,6 +242,7 @@ public class SyncPacket {
 		if (lastBatch) {
 			// Publish everything at once, so the GUI never sees half of a list
 			ExplorersCompass.canTeleport = canTeleport;
+			ExplorersCompass.canPreviewStructures = allowStructurePreview;
 			ExplorersCompass.allowedStructureKeys = new ArrayList<ResourceLocation>(receivedStructureKeys);
 			ExplorersCompass.dimensionKeysForAllowedStructureKeys = ArrayListMultimap.create(receivedStructureDimensionKeys);
 			ExplorersCompass.structureKeysToTypeKeys = new HashMap<ResourceLocation, ResourceLocation>(receivedStructureTypeKeys);

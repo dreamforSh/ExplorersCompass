@@ -1,6 +1,7 @@
 package com.chaosthedude.explorerscompass.network;
 
 import com.chaosthedude.explorerscompass.ExplorersCompass;
+import com.chaosthedude.explorerscompass.preview.StructurePreviewService;
 import com.chaosthedude.explorerscompass.util.BiomeUtils;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
 import com.chaosthedude.explorerscompass.worker.SearchExecutor;
@@ -22,6 +23,7 @@ public class ServerEventHandler {
 		// The record of what was synced to this client is per connection: after a relog the client
 		// may have been on a different server in the meantime, so it has to be synced from scratch
 		SyncPacket.forgetPlayer(event.getEntity().getUUID());
+		StructurePreviewService.forgetPlayer(event.getEntity().getUUID());
 		if (ExplorersCompass.explorersCompass != null) {
 			// Stops any search this player still had running, which nothing would otherwise end until
 			// it had sampled its way to the configured limits
@@ -45,6 +47,9 @@ public class ServerEventHandler {
 		StructureUtils.invalidateCache();
 		BiomeUtils.invalidateCache();
 		SyncPacket.forgetAllPlayers();
+		// The previews built for this world, which are derived from its data packs and its generator
+		StructurePreviewService.invalidateCache();
+		StructurePreviewService.forgetAllPlayers();
 	}
 
 }

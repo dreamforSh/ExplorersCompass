@@ -35,6 +35,13 @@ public class ConcentricRingsSearchWorker extends StructureSearchWorker<Concentri
 	}
 
 	@Override
+	int getSamplesPerTurn() {
+		// Every location this walks is one the placement really does use, so none of them is answered
+		// by the cheap path the workers walking a grid of candidates spend most of their turns on
+		return 4;
+	}
+
+	@Override
 	protected boolean hasMoreToSample() {
 		// Every location is known up front and the list is already limited to the configured radius, so
 		// the only radius left to respect is the one the manager sets. The locations are sorted by
