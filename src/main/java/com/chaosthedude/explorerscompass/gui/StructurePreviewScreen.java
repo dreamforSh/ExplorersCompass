@@ -69,12 +69,24 @@ public class StructurePreviewScreen extends Screen {
 		StructurePreviewCache.request(structureKey);
 	}
 
+	/**
+	 * The backdrop and the furniture standing on it. Drawn from here rather than from the beginning of
+	 * {@link #render}, because the screen draws its background itself as the first thing it does: a
+	 * screen that also drew one of its own would have everything it had drawn veiled by the second.
+	 */
 	@Override
-	public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
-		renderBackground(guiGraphics, mouseX, mouseY, partialTicks);
+	public void renderBackground(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
+		renderTransparentBackground(guiGraphics);
 		GuiTheme.drawHeader(guiGraphics, width);
 		GuiTheme.drawSidebar(guiGraphics, height);
 		GuiTheme.drawTitle(guiGraphics, font, title.getString(), structureKey.toString(), GuiTheme.SIDEBAR_CONTENT_X, 10);
+	}
+
+	@Override
+	public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
+		// Draws the background above, and then the controls in the sidebar. Everything below stands on
+		// the content panel, which is clear of the sidebar, so none of it is drawn over a control.
+		super.render(guiGraphics, mouseX, mouseY, partialTicks);
 
 		final int left = GuiTheme.contentLeft();
 		final int right = left + GuiTheme.contentWidth(width);
@@ -92,8 +104,6 @@ public class StructurePreviewScreen extends Screen {
 		}
 
 		renderInfoBar(guiGraphics, preview, left, right);
-
-		super.render(guiGraphics, mouseX, mouseY, partialTicks);
 		renderButtonTooltip(guiGraphics, mouseX, mouseY);
 	}
 
