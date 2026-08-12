@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import com.chaosthedude.explorerscompass.ExplorersCompass;
+import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.config.StructureGroupsConfig;
 import com.chaosthedude.explorerscompass.util.BiomeUtils;
 import com.chaosthedude.explorerscompass.util.SearchTarget;
@@ -28,7 +29,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
  *
  * <p>The lists are sent in batches, which the client collects and applies all at once.
  */
-public record SyncPacket(boolean canTeleport, boolean listUnchanged, boolean firstBatch, boolean lastBatch, List<Entry> entries, Map<ResourceLocation, String> groupNames) implements CustomPacketPayload {
+public record SyncPacket(boolean canTeleport, boolean allowStructurePreview, boolean listUnchanged, boolean firstBatch, boolean lastBatch, List<Entry> entries, Map<ResourceLocation, String> groupNames) implements CustomPacketPayload {
 
 	// A custom payload may not exceed 1048576 bytes, and a large modpack has more than enough
 	// structures and biomes to push a single packet past that, which disconnects the player as soon
@@ -66,6 +67,9 @@ public record SyncPacket(boolean canTeleport, boolean listUnchanged, boolean fir
 	public static final StreamCodec<RegistryFriendlyByteBuf, SyncPacket> STREAM_CODEC = StreamCodec.of(
 			(buf, packet) -> {
 				buf.writeBoolean(packet.canTeleport());
+				// Unlike teleporting, whether previews are allowed is the same answer for every player,
+				// but it rides along here so that a client learns it at the same moment as the rest
+				buf.writeBoolean(packet.allowStructurePreview());
 				buf.writeBoolean(packet.listUnchanged());
 				if (packet.listUnchanged()) {
 					return;
@@ -95,9 +99,10 @@ public record SyncPacket(boolean canTeleport, boolean listUnchanged, boolean fir
 			},
 			buf -> {
 				final boolean canTeleport = buf.readBoolean();
+				final boolean allowStructurePreview = buf.readBoolean();
 				final boolean listUnchanged = buf.readBoolean();
 				if (listUnchanged) {
-					return new SyncPacket(canTeleport, true, false, false, List.of(), Map.of());
+					return new SyncPacket(canTeleport, allowStructurePreview, true, false, false, List.of(), Map.of());
 				}
 
 				final boolean firstBatch = buf.readBoolean();
@@ -125,7 +130,7 @@ public record SyncPacket(boolean canTeleport, boolean listUnchanged, boolean fir
 					}
 				}
 
-				return new SyncPacket(canTeleport, false, firstBatch, lastBatch, entries, groupNames);
+				return new SyncPacket(canTeleport, allowStructurePreview, false, firstBatch, lastBatch, entries, groupNames);
 			});
 
 	private static int readBounded(int count, int max, String what) {
@@ -150,7 +155,7 @@ public record SyncPacket(boolean canTeleport, boolean listUnchanged, boolean fir
 		final long version = dataVersion(level);
 		final Long lastSynced = lastSyncedVersions.get(player.getUUID());
 		if (lastSynced != null && lastSynced.longValue() == version) {
-			return List.of(new SyncPacket(canTeleport, true, false, false, List.of(), Map.of()));
+			return List.of(new SyncPacket(canTeleport, previewsAllowed(), true, false, false, List.of(), Map.of()));
 		}
 
 		lastSyncedVersions.put(player.getUUID(), version);
@@ -190,13 +195,14 @@ public record SyncPacket(boolean canTeleport, boolean listUnchanged, boolean fir
 		collectEntries(allEntries, SearchTarget.STRUCTURE, StructureUtils.getAllowedStructureKeys(level), StructureUtils.getGeneratingDimensionsForAllowedStructures(level), StructureUtils.getStructureKeysToTypeKeys(level));
 		collectEntries(allEntries, SearchTarget.BIOME, BiomeUtils.getAllowedBiomeKeys(level), BiomeUtils.getGeneratingDimensionsForAllowedBiomes(level), BiomeUtils.getBiomeKeysToGroupKeys(level));
 
+		final boolean allowStructurePreview = previewsAllowed();
 		final List<SyncPacket> packets = new ArrayList<SyncPacket>();
 		List<Entry> batch = new ArrayList<Entry>();
 		int batchBytes = 0;
 		for (Entry entry : allEntries) {
 			int entryBytes = entry.maxByteSize();
 			if (!batch.isEmpty() && (batch.size() >= MAX_BATCH_ENTRIES || batchBytes + entryBytes > MAX_BATCH_BYTES)) {
-				packets.add(new SyncPacket(canTeleport, false, packets.isEmpty(), false, batch, Map.of()));
+				packets.add(new SyncPacket(canTeleport, allowStructurePreview, false, packets.isEmpty(), false, batch, Map.of()));
 				batch = new ArrayList<Entry>();
 				batchBytes = 0;
 			}
@@ -205,8 +211,16 @@ public record SyncPacket(boolean canTeleport, boolean listUnchanged, boolean fir
 			batchBytes += entryBytes;
 		}
 
-		packets.add(new SyncPacket(canTeleport, false, packets.isEmpty(), true, batch, StructureGroupsConfig.getGroupNames()));
+		packets.add(new SyncPacket(canTeleport, allowStructurePreview, false, packets.isEmpty(), true, batch, StructureGroupsConfig.getGroupNames()));
 		return packets;
+	}
+
+	/**
+	 * Whether this server will show a player what a structure looks like. Read from the config rather
+	 * than passed in: unlike teleporting, it is the same answer for every player.
+	 */
+	private static boolean previewsAllowed() {
+		return ConfigHandler.GENERAL.allowStructurePreview.get().booleanValue();
 	}
 
 	private static void collectEntries(List<Entry> entries, SearchTarget searchTarget, List<ResourceLocation> allowedKeys, ListMultimap<ResourceLocation, ResourceLocation> dimensionKeys, Map<ResourceLocation, ResourceLocation> keysToGroupKeys) {
@@ -222,8 +236,9 @@ public record SyncPacket(boolean canTeleport, boolean listUnchanged, boolean fir
 
 	void apply() {
 		if (listUnchanged) {
-			// The client already holds the current lists; only this can have changed
+			// The client already holds the current lists; only these can have changed
 			ExplorersCompass.canTeleport = canTeleport;
+			ExplorersCompass.canPreviewStructures = allowStructurePreview;
 			return;
 		}
 
@@ -246,6 +261,7 @@ public record SyncPacket(boolean canTeleport, boolean listUnchanged, boolean fir
 		if (lastBatch) {
 			// Publish everything at once, so the GUI never sees half of a list
 			ExplorersCompass.canTeleport = canTeleport;
+			ExplorersCompass.canPreviewStructures = allowStructurePreview;
 			ExplorersCompass.allowedStructureKeys = new ArrayList<ResourceLocation>(receivedStructureKeys);
 			ExplorersCompass.dimensionKeysForAllowedStructureKeys = ArrayListMultimap.create(receivedStructureDimensionKeys);
 			ExplorersCompass.structureKeysToTypeKeys = new HashMap<ResourceLocation, ResourceLocation>(receivedStructureTypeKeys);

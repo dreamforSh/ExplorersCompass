@@ -18,6 +18,8 @@ import com.chaosthedude.explorerscompass.network.ClearCachePacket;
 import com.chaosthedude.explorerscompass.network.CompassSearchForNextPacket;
 import com.chaosthedude.explorerscompass.network.CompassSearchPacket;
 import com.chaosthedude.explorerscompass.network.ShareLocationPacket;
+import com.chaosthedude.explorerscompass.network.StructurePreviewPacket;
+import com.chaosthedude.explorerscompass.network.StructurePreviewRequestPacket;
 import com.chaosthedude.explorerscompass.network.SyncPacket;
 import com.chaosthedude.explorerscompass.network.TeleportPacket;
 import com.chaosthedude.explorerscompass.registry.ExplorersCompassRegistry;
@@ -44,13 +46,15 @@ public class ExplorersCompass {
 	 * is then refused during the handshake with a clear message, instead of connecting and failing
 	 * to decode later.
 	 */
-	public static final String PROTOCOL_VERSION = "2.3";
+	public static final String PROTOCOL_VERSION = "2.4";
 
 	public static final Logger LOGGER = LogManager.getLogger(MODID);
 
 	public static ExplorersCompassItem explorersCompass;
 
 	public static boolean canTeleport;
+	/** Whether this server will show a player what a structure looks like. */
+	public static boolean canPreviewStructures;
 	public static List<ResourceLocation> allowedStructureKeys;
 	public static ListMultimap<ResourceLocation, ResourceLocation> dimensionKeysForAllowedStructureKeys;
 	public static Map<ResourceLocation, ResourceLocation> structureKeysToTypeKeys;
@@ -114,9 +118,11 @@ public class ExplorersCompass {
 		registrar.playToServer(BookmarkActionPacket.TYPE, BookmarkActionPacket.STREAM_CODEC, BookmarkActionPacket::handle);
 		registrar.playToServer(ShareLocationPacket.TYPE, ShareLocationPacket.STREAM_CODEC, ShareLocationPacket::handle);
 		registrar.playToServer(CancelSearchPacket.TYPE, CancelSearchPacket.STREAM_CODEC, CancelSearchPacket::handle);
+		registrar.playToServer(StructurePreviewRequestPacket.TYPE, StructurePreviewRequestPacket.STREAM_CODEC, StructurePreviewRequestPacket::handle);
 
-		// Client packet
+		// Client packets
 		registrar.playToClient(SyncPacket.TYPE, SyncPacket.STREAM_CODEC, SyncPacket::handle);
+		registrar.playToClient(StructurePreviewPacket.TYPE, StructurePreviewPacket.STREAM_CODEC, StructurePreviewPacket::handle);
 	}
 
 }

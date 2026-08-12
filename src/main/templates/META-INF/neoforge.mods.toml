@@ -14,9 +14,16 @@ issueTrackerURL="https://github.com/MattCzyr/ExplorersCompass/issues"
     '''
 
 # Opens up ChunkGeneratorStructureState#ringPositions so that a stronghold search can wait on the
-# ring positions by yielding, rather than blocking the server thread inside getRingPositionsFor.
+# ring positions by yielding, rather than blocking the server thread inside getRingPositionsFor, and
+# the parts of a placement's chunk check and of a structure's placement that a search works out for
+# itself rather than asking the world for.
 [[accessTransformers]]
     file="META-INF/accesstransformer.cfg"
+
+# The terrain height cache and the two readers a structure preview is assembled through. See the
+# mixin package for what each does and why an access transformer will not do instead.
+[[mixins]]
+    config="explorerscompass.mixins.json"
 
 [[dependencies.${mod_id}]]
     modId="neoforge"

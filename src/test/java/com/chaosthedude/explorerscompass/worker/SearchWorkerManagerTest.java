@@ -83,6 +83,11 @@ class SearchWorkerManagerTest {
 		// positions a placement is still computing
 		private int turnsUntilReady;
 
+		// How many locations one of its turns covers, standing in for how expensive a single one is
+		private int samplesPerTurn = 1;
+
+		private boolean putToWork;
+
 		private int radius;
 
 		private FakeWorker(SearchContext context, String name, int step, int findAt, ResourceLocation key) {
@@ -94,12 +99,22 @@ class SearchWorkerManagerTest {
 		}
 
 		@Override
+		protected void onBegin() {
+			putToWork = true;
+		}
+
+		@Override
 		boolean isReady() {
 			if (turnsUntilReady <= 0) {
 				return true;
 			}
 			turnsUntilReady--;
 			return false;
+		}
+
+		@Override
+		int getSamplesPerTurn() {
+			return samplesPerTurn;
 		}
 
 		@Override
@@ -160,6 +175,36 @@ class SearchWorkerManagerTest {
 		// other placement of the search standing still for as long as that one is not ready.
 		assertEquals(0, waiting.getSamples());
 		assertEquals(1, ready.getSamples());
+	}
+
+	@Test
+	void aWorkerIsPutToWorkEvenWhileItCannotSampleYet() {
+		final RecordingContext context = new RecordingContext(10000);
+		final FakeWorker waiting = new FakeWorker(context, "waiting", 100, 0, null);
+		waiting.turnsUntilReady = TURN_LIMIT;
+		final SearchWorkerManager manager = searchOf(context, waiting);
+
+		manager.doWork();
+
+		// A worker searching on a thread of its own is not ready until that thread has finished, and
+		// putting it to work is what starts that thread. Waiting for it to be ready first would leave it
+		// waiting on a thread nobody ever started.
+		assertTrue(waiting.putToWork, "the worker was never put to work");
+		assertEquals(0, waiting.getSamples());
+	}
+
+	@Test
+	void oneTurnCoversAsManyLocationsAsTheWorkerAsksFor() {
+		final RecordingContext context = new RecordingContext(10000);
+		final FakeWorker worker = new FakeWorker(context, "batched", 1, 0, null);
+		worker.samplesPerTurn = 8;
+		final SearchWorkerManager manager = searchOf(context, worker);
+
+		manager.doWork();
+
+		// What handing the turn out costs is paid once for the batch rather than once for every
+		// location, which for a location that is cheap to sample is most of what it costs at all
+		assertEquals(8, worker.getSamples());
 	}
 
 	@Test

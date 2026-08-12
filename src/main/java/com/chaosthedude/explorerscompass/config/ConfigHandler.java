@@ -36,11 +36,15 @@ public class ConfigHandler {
 		public final ModConfigSpec.IntValue biomeVerticalSampleSpacing;
 		public final ModConfigSpec.IntValue biomeDepthSampleInterval;
 		public final ModConfigSpec.BooleanValue asyncBiomeSearch;
+		public final ModConfigSpec.BooleanValue asyncStructureSearch;
 		public final ModConfigSpec.IntValue maxSearchTimePerTick;
 		public final ModConfigSpec.IntValue searchRequestCooldownMillis;
 		public final ModConfigSpec.IntValue maxBookmarks;
 		public final ModConfigSpec.BooleanValue allowSharing;
 		public final ModConfigSpec.IntValue shareCooldownMillis;
+		public final ModConfigSpec.BooleanValue allowStructurePreview;
+		public final ModConfigSpec.IntValue structurePreviewResolution;
+		public final ModConfigSpec.IntValue structurePreviewMaxBlocks;
 
 		General(ModConfigSpec.Builder builder) {
 			String desc;
@@ -81,8 +85,11 @@ public class ConfigHandler {
 			desc = "How many locations apart, along each axis, a biome search looks at the heights other than the one it was started at. The height a search starts at is sampled everywhere, since that is where the biome being looked for usually is; the rest of the dimension is sampled on a coarser grid, since a biome that fills the caves covers far more ground than the spacing between two locations. Raising this searches faster but can step over a small cave biome, and 1 samples every height at every location.";
 			biomeDepthSampleInterval = builder.comment(desc).defineInRange("biomeDepthSampleInterval", 4, 1, 64);
 
-			desc = "Runs biome searches on a thread of their own rather than in slices of the server tick, which finishes them several times sooner and costs the server nothing while they run. This is safe because which biome generates somewhere follows from the world seed and the generator's noise alone, which the game itself samples from its own worldgen threads. Turn it off if a mod that adds a biome source of its own turns out not to be safe to sample from another thread. Structure searches are unaffected: answering whether a structure is present reads chunks from storage, which only the server thread may do.";
+			desc = "Runs biome searches on threads of their own rather than in slices of the server tick, which finishes them several times sooner and costs the server nothing while they run. A search is shared out over as many threads as searching is allowed, each taking its own share of the ground. This is safe because which biome generates somewhere follows from the world seed and the generator's noise alone, which the game itself samples from its own worldgen threads. Turn it off if a mod that adds a biome source of its own turns out not to be safe to sample from another thread.";
 			asyncBiomeSearch = builder.comment(desc).define("asyncBiomeSearch", true);
+
+			desc = "Runs structure searches off the server thread, shared out over as many threads as searching is allowed, by working out where a structure would generate the same way world generation decides it instead of asking chunk storage about every location the search looks at. Almost all of what a structure search costs is that question, and asking world generation instead reads no part of the world, so the search leaves the server thread free while it runs and finishes far sooner. The location it settles on is still put to chunk storage before the compass is pointed at it. What this can differ over is ground that was generated under settings that have since changed, such as an old world or a data pack that has been edited: there the compass answers with where a structure would generate now. Turn it off to have every location answered by chunk storage on the server thread, as it was before, and also if a mod that adds structures of its own turns out not to be safe to generate from another thread.";
+			asyncStructureSearch = builder.comment(desc).define("asyncStructureSearch", true);
 
 			desc = "The maximum amount of time in milliseconds that searches may spend on the server thread during a single tick. Sampling a location can be expensive, so this caps how much of each tick searching is allowed to consume. This is shared by every search running on the server, which take turns within it, so raising it does not let one player's search crowd out another's. Lower values keep the game responsive while a search is running, higher values complete searches sooner.";
 			maxSearchTimePerTick = builder.comment(desc).defineInRange("maxSearchTimePerTick", 10, 1, 50);
@@ -98,6 +105,15 @@ public class ConfigHandler {
 
 			desc = "The minimum time in milliseconds between locations shared by the same player, so that sharing cannot be used to flood chat. Set to 0 to disable.";
 			shareCooldownMillis = builder.comment(desc).defineInRange("shareCooldownMillis", 3000, 0, 60000);
+
+			desc = "Allows players to see what a structure looks like before searching for one. The server assembles the structure the way world generation would, without placing any of it anywhere, and sends back a small model of it. This is done once per structure and then kept for as long as the server runs, so looking at the same structure again costs nothing. Turn it off to have the compass answer that there is nothing to show.";
+			allowStructurePreview = builder.comment(desc).define("allowStructurePreview", true);
+
+			desc = "How many cells across a structure preview may be. The default is large enough that no structure is shrunk to fit it, so a preview is one cell to one block and shows the structure at its own size; lower it to cap how large a preview may be however large the structure is. What actually decides whether a preview is shown one to one is the cell budget below.";
+			structurePreviewResolution = builder.comment(desc).defineInRange("structurePreviewResolution", 1024, 8, 1024);
+
+			desc = "How many cells of a structure preview may be sent. Only the cells that can be seen from outside the structure are ever sent, and a structure whose surface does not fit inside this is shrunk until it does, at which point it is no longer one cell to one block. The default clears every structure the game itself adds by several times over: the largest of them, a bastion, comes to under 60000 solid blocks even counting every piece it could possibly be assembled from, and only part of that is ever visible from outside. A structure that does not fit is named in the log. Previews are sent in pieces and each is built once and then kept, so this is what one costs the first time it is opened rather than what it costs to show.";
+			structurePreviewMaxBlocks = builder.comment(desc).defineInRange("structurePreviewMaxBlocks", 200000, 512, 400000);
 
 			builder.pop();
 		}
@@ -121,6 +137,8 @@ public class ConfigHandler {
 		public final ModConfigSpec.IntValue directionBarWidth;
 		public final ModConfigSpec.IntValue directionBarSpan;
 		public final ModConfigSpec.BooleanValue directionBarBackground;
+		public final ModConfigSpec.BooleanValue structurePreviewAutoSpin;
+		public final ModConfigSpec.IntValue structurePreviewDetailLimit;
 
 		Client(ModConfigSpec.Builder builder) {
 			String desc;
@@ -180,6 +198,12 @@ public class ConfigHandler {
 
 			desc = "Draws the direction strip on a panel of its own. Turn this off to leave only the marks, the compass points and the readout, with nothing behind them: they carry their own shadows, and fade out towards the ends of the strip on their own.";
 			directionBarBackground = builder.comment(desc).define("directionBarBackground", true);
+
+			desc = "Turns a structure preview slowly on its own, so that it is seen from more than one side without being dragged around. The button on the preview screen switches this on and off as well.";
+			structurePreviewAutoSpin = builder.comment(desc).define("structurePreviewAutoSpin", true);
+
+			desc = "How many cells a structure preview may hold before it is drawn as coloured blocks instead of real ones. Both are one cell to one block; what the coloured tier gives up is the textures, not the detail. Real blocks take far longer to assemble into a model, so a large structure is shown as its shape and its colours rather than after a long wait. Raise this to see real blocks on larger structures, at the cost of that wait when a preview opens; set it to 0 to always show colours.";
+			structurePreviewDetailLimit = builder.comment(desc).defineInRange("structurePreviewDetailLimit", 20000, 0, 400000);
 
 			builder.pop();
 		}
