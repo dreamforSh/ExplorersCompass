@@ -235,9 +235,10 @@ public class BookmarksScreen extends Screen {
 		pointAtButton.active = hasSelection;
 		removeButton.active = hasSelection;
 		clearButton.active = !bookmarks.isEmpty();
-		// The coordinates of a location in another dimension cannot be travelled to from here
+		// The teleport changes dimension when the bookmark is not in this one, so it is available
+		// for any remembered location
 		teleportButton.visible = ExplorersCompass.canTeleport;
-		teleportButton.active = hasSelection && selected.isInCurrentDimension();
+		teleportButton.active = hasSelection;
 		shareButton.visible = ConfigHandler.GENERAL.allowSharing.get();
 		shareButton.active = hasSelection;
 	}
