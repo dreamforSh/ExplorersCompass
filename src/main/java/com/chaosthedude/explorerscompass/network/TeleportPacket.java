@@ -1,5 +1,7 @@
 package com.chaosthedude.explorerscompass.network;
 
+import java.util.Collections;
+
 import com.chaosthedude.explorerscompass.ExplorersCompass;
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.items.ExplorersCompassItem;
@@ -9,17 +11,21 @@ import com.chaosthedude.explorerscompass.util.PlayerUtils;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.level.TicketType;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.util.Mth;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -54,16 +60,17 @@ public record TeleportPacket() implements CustomPacketPayload {
 		final ExplorersCompassItem explorersCompass = (ExplorersCompassItem) stack.getItem();
 		if (ConfigHandler.GENERAL.allowTeleport.get() && PlayerUtils.canTeleport(player.getServer(), player)) {
 			if (explorersCompass.getState(stack) == CompassState.FOUND) {
-				// The coordinates were found in the dimension the search ran in, and mean nothing
-				// anywhere else. Compasses from before the dimension was recorded have no way to
-				// tell, and keep the old behavior.
 				final ResourceLocation foundDimension = explorersCompass.getFoundDimension(stack);
-				if (foundDimension != null && !player.level().dimension().location().equals(foundDimension)) {
+				final ServerLevel targetLevel = resolveTargetLevel(player, foundDimension);
+				if (targetLevel == null) {
 					player.displayClientMessage(Component.translatable("string.explorerscompass.wrongDimension"), true);
+					ExplorersCompass.LOGGER.warn("Could not teleport " + player.getDisplayName().getString()
+							+ " to " + foundDimension + ": that dimension is not loaded");
 					return;
 				}
 
-				teleportWhenChunkIsReady(player, explorersCompass.getFoundStructureX(stack), explorersCompass.getFoundStructureY(stack), explorersCompass.getFoundStructureZ(stack));
+				teleportWhenChunkIsReady(player, targetLevel, explorersCompass.getFoundStructureX(stack),
+						explorersCompass.getFoundStructureY(stack), explorersCompass.getFoundStructureZ(stack));
 			}
 		} else {
 			ExplorersCompass.LOGGER.warn("Player " + player.getDisplayName().getString() + " tried to teleport but does not have permission.");
@@ -71,29 +78,49 @@ public record TeleportPacket() implements CustomPacketPayload {
 	}
 
 	/**
-	 * Requests the target chunk and teleports once it is ready. The search never generated this
-	 * chunk (it stops at structure starts), so loading it here usually means generating it, which
-	 * takes long enough that doing it synchronously would stall the whole server. Requesting it as
-	 * a future lets the generation run on the worker threads instead, and the teleport itself runs
-	 * back on the server thread once they are done.
+	 * The level the compass coordinates belong to. A compass from before the dimension was recorded
+	 * has no way to tell, and keeps the old behavior of landing wherever the player currently is.
 	 */
-	private static void teleportWhenChunkIsReady(ServerPlayer player, int x, int structureY, int z) {
-		final ServerLevel level = player.serverLevel();
+	private static ServerLevel resolveTargetLevel(ServerPlayer player, ResourceLocation foundDimension) {
+		if (foundDimension == null) {
+			return player.serverLevel();
+		}
+		return player.getServer().getLevel(ResourceKey.create(Registries.DIMENSION, foundDimension));
+	}
+
+	/**
+	 * Requests the target chunk in the dimension the structure was found in, and teleports once it
+	 * is ready. The search never generated this chunk (it stops at structure starts), so loading it
+	 * here usually means generating it.
+	 *
+	 * <p>The destination is held with a teleport ticket before generation is asked for. Custom
+	 * dimensions have no spawn chunks, so without that ticket the column unloads as soon as
+	 * generation finishes; the player then falls into the void and respawns in the overworld. The
+	 * teleport itself goes through {@link ServerPlayer#teleportTo(ServerLevel, double, double,
+	 * double, java.util.Set, float, float)}, which is what {@code /tp} uses: it adds the same ticket
+	 * again, and changes dimension when the structure is not in the world the player is standing in.
+	 */
+	private static void teleportWhenChunkIsReady(ServerPlayer player, ServerLevel level, int x, int structureY, int z) {
+		final ChunkPos chunkPos = new ChunkPos(SectionPos.blockToSectionCoord(x), SectionPos.blockToSectionCoord(z));
+		level.getChunkSource().addRegionTicket(TicketType.POST_TELEPORT, chunkPos, 1, player.getId());
 		// What comes back says whether the chunk was produced, where it used to be one of the chunk or
 		// a reason it was not
-		level.getChunkSource().getChunkFuture(SectionPos.blockToSectionCoord(x), SectionPos.blockToSectionCoord(z), ChunkStatus.FULL, true).thenAcceptAsync((result) -> {
+		level.getChunkSource().getChunkFuture(chunkPos.x, chunkPos.z, ChunkStatus.FULL, true).thenAcceptAsync((result) -> {
 			if (!result.isSuccess()) {
-				ExplorersCompass.LOGGER.warn("Could not load the chunk at " + x + ", " + z + " to teleport " + player.getDisplayName().getString() + ": " + result.getError());
+				ExplorersCompass.LOGGER.warn("Could not load the chunk at " + x + ", " + z + " in "
+						+ level.dimension().location() + " to teleport " + player.getDisplayName().getString()
+						+ ": " + result.getError());
 				return;
 			}
-			// The player may have logged out, died, or changed dimension while the chunk generated
-			if (player.hasDisconnected() || player.isRemoved() || player.serverLevel() != level) {
+			// Logged out or already gone: do not pull a player back in. Changing dimension while the
+			// chunk generated is not a reason to abort — the destination is this level, not wherever
+			// they happen to be now.
+			if (player.hasDisconnected() || player.isRemoved() || !player.isAlive()) {
 				return;
 			}
 
 			final int y = findValidTeleportHeight(level, x, structureY, z);
-			player.stopRiding();
-			player.connection.teleport(x, y, z, player.getYRot(), player.getXRot());
+			player.teleportTo(level, x + 0.5D, y, z + 0.5D, Collections.emptySet(), player.getYRot(), player.getXRot());
 
 			if (!player.isFallFlying()) {
 				player.setDeltaMovement(player.getDeltaMovement().x(), 0, player.getDeltaMovement().z());
