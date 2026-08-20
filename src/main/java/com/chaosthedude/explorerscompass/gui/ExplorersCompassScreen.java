@@ -1018,11 +1018,10 @@ public class ExplorersCompassScreen extends Screen {
 		}
 
 		// canTeleport arrives with the first sync, which may be after this screen was opened. The
-		// located coordinates only mean something in the dimension the search ran in.
-		final boolean inFoundDimension = foundDimension == null
-				|| foundDimension.equals(currentDimension);
+		// teleport itself changes dimension when the structure is not in this one, so the button
+		// stays available from anywhere the compass has a location for.
 		teleportButton.visible = ExplorersCompass.canTeleport;
-		teleportButton.active = located && inFoundDimension;
+		teleportButton.active = located;
 		shareButton.visible = buttonState.allowSharing();
 		shareButton.active = located;
 
