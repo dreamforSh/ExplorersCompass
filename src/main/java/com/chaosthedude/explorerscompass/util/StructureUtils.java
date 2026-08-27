@@ -40,6 +40,7 @@ import net.minecraft.world.level.chunk.ChunkGeneratorStructureState;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.levelgen.structure.StructureSet;
 import net.minecraft.world.level.levelgen.structure.StructureSet.StructureSelectionEntry;
+import net.minecraft.world.level.levelgen.structure.placement.StructurePlacement;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
 import net.neoforged.fml.ModContainer;
@@ -176,26 +177,51 @@ public class StructureUtils {
 	private static void collectAllowedStructures(ServerLevel level, boolean hideUngeneratable, List<ResourceLocation> allowedKeys, ListMultimap<ResourceLocation, ResourceLocation> dimensionKeys) {
 		// A world generating no structures at all has none to offer, whatever its registries hold. The
 		// world generation settings were split out of the level data into options of their own.
-		if (hideUngeneratable && !level.getServer().getWorldData().worldGenOptions().generateStructures()) {
-			return;
+		if (!level.getServer().getWorldData().worldGenOptions().generateStructures()) {
+			ExplorersCompass.LOGGER.info(hideUngeneratable ? "This world generates no structures, so the compass offers none" : "This world generates no structures, but hideStructuresThatCannotGenerate is off, so the compass offers them anyway");
+			if (hideUngeneratable) {
+				return;
+			}
 		}
 
-		// Collect the structure state of each dimension once, instead of once per structure
-		final Map<ResourceLocation, ChunkGeneratorStructureState> statesPerDimension = getStructureStatesPerDimension(level);
+		// Collect what each dimension generates once, instead of once per structure
+		final Map<ResourceLocation, DimensionWorldGen> worldGenPerDimension = getWorldGenPerDimension(level);
+		final List<ResourceLocation> ungeneratableKeys = new ArrayList<ResourceLocation>();
 		for (Holder.Reference<Structure> holder : getStructureRegistry(level).holders().toList()) {
 			final ResourceLocation structureKey = holder.key().location();
 			if (structureIsBlacklisted(structureKey)) {
 				continue;
 			}
 
-			final List<ResourceLocation> dimensions = getGeneratingDimensionKeys(holder, statesPerDimension);
-			if (dimensions.isEmpty() && hideUngeneratable) {
-				continue;
+			final List<ResourceLocation> dimensions = getGeneratingDimensionKeys(holder, worldGenPerDimension);
+			if (dimensions.isEmpty()) {
+				// Named in the log rather than only counted: which structures a world turns out not to be
+				// able to generate is the one thing that cannot be worked out from the outside, and it is
+				// the first thing to know when the compass is not offering what it was expected to
+				ungeneratableKeys.add(structureKey);
+				if (hideUngeneratable) {
+					continue;
+				}
 			}
 
 			allowedKeys.add(structureKey);
 			dimensionKeys.putAll(structureKey, dimensions);
 		}
+
+		if (!ungeneratableKeys.isEmpty()) {
+			ExplorersCompass.LOGGER.info("No dimension of this world can generate " + ungeneratableKeys.size() + " structure(s), which the compass therefore " + (hideUngeneratable ? "leaves out" : "still offers, hideStructuresThatCannotGenerate being off") + ": " + joinKeys(ungeneratableKeys));
+		}
+	}
+
+	private static String joinKeys(List<ResourceLocation> keys) {
+		final StringBuilder joined = new StringBuilder();
+		for (ResourceLocation key : keys) {
+			if (joined.length() > 0) {
+				joined.append(", ");
+			}
+			joined.append(key);
+		}
+		return joined.toString();
 	}
 
 	/**
@@ -288,32 +314,40 @@ public class StructureUtils {
 	}
 
 	/**
-	 * The structure state of each dimension of this server, in the order the server walks its levels.
-	 * This is what says where a structure can be placed, and it is also what a search asks, so
-	 * offering a structure and searching for one are decided by the same thing.
+	 * What one dimension's world generation has to say about whether a structure can generate in it:
+	 * the placements it holds, and the biomes it can produce.
 	 */
-	private static Map<ResourceLocation, ChunkGeneratorStructureState> getStructureStatesPerDimension(ServerLevel serverLevel) {
-		final Map<ResourceLocation, ChunkGeneratorStructureState> statesPerDimension = new LinkedHashMap<ResourceLocation, ChunkGeneratorStructureState>();
+	private record DimensionWorldGen(ChunkGeneratorStructureState structureState, Set<Holder<Biome>> possibleBiomes) {
+	}
+
+	/** The world generation of each dimension of this server, in the order the server walks its levels. */
+	private static Map<ResourceLocation, DimensionWorldGen> getWorldGenPerDimension(ServerLevel serverLevel) {
+		final Map<ResourceLocation, DimensionWorldGen> worldGenPerDimension = new LinkedHashMap<ResourceLocation, DimensionWorldGen>();
 		for (ServerLevel level : serverLevel.getServer().getAllLevels()) {
-			statesPerDimension.put(level.dimension().location(), level.getChunkSource().getGeneratorState());
+			final ChunkGeneratorStructureState structureState = level.getChunkSource().getGeneratorState();
+			final Set<Holder<Biome>> possibleBiomes = level.getChunkSource().getGenerator().getBiomeSource().possibleBiomes();
+			worldGenPerDimension.put(level.dimension().location(), new DimensionWorldGen(structureState, possibleBiomes));
 		}
-		return statesPerDimension;
+		return worldGenPerDimension;
 	}
 
 	/**
 	 * The dimensions the given structure can generate in: the ones whose world generation holds a
 	 * placement that would put it somewhere.
 	 *
-	 * <p>A structure is only ever placed by a structure set that names it and whose biomes the
-	 * dimension actually has, so a dimension with no placement for it cannot generate it however
-	 * fully it is registered. That is what a data pack leaves behind when it disables a structure,
-	 * whether by emptying the biome tag the structure is bound to or by taking the structure out of
-	 * every structure set, and it is also what a structure belonging to no set at all looks like.
+	 * <p>Both halves of what world generation asks have to hold. Something has to offer the structure
+	 * a chunk, which is a structure set that names it, and the biome that chunk turns out to hold has
+	 * to be one the structure is bound to. A dimension failing either can no more generate the
+	 * structure than one that has never heard of it, and between them the two cover what a data pack
+	 * leaves behind however it disables a structure: an emptied biome tag, a structure taken out of
+	 * every structure set, a set switched off by having its frequency set to nought, a structure
+	 * belonging to no set in the first place.
 	 */
-	private static List<ResourceLocation> getGeneratingDimensionKeys(Holder.Reference<Structure> structure, Map<ResourceLocation, ChunkGeneratorStructureState> statesPerDimension) {
+	private static List<ResourceLocation> getGeneratingDimensionKeys(Holder.Reference<Structure> structure, Map<ResourceLocation, DimensionWorldGen> worldGenPerDimension) {
 		final List<ResourceLocation> dimensions = new ArrayList<ResourceLocation>();
-		for (Map.Entry<ResourceLocation, ChunkGeneratorStructureState> entry : statesPerDimension.entrySet()) {
-			if (!entry.getValue().getPlacementsForStructure(structure).isEmpty()) {
+		for (Map.Entry<ResourceLocation, DimensionWorldGen> entry : worldGenPerDimension.entrySet()) {
+			final DimensionWorldGen worldGen = entry.getValue();
+			if (hasPlacementIn(worldGen.structureState(), structure) && hasBiomeIn(structure.value(), worldGen.possibleBiomes())) {
 				dimensions.add(entry.getKey());
 			}
 		}
@@ -322,6 +356,38 @@ public class StructureUtils {
 			dimensions.add(OVERWORLD_KEY);
 		}
 		return dimensions;
+	}
+
+	/** Whether a dimension's world generation holds a placement that would ever offer the structure a chunk. */
+	private static boolean hasPlacementIn(ChunkGeneratorStructureState structureState, Holder<Structure> structure) {
+		for (StructurePlacement placement : structureState.getPlacementsForStructure(structure)) {
+			// A frequency of nought turns down every chunk the placement is ever offered, which is
+			// another of the ways a structure set is switched off without being taken away, so a
+			// structure left with nothing but placements like that can no more generate than one with no
+			// placement at all
+			if (placement.frequency() > 0.0F) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Whether a dimension can produce any of the biomes the structure is bound to.
+	 *
+	 * <p>Asked of the structure's own biome set every time rather than taken from what world
+	 * generation worked out when the dimension was created. That set is usually a tag, emptying such
+	 * a tag is the commonest way a data pack switches a structure off, and a tag that is emptied
+	 * after a dimension has settled its placements leaves them naming a structure that generation
+	 * will nonetheless refuse every chunk it is offered.
+	 */
+	private static boolean hasBiomeIn(Structure structure, Set<Holder<Biome>> possibleBiomes) {
+		for (Holder<Biome> biome : structure.biomes()) {
+			if (possibleBiomes.contains(biome)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	public static int getHorizontalDistanceToLocation(Player player, int x, int z) {
