@@ -411,7 +411,7 @@ public class ClientEventHandler {
 	 * its identity tracks its contents. Watching the stack's tag instead would miss the compass being
 	 * cleared on this side, where the tag is emptied rather than replaced, and would leave the marks
 	 * for forgotten locations on the strip until the server happened to send a new stack. This runs
-	 * every frame, and parsing the list that often adds up.
+	 * for every HUD update, and parsing the list that often adds up.
 	 */
 	private List<BlockPos> getPrevPosCached(ExplorersCompassItem compass, ItemStack stack) {
 		final List<BlockPos> prevPos = compass.getPrevPos(stack);

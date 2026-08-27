@@ -109,10 +109,13 @@ public class SearchHistory {
 		save();
 	}
 
-	/** What was searched for most recently, most recent first. */
+	/**
+	 * What was searched for most recently, most recent first. A copy: the list behind it is what
+	 * gets saved to disk, and nothing outside this class may edit that.
+	 */
 	public static List<ResourceLocation> getRecents(SearchTarget searchTarget) {
 		ensureLoaded();
-		return histories.get(searchTarget).recents;
+		return List.copyOf(histories.get(searchTarget).recents);
 	}
 
 	public static void pushRecent(SearchTarget searchTarget, ResourceLocation key) {

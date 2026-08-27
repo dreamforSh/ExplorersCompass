@@ -29,8 +29,9 @@ public record StructurePreviewRequestPacket(ResourceLocation structureKey) imple
 	}
 
 	/**
-	 * Handled on the server thread, which the context puts this on: assembling a preview reads the
-	 * registries and the structure templates, and its result is kept for every player after.
+	 * Handled on the server thread, which the context puts this on. A preview already worked out is
+	 * answered right away; one still to be built is built off the server thread, and the answer goes
+	 * out once it lands — see {@link StructurePreviewService}.
 	 */
 	public static void handle(StructurePreviewRequestPacket packet, IPayloadContext ctx) {
 		if (!(ctx.player() instanceof ServerPlayer player)) {
@@ -58,14 +59,12 @@ public record StructurePreviewRequestPacket(ResourceLocation structureKey) imple
 			return;
 		}
 
-		StructurePreview preview = null;
 		try {
-			preview = StructurePreviewService.get(player, structureKey);
+			StructurePreviewService.request(player, structureKey, (waiter, preview) -> answer(waiter, structureKey, preview));
 		} catch (Throwable t) {
 			// This runs on the server thread, so an exception here would take down the server
-			ExplorersCompass.LOGGER.error("Failed to build a preview of " + structureKey, t);
+			ExplorersCompass.LOGGER.error("Failed to request a preview of " + structureKey, t);
 		}
-		answer(player, structureKey, preview);
 	}
 
 	/**

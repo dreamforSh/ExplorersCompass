@@ -97,10 +97,10 @@ Things worth knowing about:
   generating no structures. Turn it off to be offered everything the registries hold.
 - `allowTeleport`, `allowSharing`, and their cooldowns — what players are allowed to do with a result.
 - `allowStructurePreview`, `structurePreviewResolution`, `structurePreviewMaxBlocks` — whether players
-  may see what a structure looks like, how finely it is shown, and how much of it is drawn. Each
-  structure is assembled once and then kept for as long as the server runs, so a preview costs
-  nothing to open again. `structurePreviewDetailLimit`, client side, is where a preview stops being
-  drawn from real blocks and starts being drawn as coloured ones.
+  may see what a structure looks like, how finely it is shown, and how much of it is drawn. Structures
+  are assembled off the server thread and the most recently viewed ones are kept assembled, so a
+  preview costs nothing to open again while it stays in use. `structurePreviewDetailLimit`, client
+  side, is where a preview stops being drawn from real blocks and starts being drawn as coloured ones.
 - `showDirectionBar`, `directionBarWidth`, `directionBarSpan` — the horizon strip. Pair a wide strip
   with a large span to have the whole horizon on screen at once.
 - `overlayBackground`, `guiHeaderBackground`, `guiSidebarBackground`, `guiStatusBarBackground` — each

@@ -59,19 +59,19 @@ public class ModDataComponents {
 	 */
 	public static final DeferredHolder<DataComponentType<?>, DataComponentType<List<ResourceLocation>>> TARGET_KEYS = COMPONENTS.registerComponentType("target_keys",
 			builder -> builder
-					.persistent(ResourceLocation.CODEC.listOf())
+					.persistent(boundedList(ResourceLocation.CODEC, MAX_STREAMED_TARGET_KEYS))
 					.networkSynchronized(immutableList(ResourceLocation.STREAM_CODEC, MAX_STREAMED_TARGET_KEYS)));
 
 	/** The locations this compass has already located, which further searches pass over. */
 	public static final DeferredHolder<DataComponentType<?>, DataComponentType<List<BlockPos>>> PREV_POSITIONS = COMPONENTS.registerComponentType("prev_positions",
 			builder -> builder
-					.persistent(BlockPos.CODEC.listOf())
+					.persistent(boundedList(BlockPos.CODEC, MAX_STREAMED_POSITIONS))
 					.networkSynchronized(immutableList(BlockPos.STREAM_CODEC, MAX_STREAMED_POSITIONS)));
 
 	/** The locations this compass has collected, oldest first, so they can be pointed at again. */
 	public static final DeferredHolder<DataComponentType<?>, DataComponentType<List<BookmarkEntry>>> BOOKMARKS = COMPONENTS.registerComponentType("bookmarks",
 			builder -> builder
-					.persistent(Codec.list(BookmarkEntry.CODEC))
+					.persistent(boundedList(BookmarkEntry.CODEC, MAX_STREAMED_BOOKMARKS))
 					.networkSynchronized(immutableList(BookmarkEntry.STREAM_CODEC, MAX_STREAMED_BOOKMARKS)));
 
 	/**
@@ -81,6 +81,19 @@ public class ModDataComponents {
 	 */
 	private static <B extends ByteBuf, V> StreamCodec<B, List<V>> immutableList(StreamCodec<? super B, V> elementCodec, int maxSize) {
 		return ByteBufCodecs.<B, V, List<V>>collection(ArrayList::new, elementCodec, maxSize).map(List::copyOf, Function.identity());
+	}
+
+	/**
+	 * A persistent list codec that will not load more entries than the stack could carry across the
+	 * network: a list past that bound makes the whole stack fail to sync, so letting one in from disk
+	 * would trade a hand-edited save for a compass that cannot be shown at all. The writers already
+	 * keep these lists inside their bounds, so anything longer was written by something else, and the
+	 * newest entries are kept — the same end writing that many would have come to.
+	 */
+	private static <V> Codec<List<V>> boundedList(Codec<V> elementCodec, int maxSize) {
+		return elementCodec.listOf().xmap(
+				(values) -> values.size() <= maxSize ? values : List.copyOf(values.subList(values.size() - maxSize, values.size())),
+				Function.identity());
 	}
 
 	private ModDataComponents() {

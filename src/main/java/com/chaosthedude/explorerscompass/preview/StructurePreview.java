@@ -11,7 +11,7 @@ import net.minecraft.world.level.block.state.BlockState;
  * <p>A structure is assembled once on the server and thrown onto a grid of cells, each of which
  * holds whichever block fell into it. Cells with a block on every side of them are dropped, since
  * nothing inside a building is visible from outside it, and what is left is the shell that gets
- * drawn. A preview is therefore a fixed amount of data no matter how large the structure it stands
+ * drawn. A preview is therefore a bounded amount of data however large the structure it stands
  * for is: a village and an igloo both arrive as a shell of at most so many cells.
  *
  * <p>Positions are grid cells rather than blocks. One cell is {@link #getStep()} blocks along each

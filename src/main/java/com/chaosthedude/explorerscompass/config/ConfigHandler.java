@@ -25,6 +25,7 @@ public class ConfigHandler {
 
 	public static class General {
 		public final ModConfigSpec.BooleanValue allowTeleport;
+		public final ModConfigSpec.IntValue teleportCooldownMillis;
 		public final ModConfigSpec.IntValue maxNextSearches;
 		public final ModConfigSpec.BooleanValue displayCoordinates;
 		public final ModConfigSpec.IntValue maxRadius;
@@ -54,7 +55,10 @@ public class ConfigHandler {
 			desc = "Allows a player to teleport to a located structure when in creative mode, opped, or in cheat mode.";
 			allowTeleport = builder.comment(desc).define("allowTeleport", true);
 
-			desc = "The maximum number of times a player can search for the next instance of a located structure, skipping the locations already found. Once this many locations have been collected the next search starts over from the closest one again. Set to 0 to disable searching for further instances and make the compass always locate the nearest one.";
+			desc = "The minimum time in milliseconds between teleports requested by the same player. Teleporting loads, and usually generates, the destination chunk, so this keeps a modified client from queueing up that work as fast as it can send packets. Set to 0 to disable.";
+			teleportCooldownMillis = builder.comment(desc).defineInRange("teleportCooldownMillis", 2000, 0, 60000);
+
+			desc = "The maximum number of times a player can search for the next instance of a located structure, skipping the locations already found. The collected locations are forgotten and the search starts over from the closest instance again once this many have been collected, and likewise once every instance within the search radius has been collected. Set to 0 to disable searching for further instances and make the compass always locate the nearest one.";
 			// The upper bound is what a stack can carry across the network in one go, since every
 			// collected location is kept on it: see ModDataComponents.MAX_STREAMED_POSITIONS.
 			maxNextSearches = builder.comment(desc).defineInRange("maxNextSearches", 100, 0, ModDataComponents.MAX_STREAMED_POSITIONS);
@@ -110,7 +114,7 @@ public class ConfigHandler {
 			desc = "The minimum time in milliseconds between locations shared by the same player, so that sharing cannot be used to flood chat. Set to 0 to disable.";
 			shareCooldownMillis = builder.comment(desc).defineInRange("shareCooldownMillis", 3000, 0, 60000);
 
-			desc = "Allows players to see what a structure looks like before searching for one. The server assembles the structure the way world generation would, without placing any of it anywhere, and sends back a small model of it. This is done once per structure and then kept for as long as the server runs, so looking at the same structure again costs nothing. Turn it off to have the compass answer that there is nothing to show.";
+			desc = "Allows players to see what a structure looks like before searching for one. The server assembles the structure the way world generation would, without placing any of it anywhere, off the server thread, and sends back a small model of it. The most recently viewed structures are kept assembled, so looking at one again costs nothing while it stays in use. Turn it off to have the compass answer that there is nothing to show.";
 			allowStructurePreview = builder.comment(desc).define("allowStructurePreview", true);
 
 			desc = "How many cells across a structure preview may be. The default is large enough that no structure is shrunk to fit it, so a preview is one cell to one block and shows the structure at its own size; lower it to cap how large a preview may be however large the structure is. What actually decides whether a preview is shown one to one is the cell budget below.";

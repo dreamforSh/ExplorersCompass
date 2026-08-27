@@ -314,6 +314,15 @@ public class ExplorersCompassScreen extends Screen {
 			return;
 		}
 
+		// Emptied before layout, so a chip there turns out to be no room for cannot be clicked where
+		// it happened to stand the last time it was drawn
+		for (FilterChip chip : filterChips) {
+			chip.left = 0;
+			chip.right = 0;
+			chip.top = 0;
+			chip.bottom = 0;
+		}
+
 		int chipX = chipsLeft;
 		for (FilterChip chip : filterChips) {
 			final String label = chip.label + " " + CLEAR_GLYPH;
@@ -524,7 +533,9 @@ public class ExplorersCompassScreen extends Screen {
 	 * entry, or, when nothing has been selected yet, the first one the filter left in the list.
 	 */
 	private boolean searchFromKeyboard() {
-		if (multiSelectedKeys.size() > 1) {
+		// However much was picked with Ctrl-click, that is what was picked; falling through to the
+		// first row of the list would search something that was never chosen at all
+		if (!multiSelectedKeys.isEmpty()) {
 			searchForMultiSelection();
 			return true;
 		}
@@ -585,6 +596,9 @@ public class ExplorersCompassScreen extends Screen {
 	 * whatever is already typed in the filter.
 	 */
 	private void rebuildList() {
+		// Held on to across the rebuild, so that the server re-syncing the list, or the language
+		// changing, under an open screen does not throw the player's choice away
+		final ResourceLocation selectedKey = selectionList != null && selectionList.hasSelection() ? selectionList.getSelected().getKey() : null;
 		removeWidget(selectionList);
 		allowedKeys = new ArrayList<ResourceLocation>(searchTarget.getAllowedKeys());
 		searchDocuments = createSearchDocuments();
@@ -601,6 +615,11 @@ public class ExplorersCompassScreen extends Screen {
 		selectionList = null;
 		processSearchTerm();
 		selectionList = addRenderableWidget(createSelectionList());
+		if (selectedKey != null) {
+			// Quietly comes to nothing when the new list no longer holds it, or when the screen has
+			// switched to the other kind of target, where the key means nothing
+			selectionList.selectByKey(selectedKey);
+		}
 		updateButtons();
 	}
 
@@ -643,7 +662,30 @@ public class ExplorersCompassScreen extends Screen {
 		}
 	}
 
+	/** When this client last asked for a search. Shared across screens: each search closes its own. */
+	private static long lastSearchRequestTime;
+
+	/**
+	 * Whether a search may be asked for right now, taking the slot when it may. The server quietly
+	 * ignores requests that arrive inside its cooldown, so a click that would only be ignored is
+	 * refused here instead, where refusing reads as a button that did not take rather than as a
+	 * search that silently never started. Judged against this side's copy of the cooldown setting;
+	 * a server configured stricter still has the last word.
+	 */
+	private static boolean tryAcquireSearchRequestSlot() {
+		final long now = System.currentTimeMillis();
+		final int cooldown = ConfigHandler.GENERAL.searchRequestCooldownMillis.get();
+		if (cooldown > 0 && now - lastSearchRequestTime < cooldown) {
+			return false;
+		}
+		lastSearchRequestTime = now;
+		return true;
+	}
+
 	public void searchForTarget(ResourceLocation key) {
+		if (!tryAcquireSearchRequestSlot()) {
+			return;
+		}
 		SearchHistory.pushRecent(searchTarget, key);
 		PacketDistributor.sendToServer(CompassSearchPacket.forTargets(searchTarget, List.of(key)));
 		minecraft.setScreen(null);
@@ -651,6 +693,9 @@ public class ExplorersCompassScreen extends Screen {
 
 	/** Searches for the nearest of everything picked with Ctrl-click. */
 	public void searchForMultiSelection() {
+		if (!tryAcquireSearchRequestSlot()) {
+			return;
+		}
 		final List<ResourceLocation> keys = new ArrayList<ResourceLocation>(multiSelectedKeys);
 		for (ResourceLocation key : keys) {
 			SearchHistory.pushRecent(searchTarget, key);
@@ -660,7 +705,7 @@ public class ExplorersCompassScreen extends Screen {
 	}
 
 	public void searchForGroup(ResourceLocation key) {
-		if (key == null) {
+		if (key == null || !tryAcquireSearchRequestSlot()) {
 			return;
 		}
 		PacketDistributor.sendToServer(CompassSearchPacket.forGroup(searchTarget, key));
@@ -668,6 +713,9 @@ public class ExplorersCompassScreen extends Screen {
 	}
 
 	public void searchForNext() {
+		if (!tryAcquireSearchRequestSlot()) {
+			return;
+		}
 		PacketDistributor.sendToServer(new CompassSearchForNextPacket());
 		minecraft.setScreen(null);
 	}
@@ -845,7 +893,9 @@ public class ExplorersCompassScreen extends Screen {
 		previewButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.preview"), Component.translatable("string.explorerscompass.tooltip.previewStructuresOnly"));
 
 		searchButton = addSidebarButton(Component.translatable("string.explorerscompass.search"), (onPress) -> {
-			if (multiSelectedKeys.size() > 1) {
+			// Anything picked with Ctrl-click wins, however much of it there is: the button lights up
+			// for a single pick as much as for several, and it has to act on what lit it up
+			if (!multiSelectedKeys.isEmpty()) {
 				searchForMultiSelection();
 			} else if (selectionList.hasSelection()) {
 				selectionList.getSelected().search();
@@ -938,6 +988,8 @@ public class ExplorersCompassScreen extends Screen {
 
 		final int fieldLeft = columnLeft() + PREVIEW_BUTTON_WIDTH + PREVIEW_BUTTON_GAP;
 		searchTextField = new TransparentTextField(font, fieldLeft, 8, columnWidth() - PREVIEW_BUTTON_WIDTH - PREVIEW_BUTTON_GAP, 18, Component.translatable("string.explorerscompass.searchHint"));
+		// The box's own limit is 32, which a filter naming a couple of quoted terms already passes
+		searchTextField.setMaxLength(256);
 		searchTextField.setValue(previousSearchTerm);
 		// Filtering as the field changes covers every way it can: typing, pasting, and the button that
 		// empties it
@@ -1017,7 +1069,9 @@ public class ExplorersCompassScreen extends Screen {
 		// Nothing to show for a biome, nothing to show without something picked, and nothing to show at
 		// all where the server has switched previews off
 		previewButton.active = searchTarget == SearchTarget.STRUCTURE && hasSelection && ExplorersCompass.canPreviewStructures;
-		searchButton.setMessage(multiSelected > 1 ? Component.translatable("string.explorerscompass.search").append(Component.literal(" (" + multiSelected + ")")) : Component.translatable("string.explorerscompass.search"));
+		// The count shows from the first Ctrl-click on, since from then on the button acts on the
+		// picks rather than on the selected row
+		searchButton.setMessage(multiSelected >= 1 ? Component.translatable("string.explorerscompass.search").append(Component.literal(" (" + multiSelected + ")")) : Component.translatable("string.explorerscompass.search"));
 		// A group search applies to the group of a single entry, and only where there is one
 		searchGroupButton.active = selectionHasGroup && multiSelected <= 1;
 

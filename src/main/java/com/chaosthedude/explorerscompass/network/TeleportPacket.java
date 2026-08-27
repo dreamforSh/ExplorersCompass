@@ -30,7 +30,6 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 /** Asks to be teleported to the located structure. */
@@ -58,23 +57,46 @@ public record TeleportPacket() implements CustomPacketPayload {
 		}
 
 		final ExplorersCompassItem explorersCompass = (ExplorersCompassItem) stack.getItem();
-		if (ConfigHandler.GENERAL.allowTeleport.get() && PlayerUtils.canTeleport(player.getServer(), player)) {
-			if (explorersCompass.getState(stack) == CompassState.FOUND) {
-				final ResourceLocation foundDimension = explorersCompass.getFoundDimension(stack);
-				final ServerLevel targetLevel = resolveTargetLevel(player, foundDimension);
-				if (targetLevel == null) {
-					player.displayClientMessage(Component.translatable("string.explorerscompass.wrongDimension"), true);
-					ExplorersCompass.LOGGER.warn("Could not teleport " + player.getDisplayName().getString()
-							+ " to " + foundDimension + ": that dimension is not loaded");
-					return;
-				}
-
-				teleportWhenChunkIsReady(player, targetLevel, explorersCompass.getFoundStructureX(stack),
-						explorersCompass.getFoundStructureY(stack), explorersCompass.getFoundStructureZ(stack));
-			}
-		} else {
-			ExplorersCompass.LOGGER.warn("Player " + player.getDisplayName().getString() + " tried to teleport but does not have permission.");
+		if (!ConfigHandler.GENERAL.allowTeleport.get()) {
+			// Not the same thing as the player lacking permission, whatever the log used to say
+			ExplorersCompass.LOGGER.warn("Ignoring a teleport request from " + player.getDisplayName().getString() + ": teleporting is disabled on this server");
+			return;
 		}
+		if (!PlayerUtils.canTeleport(player.getServer(), player)) {
+			ExplorersCompass.LOGGER.warn("Player " + player.getDisplayName().getString() + " tried to teleport but does not have permission.");
+			return;
+		}
+		if (explorersCompass.getState(stack) != CompassState.FOUND) {
+			return;
+		}
+
+		// Granted only once everything cheaper has passed: requests cost a client nothing to send,
+		// while every teleport granted loads, and usually generates, the destination chunk
+		if (!explorersCompass.tryAcquireTeleportSlot(player)) {
+			ExplorersCompass.LOGGER.info("Ignoring a teleport request from " + player.getDisplayName().getString() + ": another teleport was requested less than " + ConfigHandler.GENERAL.teleportCooldownMillis.get() + "ms ago");
+			return;
+		}
+
+		final ResourceLocation foundDimension = explorersCompass.getFoundDimension(stack);
+		final ServerLevel targetLevel = resolveTargetLevel(player, foundDimension);
+		if (targetLevel == null) {
+			player.displayClientMessage(Component.translatable("string.explorerscompass.dimensionUnavailable"), true);
+			ExplorersCompass.LOGGER.warn("Could not teleport " + player.getDisplayName().getString()
+					+ " to " + foundDimension + ": that dimension is not loaded");
+			return;
+		}
+
+		// The coordinates are read off the compass rather than the packet, but an item can be given
+		// any data at all, so where they lead still has to be somewhere a player may be
+		final int x = explorersCompass.getFoundStructureX(stack);
+		final int z = explorersCompass.getFoundStructureZ(stack);
+		if (!targetLevel.getWorldBorder().isWithinBounds(new BlockPos(x, 0, z))) {
+			player.displayClientMessage(Component.translatable("string.explorerscompass.teleportOutOfBounds"), true);
+			ExplorersCompass.LOGGER.warn("Refusing to teleport " + player.getDisplayName().getString() + " to " + x + ", " + z + ": outside the world border");
+			return;
+		}
+
+		teleportWhenChunkIsReady(player, targetLevel, x, explorersCompass.getFoundStructureY(stack), z);
 	}
 
 	/**
@@ -120,6 +142,14 @@ public record TeleportPacket() implements CustomPacketPayload {
 			}
 
 			final int y = findValidTeleportHeight(level, x, structureY, z);
+			if (y == NO_SAFE_HEIGHT) {
+				// Landing on the heightmap instead would drop the player into whatever made the whole
+				// column unsafe, the void included
+				player.displayClientMessage(Component.translatable("string.explorerscompass.noSafeLanding"), true);
+				ExplorersCompass.LOGGER.warn("Not teleporting " + player.getDisplayName().getString() + " to " + x + ", " + z
+						+ " in " + level.dimension().location() + ": that column holds no safe place to land");
+				return;
+			}
 			player.teleportTo(level, x + 0.5D, y, z + 0.5D, Collections.emptySet(), player.getYRot(), player.getXRot());
 
 			if (!player.isFallFlying()) {
@@ -129,10 +159,14 @@ public record TeleportPacket() implements CustomPacketPayload {
 		}, player.getServer());
 	}
 
+	/** Marks a column that holds no safe place to land at all, such as a structure over the void. */
+	private static final int NO_SAFE_HEIGHT = Integer.MIN_VALUE;
+
 	/**
 	 * The Y level to land at: the safe position closest to the structure's height when the compass
-	 * recorded one, and to sea level otherwise. The column was just loaded, so every read is served
-	 * from memory, and each block of it is read at most once.
+	 * recorded one, and to sea level otherwise, or {@link #NO_SAFE_HEIGHT} when the whole column
+	 * holds none. The column was just loaded, so every read is served from memory, and each block of
+	 * it is read at most once.
 	 */
 	private static int findValidTeleportHeight(Level level, int x, int structureY, int z) {
 		final int minY = level.getMinBuildHeight();
@@ -155,7 +189,9 @@ public record TeleportPacket() implements CustomPacketPayload {
 			}
 		}
 
-		return level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+		// The scan above covered every height of the column, so there is nothing left to fall back
+		// on: whatever this column is made of, a player cannot safely stand anywhere in it
+		return NO_SAFE_HEIGHT;
 	}
 
 	private static boolean isValidTeleportPosition(Level level, int x, int z, int y, BlockState[] states) {
