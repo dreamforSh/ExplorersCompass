@@ -3,6 +3,7 @@ package com.chaosthedude.explorerscompass.util;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -35,6 +36,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.chunk.ChunkGenerator;
+import net.minecraft.world.level.chunk.ChunkGeneratorStructureState;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.levelgen.structure.StructureSet;
 import net.minecraft.world.level.levelgen.structure.StructureSet.StructureSelectionEntry;
@@ -61,11 +63,12 @@ public class StructureUtils {
 	// The structure data the compass syncs and searches is derived from the worldgen registries,
 	// which are fixed for the lifetime of a server, so it is computed once and reused: rebuilding
 	// it walks every structure set and matches every structure against the blacklist and the custom
-	// groups, which is far too much to repeat on every use of the compass. The blacklist is part of
-	// the key because its config file can be edited while the server runs. Only ever touched from
-	// the server thread.
+	// groups, which is far too much to repeat on every use of the compass. The blacklist and the
+	// hiding of what cannot generate are part of the key because their config file can be edited
+	// while the server runs. Only ever touched from the server thread.
 	private static MinecraftServer cachedServer;
 	private static List<String> cachedSyncBlacklist;
+	private static boolean cachedHideUngeneratable;
 	private static List<ResourceLocation> cachedAllowedStructureKeys;
 	private static ListMultimap<ResourceLocation, ResourceLocation> cachedDimensionKeys;
 	private static Map<ResourceLocation, ResourceLocation> cachedStructureKeysToTypeKeys;
@@ -75,26 +78,31 @@ public class StructureUtils {
 	}
 
 	/**
-	 * Maps the key of every structure in the level to the key of the group it belongs to: the group
-	 * configured for it in {@code groups.json} when there is one, otherwise the structure set it
-	 * belongs to, or {@link #NO_TYPE_KEY} when it belongs to neither. The returned map is shared
-	 * and must not be modified.
+	 * Maps the key of every structure the compass may search for to the key of the group it belongs
+	 * to: the group configured for it in {@code groups.json} when there is one, otherwise the
+	 * structure set it belongs to, or {@link #NO_TYPE_KEY} when it belongs to neither. The returned
+	 * map is shared and must not be modified.
 	 */
 	public static Map<ResourceLocation, ResourceLocation> getStructureKeysToTypeKeys(ServerLevel level) {
 		refreshCachedStructureData(level);
 		return cachedStructureKeysToTypeKeys;
 	}
 
-	private static Map<ResourceLocation, ResourceLocation> computeStructureKeysToTypeKeys(ServerLevel level) {
+	/**
+	 * Groups only the structures the compass may search for. Anything left out of that list is left
+	 * out of here as well: this is what a search for a whole group is resolved through, so a group
+	 * holding what the list does not offer would be a way round the list.
+	 */
+	private static Map<ResourceLocation, ResourceLocation> computeStructureKeysToTypeKeys(ServerLevel level, List<ResourceLocation> allowedStructureKeys) {
 		final Registry<Structure> structureRegistry = getStructureRegistry(level);
 		final Registry<StructureSet> setRegistry = getStructureSetRegistry(level);
+		final Set<ResourceLocation> allowedKeys = new HashSet<ResourceLocation>(allowedStructureKeys);
 		final Map<ResourceLocation, ResourceLocation> structureKeysToTypeKeys = new HashMap<ResourceLocation, ResourceLocation>();
 
 		// Groups configured in groups.json take priority over the structure sets
-		for (Structure structure : structureRegistry) {
-			final ResourceLocation structureKey = structureRegistry.getKey(structure);
+		for (ResourceLocation structureKey : allowedStructureKeys) {
 			final ResourceLocation customGroupKey = StructureGroupsConfig.getGroupForStructure(structureKey);
-			if (structureKey != null && customGroupKey != null) {
+			if (customGroupKey != null) {
 				structureKeysToTypeKeys.put(structureKey, customGroupKey);
 			}
 		}
@@ -109,18 +117,15 @@ public class StructureUtils {
 				}
 
 				final ResourceLocation structureKey = structureRegistry.getKey(entry.structure().value());
-				if (structureKey != null && setKey != null) {
+				if (setKey != null && allowedKeys.contains(structureKey)) {
 					// The first set that lists a structure wins
 					structureKeysToTypeKeys.putIfAbsent(structureKey, setKey);
 				}
 			}
 		}
 
-		for (Structure structure : structureRegistry) {
-			final ResourceLocation structureKey = structureRegistry.getKey(structure);
-			if (structureKey != null) {
-				structureKeysToTypeKeys.putIfAbsent(structureKey, NO_TYPE_KEY);
-			}
+		for (ResourceLocation structureKey : allowedStructureKeys) {
+			structureKeysToTypeKeys.putIfAbsent(structureKey, NO_TYPE_KEY);
 		}
 
 		return structureKeysToTypeKeys;
@@ -159,34 +164,62 @@ public class StructureUtils {
 		return cachedAllowedStructureKeys;
 	}
 
-	private static List<ResourceLocation> computeAllowedStructureKeys(ServerLevel level) {
-		final List<ResourceLocation> structures = new ArrayList<ResourceLocation>();
-		for (Structure structure : getStructureRegistry(level)) {
-			final ResourceLocation structureKey = getKeyForStructure(level, structure);
-			if (structureKey != null && !structureIsBlacklisted(level, structure)) {
-				structures.add(structureKey);
-			}
+	/**
+	 * Collects the structures the compass may search for, and the dimensions each of them generates
+	 * in, in registry order so that the list a client is sent is the same one every time it is
+	 * rebuilt.
+	 *
+	 * <p>A structure this world cannot place is left out entirely, the way a biome no biome source
+	 * produces is: what decides that is the same thing a search is run through, so what is left out
+	 * is exactly what a search could never find. See {@link #getGeneratingDimensionKeys}.
+	 */
+	private static void collectAllowedStructures(ServerLevel level, boolean hideUngeneratable, List<ResourceLocation> allowedKeys, ListMultimap<ResourceLocation, ResourceLocation> dimensionKeys) {
+		// A world generating no structures at all has none to offer, whatever its registries hold. The
+		// world generation settings were split out of the level data into options of their own.
+		if (hideUngeneratable && !level.getServer().getWorldData().worldGenOptions().generateStructures()) {
+			return;
 		}
-		return structures;
+
+		// Collect the structure state of each dimension once, instead of once per structure
+		final Map<ResourceLocation, ChunkGeneratorStructureState> statesPerDimension = getStructureStatesPerDimension(level);
+		for (Holder.Reference<Structure> holder : getStructureRegistry(level).holders().toList()) {
+			final ResourceLocation structureKey = holder.key().location();
+			if (structureIsBlacklisted(structureKey)) {
+				continue;
+			}
+
+			final List<ResourceLocation> dimensions = getGeneratingDimensionKeys(holder, statesPerDimension);
+			if (dimensions.isEmpty() && hideUngeneratable) {
+				continue;
+			}
+
+			allowedKeys.add(structureKey);
+			dimensionKeys.putAll(structureKey, dimensions);
+		}
 	}
 
 	/**
-	 * Recomputes the cached structure data when the server, or the blacklist it was built under,
-	 * has changed since the last time.
+	 * Recomputes the cached structure data when the server, or the config it was built under, has
+	 * changed since the last time.
 	 */
 	private static void refreshCachedStructureData(ServerLevel level) {
 		final MinecraftServer server = level.getServer();
 		final List<String> blacklist = ConfigHandler.GENERAL.structureBlacklist.get();
-		if (server == cachedServer && blacklist.equals(cachedSyncBlacklist)) {
+		final boolean hideUngeneratable = ConfigHandler.GENERAL.hideStructuresThatCannotGenerate.get().booleanValue();
+		if (server == cachedServer && blacklist.equals(cachedSyncBlacklist) && hideUngeneratable == cachedHideUngeneratable) {
 			return;
 		}
 
-		final List<ResourceLocation> allowedKeys = computeAllowedStructureKeys(level);
+		final List<ResourceLocation> allowedKeys = new ArrayList<ResourceLocation>();
+		final ListMultimap<ResourceLocation, ResourceLocation> dimensionKeys = ArrayListMultimap.create();
+		collectAllowedStructures(level, hideUngeneratable, allowedKeys, dimensionKeys);
+
 		cachedAllowedStructureKeys = Collections.unmodifiableList(allowedKeys);
-		cachedDimensionKeys = Multimaps.unmodifiableListMultimap(computeGeneratingDimensionsForAllowedStructures(level, allowedKeys));
-		cachedStructureKeysToTypeKeys = Collections.unmodifiableMap(computeStructureKeysToTypeKeys(level));
+		cachedDimensionKeys = Multimaps.unmodifiableListMultimap(dimensionKeys);
+		cachedStructureKeysToTypeKeys = Collections.unmodifiableMap(computeStructureKeysToTypeKeys(level, allowedKeys));
 		cachedServer = server;
 		cachedSyncBlacklist = new ArrayList<String>(blacklist);
+		cachedHideUngeneratable = hideUngeneratable;
 		cachedDataVersion++;
 	}
 
@@ -215,7 +248,10 @@ public class StructureUtils {
 	}
 
 	public static boolean structureIsBlacklisted(ServerLevel level, Structure structure) {
-		final ResourceLocation structureKey = getKeyForStructure(level, structure);
+		return structureIsBlacklisted(getKeyForStructure(level, structure));
+	}
+
+	public static boolean structureIsBlacklisted(ResourceLocation structureKey) {
 		if (structureKey == null) {
 			return false;
 		}
@@ -238,19 +274,6 @@ public class StructureUtils {
 		return cachedDimensionKeys;
 	}
 
-	private static ListMultimap<ResourceLocation, ResourceLocation> computeGeneratingDimensionsForAllowedStructures(ServerLevel serverLevel, List<ResourceLocation> allowedStructureKeys) {
-		// Collect the biomes of each dimension once, instead of once per structure
-		final Map<ResourceLocation, Set<Holder<Biome>>> biomesPerDimension = getBiomesPerDimension(serverLevel);
-		final ListMultimap<ResourceLocation, ResourceLocation> dimensionsForAllowedStructures = ArrayListMultimap.create();
-		for (ResourceLocation structureKey : allowedStructureKeys) {
-			final Structure structure = getStructureForKey(serverLevel, structureKey);
-			if (structure != null) {
-				dimensionsForAllowedStructures.putAll(structureKey, getGeneratingDimensionKeys(serverLevel, structure, biomesPerDimension));
-			}
-		}
-		return dimensionsForAllowedStructures;
-	}
-
 	/**
 	 * The biomes each dimension of this server can generate, in the order the server walks its
 	 * levels. Shared with {@link BiomeUtils}, which builds the biome list out of the same data.
@@ -264,18 +287,38 @@ public class StructureUtils {
 		return biomesPerDimension;
 	}
 
-	private static List<ResourceLocation> getGeneratingDimensionKeys(ServerLevel serverLevel, Structure structure, Map<ResourceLocation, Set<Holder<Biome>>> biomesPerDimension) {
+	/**
+	 * The structure state of each dimension of this server, in the order the server walks its levels.
+	 * This is what says where a structure can be placed, and it is also what a search asks, so
+	 * offering a structure and searching for one are decided by the same thing.
+	 */
+	private static Map<ResourceLocation, ChunkGeneratorStructureState> getStructureStatesPerDimension(ServerLevel serverLevel) {
+		final Map<ResourceLocation, ChunkGeneratorStructureState> statesPerDimension = new LinkedHashMap<ResourceLocation, ChunkGeneratorStructureState>();
+		for (ServerLevel level : serverLevel.getServer().getAllLevels()) {
+			statesPerDimension.put(level.dimension().location(), level.getChunkSource().getGeneratorState());
+		}
+		return statesPerDimension;
+	}
+
+	/**
+	 * The dimensions the given structure can generate in: the ones whose world generation holds a
+	 * placement that would put it somewhere.
+	 *
+	 * <p>A structure is only ever placed by a structure set that names it and whose biomes the
+	 * dimension actually has, so a dimension with no placement for it cannot generate it however
+	 * fully it is registered. That is what a data pack leaves behind when it disables a structure,
+	 * whether by emptying the biome tag the structure is bound to or by taking the structure out of
+	 * every structure set, and it is also what a structure belonging to no set at all looks like.
+	 */
+	private static List<ResourceLocation> getGeneratingDimensionKeys(Holder.Reference<Structure> structure, Map<ResourceLocation, ChunkGeneratorStructureState> statesPerDimension) {
 		final List<ResourceLocation> dimensions = new ArrayList<ResourceLocation>();
-		for (Map.Entry<ResourceLocation, Set<Holder<Biome>>> entry : biomesPerDimension.entrySet()) {
-			for (Holder<Biome> biome : structure.biomes()) {
-				if (entry.getValue().contains(biome)) {
-					dimensions.add(entry.getKey());
-					break;
-				}
+		for (Map.Entry<ResourceLocation, ChunkGeneratorStructureState> entry : statesPerDimension.entrySet()) {
+			if (!entry.getValue().getPlacementsForStructure(structure).isEmpty()) {
+				dimensions.add(entry.getKey());
 			}
 		}
 		// Fix empty dimensions for stronghold
-		if (dimensions.isEmpty() && STRONGHOLD_KEY.equals(getKeyForStructure(serverLevel, structure))) {
+		if (dimensions.isEmpty() && STRONGHOLD_KEY.equals(structure.key().location())) {
 			dimensions.add(OVERWORLD_KEY);
 		}
 		return dimensions;

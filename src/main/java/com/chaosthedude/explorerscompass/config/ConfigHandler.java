@@ -30,6 +30,7 @@ public class ConfigHandler {
 		public final ModConfigSpec.IntValue maxRadius;
 		public final ModConfigSpec.ConfigValue<List<String>> structureBlacklist;
 		public final ModConfigSpec.ConfigValue<List<String>> biomeBlacklist;
+		public final ModConfigSpec.BooleanValue hideStructuresThatCannotGenerate;
 		public final ModConfigSpec.IntValue maxSamples;
 		public final ModConfigSpec.IntValue maxBiomeSamples;
 		public final ModConfigSpec.IntValue biomeSampleSpacing;
@@ -69,6 +70,9 @@ public class ConfigHandler {
 
 			desc = "A list of biomes that the compass will not display in the GUI and will not be able to search for. Wildcards work the same way they do for the structure blacklist. Ex: [\"minecraft:deep_dark\", \"minecraft:*ocean*\"]";
 			biomeBlacklist = builder.comment(desc).define("biomeBlacklist", new ArrayList<String>());
+
+			desc = "Leaves the structures this world cannot generate out of the compass, rather than offering them and having every search for one report that nothing was found. A structure is only ever placed by a structure set that names it and whose biomes this world actually has, so what this drops is the structures no dimension of this world could place: the ones whose biome tag a data pack has emptied out, the ones a data pack has taken out of every structure set, the ones belonging to no set in the first place, and every structure at once in a superflat world configured without any or in a world generating no structures at all. This is the same rule the compass already searches by, so what it leaves out is exactly what a search could never find. Turn it off to be offered every structure this world's registries hold, whether it can generate or not.";
+			hideStructuresThatCannotGenerate = builder.comment(desc).define("hideStructuresThatCannotGenerate", true);
 
 			desc = "The maximum number of samples to be taken when searching for a structure.";
 			maxSamples = builder.comment(desc).defineInRange("maxSamples", 100000, 0, 100000000);

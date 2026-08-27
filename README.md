@@ -89,6 +89,12 @@ Things worth knowing about:
   generate now. Turn it off to have every location answered by chunk storage as before.
 - `structureBlacklist` / `biomeBlacklist` — what the compass will not show or search for. `*` matches
   any number of characters and `?` matches one, so `minecraft:*village*` works.
+- `hideStructuresThatCannotGenerate` — leaves out the structures this world could never place, rather
+  than offering them and having every search for one come back empty. A structure is only placed by a
+  structure set that names it and whose biomes the world has, so this covers the structures a data
+  pack disabled by emptying their biome tag or taking them out of every set, the ones belonging to no
+  set at all, and every structure at once in a superflat world configured without any or in a world
+  generating no structures. Turn it off to be offered everything the registries hold.
 - `allowTeleport`, `allowSharing`, and their cooldowns — what players are allowed to do with a result.
 - `allowStructurePreview`, `structurePreviewResolution`, `structurePreviewMaxBlocks` — whether players
   may see what a structure looks like, how finely it is shown, and how much of it is drawn. Each
