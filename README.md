@@ -48,9 +48,11 @@ alone are what the upstream mod covers; biomes are its sister mod,
 **After a search**
 
 - A heads-up panel says what the compass is doing: search radius and progress while it runs, then
-  the coordinates, the distance and the compass point once it lands.
+  the coordinates, the distance and the compass point once it lands. It can be kept up while the
+  compass is only carried, so a search can be watched with something else in hand.
 - A direction strip across the top of the screen marks where the target lies against the horizon,
-  turns green when you are facing it, and points the way to turn when it is off screen.
+  turns green when you are facing it, and points the way to turn when it is off screen. It stays
+  up while the compass is still carried, not only while it is in hand.
 - The compass needle itself points at the located place, as a compass should.
 - Every located place is remembered. Point the compass back at one, share it in chat with
   click-to-copy coordinates, or travel to it where the server allows that.
@@ -101,8 +103,12 @@ Things worth knowing about:
   are assembled off the server thread and the most recently viewed ones are kept assembled, so a
   preview costs nothing to open again while it stays in use. `structurePreviewDetailLimit`, client
   side, is where a preview stops being drawn from real blocks and starts being drawn as coloured ones.
-- `showDirectionBar`, `directionBarWidth`, `directionBarSpan` — the horizon strip. Pair a wide strip
-  with a large span to have the whole horizon on screen at once.
+- `showDirectionBar`, `showDirectionBarWhileCarried`, `directionBarWidth`, `directionBarSpan` — the
+  horizon strip. Pair a wide strip with a large span to have the whole horizon on screen at once. The
+  strip can stay up while the compass is in the inventory rather than in hand.
+- `showOverlayWhileCarried` — keeps the information panel up while the compass is in the inventory
+  rather than in hand, the way the strip already can, and it reports on a carried compass exactly as
+  it does on a held one. Off by default, so the panel appears only while a compass is held.
 - `overlayBackground`, `guiHeaderBackground`, `guiSidebarBackground`, `guiStatusBarBackground` — each
   panel can be filled in or left outlined and see-through on its own.
 

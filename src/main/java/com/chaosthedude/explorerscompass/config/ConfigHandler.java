@@ -134,6 +134,7 @@ public class ConfigHandler {
 		public final ModConfigSpec.BooleanValue translateBiomeNames;
 		public final ModConfigSpec.BooleanValue createXaeroWaypoints;
 		public final ModConfigSpec.IntValue xaeroWaypointColor;
+		public final ModConfigSpec.BooleanValue showOverlayWhileCarried;
 		public final ModConfigSpec.EnumValue<OverlaySide> overlaySide;
 		public final ModConfigSpec.IntValue overlayLineOffset;
 		public final ModConfigSpec.BooleanValue overlayBackground;
@@ -141,6 +142,7 @@ public class ConfigHandler {
 		public final ModConfigSpec.BooleanValue guiSidebarBackground;
 		public final ModConfigSpec.BooleanValue guiStatusBarBackground;
 		public final ModConfigSpec.BooleanValue showDirectionBar;
+		public final ModConfigSpec.BooleanValue showDirectionBarWhileCarried;
 		public final ModConfigSpec.IntValue directionBarY;
 		public final ModConfigSpec.IntValue directionBarWidth;
 		public final ModConfigSpec.IntValue directionBarSpan;
@@ -172,6 +174,9 @@ public class ConfigHandler {
 			desc = "The color of the waypoints created in Xaero's Minimap, as an index into its own color list.";
 			xaeroWaypointColor = builder.comment(desc).defineInRange("xaeroWaypointColor", 6, 0, 15);
 
+			desc = "Keeps the panel of compass information on the HUD while the compass is only carried, rather than only while one is held. A carried compass reports what it is doing exactly as a held one does: how far the search it is running has got, where the place it points at lies, or that its last search came back empty. Where several are carried, the one pointing at a place located in this dimension is the one the panel speaks for.";
+			showOverlayWhileCarried = builder.comment(desc).define("showOverlayWhileCarried", false);
+
 			desc = "The line offset for information rendered on the HUD.";
 			overlayLineOffset = builder.comment(desc).defineInRange("overlayLineOffset", 1, 0, 50);
 
@@ -194,6 +199,9 @@ public class ConfigHandler {
 
 			desc = "Displays a compass strip at the top of the screen marking the direction of the located structure.";
 			showDirectionBar = builder.comment(desc).define("showDirectionBar", true);
+
+			desc = "Keeps the direction strip on the HUD while the compass is only carried, rather than only while one is held, so long as the carried one is pointing at a place located in this dimension. Turn this off to have the strip appear only while the compass is in hand. What the panel of compass information does while one is only carried is showOverlayWhileCarried's to say.";
+			showDirectionBarWhileCarried = builder.comment(desc).define("showDirectionBarWhileCarried", true);
 
 			desc = "How far down from the top of the screen the direction strip is drawn.";
 			directionBarY = builder.comment(desc).defineInRange("directionBarY", 4, 0, 200);
