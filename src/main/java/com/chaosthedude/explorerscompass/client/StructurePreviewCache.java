@@ -131,7 +131,6 @@ public class StructurePreviewCache {
 			// More than was promised: whatever this is, it is not the preview that was asked for
 			ExplorersCompass.LOGGER.warn("Discarding a preview of " + structureKey + ": it carried more than the " + totalBytes + " bytes it declared");
 			discardAssembly();
-			receive(structureKey, null);
 			return;
 		}
 
@@ -153,6 +152,13 @@ public class StructurePreviewCache {
 		}
 
 		discardAssembly();
+		if (preview == null) {
+			// An answer that arrived broken says nothing about the structure, unlike the server
+			// answering that there is nothing to show, so it is not remembered against it: the
+			// request stays standing and is asked again after the usual wait, until the attempts
+			// run out
+			return;
+		}
 		receive(structureKey, preview);
 	}
 

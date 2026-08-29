@@ -112,13 +112,22 @@ final class SearchDocument {
 	}
 
 	boolean contains(SearchQuery.Field field, String value) {
+		return textFor(field).contains(value);
+	}
+
+	/**
+	 * The haystack {@link ExplorersCompassScreen#processSearchTerm()} feeds to
+	 * {@link String#contains}. Kept as a getter so that invoke stays in that method, which is
+	 * what Just Enough Characters rewrites for pinyin matching.
+	 */
+	String textFor(SearchQuery.Field field) {
 		return switch (field) {
-			case ANY -> allSearchText.contains(value);
-			case ID -> idSearchText.contains(value);
-			case NAME -> nameSearchText.contains(value);
-			case SOURCE -> sourceSearchText.contains(value);
-			case GROUP -> groupSearchText.contains(value);
-			case DIMENSION -> dimensionSearchText.contains(value);
+			case ANY -> allSearchText;
+			case ID -> idSearchText;
+			case NAME -> nameSearchText;
+			case SOURCE -> sourceSearchText;
+			case GROUP -> groupSearchText;
+			case DIMENSION -> dimensionSearchText;
 		};
 	}
 

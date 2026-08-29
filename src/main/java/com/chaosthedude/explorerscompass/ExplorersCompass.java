@@ -198,7 +198,7 @@ public class ExplorersCompass {
 					if (stack.getItem() == explorersCompass) {
 						ExplorersCompassItem compassItem = (ExplorersCompassItem) stack.getItem();
 						BlockPos pos;
-						if (compassItem.getState(stack) == CompassState.FOUND) {
+						if (compassItem.getState(stack) == CompassState.FOUND && isInFoundDimension(world, compassItem, stack)) {
 							pos = new BlockPos(compassItem.getFoundStructureX(stack), 0, compassItem.getFoundStructureZ(stack));
 						} else {
 							pos = world.getSharedSpawnPos();
@@ -206,6 +206,18 @@ public class ExplorersCompass {
 						return Math.atan2((double) pos.getZ() - entity.position().z(), (double) pos.getX() - entity.position().x());
 					}
 					return 0.0D;
+				}
+
+				/**
+				 * Whether the holder is in the dimension the target was located in. Anywhere else the
+				 * located coordinates mean nothing, so the needle falls back to the spawn point, the
+				 * way the HUD already holds its direction strip back. A compass from before the
+				 * dimension was recorded has no way to tell and keeps the old behavior of pointing.
+				 */
+				@OnlyIn(Dist.CLIENT)
+				private boolean isInFoundDimension(ClientLevel world, ExplorersCompassItem compassItem, ItemStack stack) {
+					final ResourceLocation foundDimension = compassItem.getFoundDimension(stack);
+					return foundDimension == null || world == null || foundDimension.equals(world.dimension().location());
 				}
 			});
 		});

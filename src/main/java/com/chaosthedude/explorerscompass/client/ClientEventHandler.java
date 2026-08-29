@@ -136,11 +136,17 @@ public class ClientEventHandler {
 		private final int targetY;
 		private final int targetZ;
 		private final List<BlockPos> previousLocations;
+		/**
+		 * Which parts of the HUD this compass is drawn as. Both are drawn for one in hand; for one
+		 * merely carried, each is kept on screen or not as the player asked.
+		 */
+		private final boolean showDirectionBar;
+		private final boolean showInfoPanel;
 
 		private HudData(CompassState state, String headline, String target, int dotColor,
 				float progress, List<HudRow> rows, boolean inFoundDimension,
 				boolean displayCoordinates, int targetX, int targetY, int targetZ,
-				List<BlockPos> previousLocations) {
+				List<BlockPos> previousLocations, boolean showDirectionBar, boolean showInfoPanel) {
 			this.state = state;
 			this.headline = headline;
 			this.target = target;
@@ -153,6 +159,8 @@ public class ClientEventHandler {
 			this.targetY = targetY;
 			this.targetZ = targetZ;
 			this.previousLocations = previousLocations;
+			this.showDirectionBar = showDirectionBar;
+			this.showInfoPanel = showInfoPanel;
 		}
 
 	}
@@ -177,18 +185,12 @@ public class ClientEventHandler {
 		final Player player = mc.player;
 		final ItemStack stack = ItemUtils.getHeldItem(player, ExplorersCompass.explorersCompass);
 		if (stack == null || !(stack.getItem() instanceof ExplorersCompassItem compass)) {
-			hudData = null;
+			hudData = hudDataForCarriedCompass(player);
 			return;
 		}
 
 		final CompassState state = compass.getState(stack);
-		if (state != lastState) {
-			if (lastState == CompassState.SEARCHING
-					&& (state == CompassState.FOUND || state == CompassState.NOT_FOUND)) {
-				announceUntil = Util.getMillis() + ANNOUNCE_MILLIS;
-			}
-			lastState = state;
-		}
+		updateAnnouncement(state);
 		if (state == null || state == CompassState.INACTIVE) {
 			hudData = null;
 			return;
@@ -199,7 +201,75 @@ public class ClientEventHandler {
 		} else if (state == CompassState.FOUND && isInFoundDimension(player, compass, stack)) {
 			XaeroMinimapIntegration.createWaypointForLocation(player, compass, stack);
 		}
-		hudData = createHudData(player, compass, stack, state);
+		hudData = createHudData(player, compass, stack, state, true);
+	}
+
+	/** Starts the announcement when the search the panel was reporting on has just ended. */
+	private void updateAnnouncement(CompassState state) {
+		if (state == lastState) {
+			return;
+		}
+		if (lastState == CompassState.SEARCHING
+				&& (state == CompassState.FOUND || state == CompassState.NOT_FOUND)) {
+			announceUntil = Util.getMillis() + ANNOUNCE_MILLIS;
+		}
+		lastState = state;
+	}
+
+	/**
+	 * What the HUD shows when the compass is not in hand: what one still carried is doing, so far as
+	 * the player asked for any of it to stay on screen. The strip needs a place located in this
+	 * dimension to mark, where the panel speaks for a carried compass whatever it is doing.
+	 */
+	private HudData hudDataForCarriedCompass(Player player) {
+		final boolean infoPanel = ConfigHandler.CLIENT.showOverlayWhileCarried.get();
+		final boolean directionBar = ConfigHandler.CLIENT.showDirectionBar.get()
+				&& ConfigHandler.CLIENT.showDirectionBarWhileCarried.get();
+		if (!infoPanel && !directionBar) {
+			return null;
+		}
+
+		final ItemStack stack = findCarriedCompass(player, infoPanel);
+		if (!(stack.getItem() instanceof ExplorersCompassItem compass)) {
+			return null;
+		}
+		final CompassState state = compass.getState(stack);
+		if (state == null || state == CompassState.INACTIVE) {
+			return null;
+		}
+		if (infoPanel) {
+			// The pulse a finished search is announced with is part of the panel, so a search that
+			// ends with no panel on screen is left to be announced when the compass is next held
+			updateAnnouncement(state);
+		}
+		return createHudData(player, compass, stack, state, false);
+	}
+
+	/**
+	 * The compass in the inventory the HUD speaks for while none is held. One pointing at a place
+	 * located in this dimension comes first, since that is the only kind the direction strip has
+	 * anything to mark; where the panel is wanted as well, any other compass that is doing something
+	 * stands in for it.
+	 */
+	private static ItemStack findCarriedCompass(Player player, boolean acceptAnyState) {
+		ItemStack candidate = ItemStack.EMPTY;
+		for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
+			final ItemStack stack = player.getInventory().getItem(i);
+			// A compass that was never used carries no tag and is doing nothing, so it is passed over
+			// here rather than being given one just to be asked about
+			if (!(stack.getItem() instanceof ExplorersCompassItem compass) || !stack.hasTag()) {
+				continue;
+			}
+			final CompassState state = compass.getState(stack);
+			if (state == CompassState.FOUND && isInFoundDimension(player, compass, stack)) {
+				return stack;
+			}
+			if (acceptAnyState && candidate.isEmpty() && state != null
+					&& state != CompassState.INACTIVE) {
+				candidate = stack;
+			}
+		}
+		return candidate;
 	}
 
 	/**
@@ -233,13 +303,13 @@ public class ClientEventHandler {
 		// rather than having someone else's text come out on top of its own background
 		guiGraphics.flush();
 
-		if (data.state == CompassState.FOUND && data.inFoundDimension) {
-			if (ConfigHandler.CLIENT.showDirectionBar.get()) {
-				renderDirectionBar(guiGraphics, player, data);
-			}
+		if (data.showDirectionBar && data.state == CompassState.FOUND && data.inFoundDimension) {
+			renderDirectionBar(guiGraphics, player, data);
 		}
 
-		renderInfoPanel(guiGraphics, data);
+		if (data.showInfoPanel) {
+			renderInfoPanel(guiGraphics, data);
+		}
 	}
 
 	/**
@@ -317,7 +387,7 @@ public class ClientEventHandler {
 	}
 
 	private HudData createHudData(Player player, ExplorersCompassItem compass, ItemStack stack,
-			CompassState state) {
+			CompassState state, boolean held) {
 		final List<HudRow> rows = new ArrayList<HudRow>();
 		final String headline;
 		final String target;
@@ -387,9 +457,15 @@ public class ClientEventHandler {
 					String.format("%,d", compass.getSamples(stack)), GuiTheme.TEXT_PRIMARY));
 		}
 
+		// Both parts of the HUD are drawn for a compass in hand; for one merely carried, each is
+		// drawn only where the player asked for it to stay up
+		final boolean showDirectionBar = ConfigHandler.CLIENT.showDirectionBar.get()
+				&& (held || ConfigHandler.CLIENT.showDirectionBarWhileCarried.get());
+		final boolean showInfoPanel = held || ConfigHandler.CLIENT.showOverlayWhileCarried.get();
+
 		return new HudData(state, headline, target, dotColor, progress, List.copyOf(rows),
 				inFoundDimension, displayCoordinates, targetX, targetY, targetZ,
-				previousLocations);
+				previousLocations, showDirectionBar, showInfoPanel);
 	}
 
 	/**
@@ -413,7 +489,7 @@ public class ClientEventHandler {
 	 * its identity tracks its contents. Watching the stack's tag instead would miss the compass being
 	 * cleared on this side, where the tag is emptied rather than replaced, and would leave the marks
 	 * for forgotten locations on the strip until the server happened to send a new stack. This runs
-	 * every frame, and parsing the list that often adds up.
+	 * for every HUD update, and parsing the list that often adds up.
 	 */
 	private List<BlockPos> getPrevPosCached(ExplorersCompassItem compass, ItemStack stack) {
 		final Tag prevPosTag = compass.getPrevPosTag(stack);

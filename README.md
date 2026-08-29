@@ -48,9 +48,11 @@ alone are what the upstream mod covers; biomes are its sister mod,
 **After a search**
 
 - A heads-up panel says what the compass is doing: search radius and progress while it runs, then
-  the coordinates, the distance and the compass point once it lands.
+  the coordinates, the distance and the compass point once it lands. It can be kept up while the
+  compass is only carried, so a search can be watched with something else in hand.
 - A direction strip across the top of the screen marks where the target lies against the horizon,
-  turns green when you are facing it, and points the way to turn when it is off screen.
+  turns green when you are facing it, and points the way to turn when it is off screen. It stays
+  up while the compass is still carried, not only while it is in hand.
 - The compass needle itself points at the located place, as a compass should.
 - Every located place is remembered. Point the compass back at one, share it in chat with
   click-to-copy coordinates, or travel to it where the server allows that.
@@ -89,14 +91,24 @@ Things worth knowing about:
   generate now. Turn it off to have every location answered by chunk storage as before.
 - `structureBlacklist` / `biomeBlacklist` — what the compass will not show or search for. `*` matches
   any number of characters and `?` matches one, so `minecraft:*village*` works.
+- `hideStructuresThatCannotGenerate` — leaves out the structures this world could never place, rather
+  than offering them and having every search for one come back empty. A structure is only placed by a
+  structure set that names it and whose biomes the world has, so this covers the structures a data
+  pack disabled by emptying their biome tag or taking them out of every set, the ones belonging to no
+  set at all, and every structure at once in a superflat world configured without any or in a world
+  generating no structures. Turn it off to be offered everything the registries hold.
 - `allowTeleport`, `allowSharing`, and their cooldowns — what players are allowed to do with a result.
 - `allowStructurePreview`, `structurePreviewResolution`, `structurePreviewMaxBlocks` — whether players
-  may see what a structure looks like, how finely it is shown, and how much of it is drawn. Each
-  structure is assembled once and then kept for as long as the server runs, so a preview costs
-  nothing to open again. `structurePreviewDetailLimit`, client side, is where a preview stops being
-  drawn from real blocks and starts being drawn as coloured ones.
-- `showDirectionBar`, `directionBarWidth`, `directionBarSpan` — the horizon strip. Pair a wide strip
-  with a large span to have the whole horizon on screen at once.
+  may see what a structure looks like, how finely it is shown, and how much of it is drawn. Structures
+  are assembled off the server thread and the most recently viewed ones are kept assembled, so a
+  preview costs nothing to open again while it stays in use. `structurePreviewDetailLimit`, client
+  side, is where a preview stops being drawn from real blocks and starts being drawn as coloured ones.
+- `showDirectionBar`, `showDirectionBarWhileCarried`, `directionBarWidth`, `directionBarSpan` — the
+  horizon strip. Pair a wide strip with a large span to have the whole horizon on screen at once. The
+  strip can stay up while the compass is in the inventory rather than in hand.
+- `showOverlayWhileCarried` — keeps the information panel up while the compass is in the inventory
+  rather than in hand, the way the strip already can, and it reports on a carried compass exactly as
+  it does on a held one. Off by default, so the panel appears only while a compass is held.
 - `overlayBackground`, `guiHeaderBackground`, `guiSidebarBackground`, `guiStatusBarBackground` — each
   panel can be filled in or left outlined and see-through on its own.
 

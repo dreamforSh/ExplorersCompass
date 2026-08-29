@@ -5,9 +5,9 @@ issueTrackerURL="https://github.com/MattCzyr/ExplorersCompass/issues"
 [[mods]]
     modId="explorerscompass"
     version="${file.jarVersion}"
-    displayName="Explorer's Compass"
+    displayName="Explorer's Compass Enhance"
     displayURL="https://github.com/MattCzyr/ExplorersCompass"
-    authors="ChaosTheDude"
+    authors="ChaosTheDude,xinian"
     description='''
     Search for and locate structures anywhere in the world.
     '''
@@ -24,3 +24,13 @@ issueTrackerURL="https://github.com/MattCzyr/ExplorersCompass/issues"
     versionRange="[1.20.1,1.21)"
     ordering="NONE"
     side="BOTH"
+
+# Just Enough Characters rewrites String.contains in ExplorersCompassScreen.processSearchTerm
+# when it is installed, which is what makes pinyin queries match translated names. The compass
+# works without it.
+[[dependencies.explorerscompass]]
+    modId="jecharacters"
+    mandatory=false
+    versionRange="[4.5.0,)"
+    ordering="NONE"
+    side="CLIENT"

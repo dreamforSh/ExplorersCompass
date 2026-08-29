@@ -78,6 +78,13 @@ public class ExplorersCompassItem extends Item {
 	 */
 	private final Map<UUID, Long> lastShareTimes = new HashMap<UUID, Long>();
 
+	/**
+	 * When each player last teleported to a located structure. A teleport loads, and usually
+	 * generates, the destination chunk, which is far too much work to hand out as fast as a client
+	 * can send packets. Only ever touched on the server thread.
+	 */
+	private final Map<UUID, Long> lastTeleportTimes = new HashMap<UUID, Long>();
+
 	public ExplorersCompassItem() {
 		// Which creative tab this shows up in is no longer a property of the item; it is decided by
 		// whoever fills the tab, in ExplorersCompassRegistry
@@ -155,8 +162,9 @@ public class ExplorersCompassItem extends Item {
 
 	/**
 	 * Searches for another instance of whatever the compass has already located, skipping the ones
-	 * it has collected so far. Once the configured number of instances has been collected the list
-	 * is dropped and the search starts over from the closest one again.
+	 * it has collected so far. The collected locations are dropped and the search starts over from
+	 * the closest one again once the configured number of them has been collected, and likewise when
+	 * a search finds nothing further within its radius — see {@link #startOver}.
 	 */
 	public void searchForNext(Level level, Player player, BlockPos pos, ItemStack stack) {
 		if (!(level instanceof ServerLevel) || ConfigHandler.GENERAL.maxNextSearches.get() <= 0) {
@@ -172,9 +180,7 @@ public class ExplorersCompassItem extends Item {
 		}
 
 		ServerLevel serverLevel = (ServerLevel) level;
-		SearchTarget searchTarget = getSearchTarget(stack);
-		ResourceLocation targetKey = getTargetKey(stack);
-		if (targetKey == null || getState(stack) != CompassState.FOUND) {
+		if (getTargetKey(stack) == null || getState(stack) != CompassState.FOUND) {
 			ExplorersCompass.LOGGER.info("Ignoring a search for a further instance from " + player.getName().getString() + ": the compass has not located anything to look past");
 			return;
 		}
@@ -184,6 +190,36 @@ public class ExplorersCompassItem extends Item {
 			ExplorersCompass.LOGGER.info("Forgetting the " + prevPos.size() + " locations this compass had collected: it has been asked for a further instance as many times as it is allowed, so the next search starts over from the closest one again");
 			prevPos.clear();
 		}
+
+		searchPastCollected(serverLevel, player, pos, stack, prevPos);
+	}
+
+	/**
+	 * Starts the search over from the closest instance, forgetting the locations collected so far.
+	 *
+	 * <p>This is what a search for a further instance ends in when it finds nothing: everything
+	 * within its reach is already collected, so the only further instance there is to offer is the
+	 * closest one over again — the same place that collecting as many as allowed starts over from.
+	 * Answering "not found" instead would leave the compass with nothing located, and a compass with
+	 * nothing located cannot even be asked for a further instance, so it would stay stuck there for
+	 * as long as the collected locations were kept.
+	 */
+	public void startOver(ServerLevel level, Player player, BlockPos pos, ItemStack stack) {
+		if (getTargetKey(stack) == null) {
+			// Nothing is known about what was being searched for, so there is nothing to start over on
+			fail(player, stack, 0, 0);
+			return;
+		}
+		searchPastCollected(level, player, pos, stack, new ArrayList<BlockPos>());
+	}
+
+	/**
+	 * Searches for the nearest instance of whatever the compass is aimed at that none of the given
+	 * locations already answer for.
+	 */
+	private void searchPastCollected(ServerLevel serverLevel, Player player, BlockPos pos, ItemStack stack, List<BlockPos> prevPos) {
+		SearchTarget searchTarget = getSearchTarget(stack);
+		ResourceLocation targetKey = getTargetKey(stack);
 
 		// The compass stores the key of what was found, so a group search has to be widened back out
 		// to the group it belongs to
@@ -218,8 +254,19 @@ public class ExplorersCompassItem extends Item {
 		if (!level.isClientSide()) {
 			SearchService.stopSearch(player);
 		}
+		// Taken back to a compass that has never been used, rather than only marked inactive: what it
+		// was aimed at is part of what cancelling takes off it, and leaving the old target and its
+		// coordinates behind would hand them to whoever asks next. The remembered bookmarks are the
+		// one thing that is not the cancelled search's to take.
+		if (ItemUtils.verifyNBT(stack)) {
+			final CompoundTag tag = stack.getTag();
+			for (String key : new HashSet<String>(tag.getAllKeys())) {
+				if (!key.equals("Bookmarks")) {
+					tag.remove(key);
+				}
+			}
+		}
 		setState(stack, null, CompassState.INACTIVE, player);
-		clearPrevPos(stack);
 	}
 
 	private void search(ServerLevel level, Player player, SearchTarget searchTarget, List<ResourceLocation> keys, ResourceLocation displayKey, boolean isGroup, BlockPos pos, ItemStack stack, List<BlockPos> prevPos, boolean ignoreNearStart) {
@@ -301,6 +348,7 @@ public class ExplorersCompassItem extends Item {
 	public void forgetAllPlayers() {
 		SearchService.forgetAllPlayers();
 		lastShareTimes.clear();
+		lastTeleportTimes.clear();
 	}
 
 	/**
@@ -310,6 +358,7 @@ public class ExplorersCompassItem extends Item {
 	public void forgetPlayer(UUID playerId) {
 		SearchService.forgetPlayer(playerId);
 		lastShareTimes.remove(playerId);
+		lastTeleportTimes.remove(playerId);
 	}
 
 	public void succeed(Player player, ItemStack stack, ResourceLocation targetKey, boolean isGroup, int x, int z, int y, ResourceLocation dimensionKey, List<BlockPos> prevPos, int samples, boolean displayCoordinates) {
@@ -650,6 +699,26 @@ public class ExplorersCompassItem extends Item {
 			return false;
 		}
 		lastShareTimes.put(player.getUUID(), now);
+		return true;
+	}
+
+	/**
+	 * Whether the given player may teleport right now, recording the teleport when they may. Rate
+	 * limited the same way sharing is, since a request costs a client nothing to send while every
+	 * one granted loads a chunk.
+	 */
+	public boolean tryAcquireTeleportSlot(ServerPlayer player) {
+		final int cooldown = ConfigHandler.GENERAL.teleportCooldownMillis.get();
+		if (cooldown <= 0) {
+			return true;
+		}
+
+		final long now = System.currentTimeMillis();
+		final Long lastTeleport = lastTeleportTimes.get(player.getUUID());
+		if (lastTeleport != null && now - lastTeleport < cooldown) {
+			return false;
+		}
+		lastTeleportTimes.put(player.getUUID(), now);
 		return true;
 	}
 

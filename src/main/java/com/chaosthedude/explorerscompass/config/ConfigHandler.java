@@ -24,11 +24,13 @@ public class ConfigHandler {
 
 	public static class General {
 		public final ForgeConfigSpec.BooleanValue allowTeleport;
+		public final ForgeConfigSpec.IntValue teleportCooldownMillis;
 		public final ForgeConfigSpec.IntValue maxNextSearches;
 		public final ForgeConfigSpec.BooleanValue displayCoordinates;
 		public final ForgeConfigSpec.IntValue maxRadius;
 		public final ForgeConfigSpec.ConfigValue<List<String>> structureBlacklist;
 		public final ForgeConfigSpec.ConfigValue<List<String>> biomeBlacklist;
+		public final ForgeConfigSpec.BooleanValue hideStructuresThatCannotGenerate;
 		public final ForgeConfigSpec.IntValue maxSamples;
 		public final ForgeConfigSpec.IntValue maxBiomeSamples;
 		public final ForgeConfigSpec.IntValue biomeSampleSpacing;
@@ -52,7 +54,10 @@ public class ConfigHandler {
 			desc = "Allows a player to teleport to a located structure when in creative mode, opped, or in cheat mode.";
 			allowTeleport = builder.comment(desc).define("allowTeleport", true);
 
-			desc = "The maximum number of times a player can search for the next instance of a located structure, skipping the locations already found. Once this many locations have been collected the next search starts over from the closest one again. Set to 0 to disable searching for further instances and make the compass always locate the nearest one.";
+			desc = "The minimum time in milliseconds between teleports requested by the same player. Teleporting loads, and usually generates, the destination chunk, so this keeps a modified client from queueing up that work as fast as it can send packets. Set to 0 to disable.";
+			teleportCooldownMillis = builder.comment(desc).defineInRange("teleportCooldownMillis", 2000, 0, 60000);
+
+			desc = "The maximum number of times a player can search for the next instance of a located structure, skipping the locations already found. The collected locations are forgotten and the search starts over from the closest instance again once this many have been collected, and likewise once every instance within the search radius has been collected. Set to 0 to disable searching for further instances and make the compass always locate the nearest one.";
 			maxNextSearches = builder.comment(desc).defineInRange("maxNextSearches", 100, 0, 10000);
 			
 			desc = "Allows players to view the precise coordinates and distance of a located structure on the HUD, rather than relying on the direction the compass is pointing.";
@@ -66,6 +71,9 @@ public class ConfigHandler {
 
 			desc = "A list of biomes that the compass will not display in the GUI and will not be able to search for. Wildcards work the same way they do for the structure blacklist. Ex: [\"minecraft:deep_dark\", \"minecraft:*ocean*\"]";
 			biomeBlacklist = builder.comment(desc).define("biomeBlacklist", new ArrayList<String>());
+
+			desc = "Leaves the structures this world cannot generate out of the compass, rather than offering them and having every search for one report that nothing was found. A structure is only ever placed by a structure set that names it and whose biomes this world actually has, so what this drops is the structures no dimension of this world could place: the ones whose biome tag a data pack has emptied out, the ones a data pack has taken out of every structure set, the ones belonging to no set in the first place, and every structure at once in a superflat world configured without any or in a world generating no structures at all. This is the same rule the compass already searches by, so what it leaves out is exactly what a search could never find. Turn it off to be offered every structure this world's registries hold, whether it can generate or not.";
+			hideStructuresThatCannotGenerate = builder.comment(desc).define("hideStructuresThatCannotGenerate", true);
 
 			desc = "The maximum number of samples to be taken when searching for a structure.";
 			maxSamples = builder.comment(desc).defineInRange("maxSamples", 100000, 0, 100000000);
@@ -103,7 +111,7 @@ public class ConfigHandler {
 			desc = "The minimum time in milliseconds between locations shared by the same player, so that sharing cannot be used to flood chat. Set to 0 to disable.";
 			shareCooldownMillis = builder.comment(desc).defineInRange("shareCooldownMillis", 3000, 0, 60000);
 
-			desc = "Allows players to see what a structure looks like before searching for one. The server assembles the structure the way world generation would, without placing any of it anywhere, and sends back a small model of it. This is done once per structure and then kept for as long as the server runs, so looking at the same structure again costs nothing. Turn it off to have the compass answer that there is nothing to show.";
+			desc = "Allows players to see what a structure looks like before searching for one. The server assembles the structure the way world generation would, without placing any of it anywhere, off the server thread, and sends back a small model of it. The most recently viewed structures are kept assembled, so looking at one again costs nothing while it stays in use. Turn it off to have the compass answer that there is nothing to show.";
 			allowStructurePreview = builder.comment(desc).define("allowStructurePreview", true);
 
 			desc = "How many cells across a structure preview may be. The default is large enough that no structure is shrunk to fit it, so a preview is one cell to one block and shows the structure at its own size; lower it to cap how large a preview may be however large the structure is. What actually decides whether a preview is shown one to one is the cell budget below.";
@@ -123,6 +131,7 @@ public class ConfigHandler {
 		public final ForgeConfigSpec.BooleanValue translateBiomeNames;
 		public final ForgeConfigSpec.BooleanValue createXaeroWaypoints;
 		public final ForgeConfigSpec.IntValue xaeroWaypointColor;
+		public final ForgeConfigSpec.BooleanValue showOverlayWhileCarried;
 		public final ForgeConfigSpec.EnumValue<OverlaySide> overlaySide;
 		public final ForgeConfigSpec.IntValue overlayLineOffset;
 		public final ForgeConfigSpec.BooleanValue overlayBackground;
@@ -130,6 +139,7 @@ public class ConfigHandler {
 		public final ForgeConfigSpec.BooleanValue guiSidebarBackground;
 		public final ForgeConfigSpec.BooleanValue guiStatusBarBackground;
 		public final ForgeConfigSpec.BooleanValue showDirectionBar;
+		public final ForgeConfigSpec.BooleanValue showDirectionBarWhileCarried;
 		public final ForgeConfigSpec.IntValue directionBarY;
 		public final ForgeConfigSpec.IntValue directionBarWidth;
 		public final ForgeConfigSpec.IntValue directionBarSpan;
@@ -161,6 +171,9 @@ public class ConfigHandler {
 			desc = "The color of the waypoints created in Xaero's Minimap, as an index into its own color list.";
 			xaeroWaypointColor = builder.comment(desc).defineInRange("xaeroWaypointColor", 6, 0, 15);
 
+			desc = "Keeps the panel of compass information on the HUD while the compass is only carried, rather than only while one is held. A carried compass reports what it is doing exactly as a held one does: how far the search it is running has got, where the place it points at lies, or that its last search came back empty. Where several are carried, the one pointing at a place located in this dimension is the one the panel speaks for.";
+			showOverlayWhileCarried = builder.comment(desc).define("showOverlayWhileCarried", false);
+
 			desc = "The line offset for information rendered on the HUD.";
 			overlayLineOffset = builder.comment(desc).defineInRange("overlayLineOffset", 1, 0, 50);
 
@@ -183,6 +196,9 @@ public class ConfigHandler {
 
 			desc = "Displays a compass strip at the top of the screen marking the direction of the located structure.";
 			showDirectionBar = builder.comment(desc).define("showDirectionBar", true);
+
+			desc = "Keeps the direction strip on the HUD while the compass is only carried, rather than only while one is held, so long as the carried one is pointing at a place located in this dimension. Turn this off to have the strip appear only while the compass is in hand. What the panel of compass information does while one is only carried is showOverlayWhileCarried's to say.";
+			showDirectionBarWhileCarried = builder.comment(desc).define("showDirectionBarWhileCarried", true);
 
 			desc = "How far down from the top of the screen the direction strip is drawn.";
 			directionBarY = builder.comment(desc).defineInRange("directionBarY", 4, 0, 200);

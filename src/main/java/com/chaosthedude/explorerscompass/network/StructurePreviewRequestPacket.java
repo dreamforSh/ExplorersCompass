@@ -31,6 +31,11 @@ public class StructurePreviewRequestPacket {
 		buf.writeResourceLocation(structureKey);
 	}
 
+	/**
+	 * Handled on the server thread, which the context puts this on. A preview already worked out is
+	 * answered right away; one still to be built is built off the server thread, and the answer goes
+	 * out once it lands — see {@link StructurePreviewService}.
+	 */
 	public void handle(Supplier<NetworkEvent.Context> ctx) {
 		ctx.get().enqueueWork(() -> {
 			final ServerPlayer player = ctx.get().getSender();
@@ -58,14 +63,12 @@ public class StructurePreviewRequestPacket {
 				return;
 			}
 
-			StructurePreview preview = null;
 			try {
-				preview = StructurePreviewService.get(player, structureKey);
+				StructurePreviewService.request(player, structureKey, this::answer);
 			} catch (Throwable t) {
 				// This runs on the server thread, so an exception here would take down the server
-				ExplorersCompass.LOGGER.error("Failed to build a preview of " + structureKey, t);
+				ExplorersCompass.LOGGER.error("Failed to request a preview of " + structureKey, t);
 			}
-			answer(player, preview);
 		});
 		ctx.get().setPacketHandled(true);
 	}

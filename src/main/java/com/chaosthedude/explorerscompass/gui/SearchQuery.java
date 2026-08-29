@@ -46,6 +46,10 @@ final class SearchQuery {
 		return true;
 	}
 
+	List<SearchTerm> terms() {
+		return terms;
+	}
+
 	private static void addTerm(List<SearchTerm> terms, String token) {
 		boolean excluded = token.startsWith("-") && token.length() > 1;
 		String value = excluded ? token.substring(1) : token;
@@ -124,11 +128,11 @@ final class SearchQuery {
 		}
 	}
 
-	private static class SearchTerm {
+	static class SearchTerm {
 
-		private final Field field;
-		private final String value;
-		private final boolean excluded;
+		final Field field;
+		final String value;
+		final boolean excluded;
 
 		private SearchTerm(Field field, String value, boolean excluded) {
 			this.field = field;
