@@ -764,13 +764,32 @@ public class ExplorersCompassScreen extends Screen {
 		PacketDistributor.sendToServer(new ShareLocationPacket(ShareLocationPacket.CURRENT_TARGET));
 	}
 
+	/**
+	 * Rebuilds the visible list from the filter field.
+	 *
+	 * <p>Matching has to call {@link String#contains} in this method rather than in
+	 * {@link SearchQuery} or {@link SearchDocument}. Just Enough Characters rewrites that
+	 * invoke when it is installed, which is how a pinyin query matches a translated Chinese
+	 * name. The method name and descriptor must stay {@code processSearchTerm()V}: that is
+	 * the target JECH ships for this screen.
+	 */
 	public void processSearchTerm() {
 		final SearchQuery query = SearchQuery.parse(searchTextField.getValue());
 		keysMatchingSearch = new ArrayList<ResourceLocation>();
 		for (ResourceLocation key : allowedKeys) {
 			final SearchDocument document = searchDocuments.get(key);
-			if (document != null && matchesModFilter(key)
-					&& matchesDimensionFilter(document) && query.matches(document)) {
+			if (document == null || !matchesModFilter(key) || !matchesDimensionFilter(document)) {
+				continue;
+			}
+			boolean matches = true;
+			for (SearchQuery.SearchTerm term : query.terms()) {
+				final boolean contains = document.textFor(term.field).contains(term.value);
+				if (term.excluded ? contains : !contains) {
+					matches = false;
+					break;
+				}
+			}
+			if (matches) {
 				keysMatchingSearch.add(key);
 			}
 		}

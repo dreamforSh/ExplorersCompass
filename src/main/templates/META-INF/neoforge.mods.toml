@@ -38,3 +38,13 @@ issueTrackerURL="https://github.com/MattCzyr/ExplorersCompass/issues"
     versionRange="${minecraft_version_range}"
     ordering="NONE"
     side="BOTH"
+
+# Just Enough Characters rewrites String.contains in ExplorersCompassScreen.processSearchTerm
+# when it is installed, which is what makes pinyin queries match translated names. The compass
+# works without it.
+[[dependencies.${mod_id}]]
+    modId="jecharacters"
+    type="optional"
+    versionRange="[4.5.0,)"
+    ordering="NONE"
+    side="CLIENT"

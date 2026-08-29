@@ -107,7 +107,12 @@ dependencies {
     // present so a dev run can exercise the waypoint integration.
     localRuntime "curse.maven:xaeros-minimap-263420:${xaero_minimap_file_id}"
     localRuntime "curse.maven:xaeros-world-map-317780:${xaero_worldmap_file_id}"
-
+    // Just Enough Characters rewrites String.contains inside
+    // ExplorersCompassScreen.processSearchTerm, so pinyin search works when it is
+    // installed. Nothing here is compiled against. They are only present so a
+    // dev run can exercise that hook; JEI is what JECH's own plugin attaches to.
+    localRuntime "curse.maven:jei-238222:${jei_file_id}"
+    localRuntime "curse.maven:just-enough-characters-250702:${jecharacters_file_id}"
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
 }
 

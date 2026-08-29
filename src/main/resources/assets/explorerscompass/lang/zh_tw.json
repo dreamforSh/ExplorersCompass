@@ -52,7 +52,7 @@
     "string.explorerscompass.copyCoordinates": "點擊複製座標",
     "string.explorerscompass.noBookmarks": "還沒有已定位的地點",
     "string.explorerscompass.sharedLocation": "%1$s 找到了 %2$s：%3$s（%4$s）",
-    "string.explorerscompass.searchHint": "搜尋名稱或 ID",
+    "string.explorerscompass.searchHint": "搜尋名稱、ID 或拼音",
     "string.explorerscompass.searchSyntax.fields": "欄位：id:、name:、mod:（或 @）、group:（或 #）、dim:",
     "string.explorerscompass.searchSyntax.combine": "空格表示「並且」，- 表示排除，引號用於完整詞組。",
     "string.explorerscompass.searchSyntax.example": "範例：@minecraft dim:overworld -id:ruined",
