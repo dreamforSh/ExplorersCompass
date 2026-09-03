@@ -726,10 +726,17 @@ public class ExplorersCompassScreen extends Screen {
 	 * structure stands rather than a thing that was built.
 	 */
 	private void openPreview() {
-		if (searchTarget != SearchTarget.STRUCTURE || !selectionList.hasSelection()) {
+		if (selectionList.hasSelection()) {
+			openPreview(selectionList.getSelected().getKey());
+		}
+	}
+
+	/** Shows what the given structure looks like, where the server allows it and it is a structure at all. */
+	public void openPreview(ResourceLocation key) {
+		if (searchTarget != SearchTarget.STRUCTURE || !ExplorersCompass.canPreviewStructures || key == null) {
 			return;
 		}
-		minecraft.setScreen(new StructurePreviewScreen(this, selectionList.getSelected().getKey()));
+		minecraft.setScreen(new StructurePreviewScreen(this, key));
 	}
 
 	public void clearCache() {
@@ -909,7 +916,7 @@ public class ExplorersCompassScreen extends Screen {
 		previewButton = addRenderableWidget(new TransparentButton(columnLeft(), 8, PREVIEW_BUTTON_WIDTH, PREVIEW_BUTTON_HEIGHT, Component.literal(PREVIEW_GLYPH), (onPress) -> {
 			openPreview();
 		}));
-		previewButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.preview"), Component.translatable("string.explorerscompass.tooltip.previewStructuresOnly"));
+		previewButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.preview"), Component.translatable("string.explorerscompass.tooltip.previewStructuresOnly"), Component.translatable("string.explorerscompass.tooltip.previewMiddleClick"));
 
 		searchButton = addSidebarButton(Component.translatable("string.explorerscompass.search"), (onPress) -> {
 			// Anything picked with Ctrl-click wins, however much of it there is: the button lights up

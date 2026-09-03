@@ -40,10 +40,14 @@ alone are what the upstream mod covers; biomes are its sister mod,
   dimension or source mod.
 - See what a structure looks like before spending a search on it: the server assembles it the way
   world generation would, without placing any of it anywhere, and the compass draws it as a model
-  you can turn, zoom and cut layers off to look inside. It is one cell to one block: what you see is
-  the structure at its own size, not a sketch of it. Small ones are drawn from the blocks' own
-  models, chests and beds and banners included; large ones are drawn as coloured blocks instead, at
-  the same size, so that a mansion or a stronghold can be looked over rather than waited on.
+  you can turn, slide, zoom, look at from set angles and cut open layer by layer down a slider to
+  look inside. It is one cell to one block: what you see is the structure at its own size, not a
+  sketch of it. The blocks are drawn the way the world draws them — faces that cannot be seen left
+  out, corners darkened where blocks meet, grass and leaves in their biome colours, glass and ice
+  see-through, chests and beds and banners included — and the model is built off the render thread,
+  with a version in flat colours standing in until it lands, so that a mansion or a stronghold never
+  holds the game up. A button switches between the textured and the coloured drawing, a compass in
+  the corner says which way north lies, and a grid under the model says how large it is.
 
 **After a search**
 
@@ -102,7 +106,8 @@ Things worth knowing about:
   may see what a structure looks like, how finely it is shown, and how much of it is drawn. Structures
   are assembled off the server thread and the most recently viewed ones are kept assembled, so a
   preview costs nothing to open again while it stays in use. `structurePreviewDetailLimit`, client
-  side, is where a preview stops being drawn from real blocks and starts being drawn as coloured ones.
+  side, is the size past which a preview opens drawn as coloured blocks rather than textured ones;
+  the button on the preview screen switches between the two either way.
 - `showDirectionBar`, `showDirectionBarWhileCarried`, `directionBarWidth`, `directionBarSpan` — the
   horizon strip. Pair a wide strip with a large span to have the whole horizon on screen at once. The
   strip can stay up while the compass is in the inventory rather than in hand.

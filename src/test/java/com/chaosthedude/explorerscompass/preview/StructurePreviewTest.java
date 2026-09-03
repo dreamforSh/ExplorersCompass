@@ -2,11 +2,13 @@ package com.chaosthedude.explorerscompass.preview;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
 import io.netty.buffer.Unpooled;
+import io.netty.handler.codec.DecoderException;
 import net.minecraft.network.FriendlyByteBuf;
 
 /**
@@ -110,6 +112,58 @@ class StructurePreviewTest {
 		assertEquals(9, received.getComponentX(1));
 		assertEquals(12, received.getComponentY(1));
 		assertEquals(2, received.getComponentZ(1));
+	}
+
+	@Test
+	void theWalledInCellsTravelAsRunsAndComeBackWhole() {
+		// A row of the same material walled in behind the shell travels as one run; a row of another
+		// material behind it as a second. What comes back has to name the same cells and materials.
+		final int[] runStarts = { StructurePreview.pack(1, 1, 1), StructurePreview.pack(1, 1, 2) };
+		final int[] runLengths = { 6, 3 };
+		final int[] runPalette = { 1, 0 };
+		final StructurePreview sent = new StructurePreview(8, 4, 8, 1, 8, 4, 8, 1, 0, false,
+				new int[] { 7, 9 }, new int[] { StructurePreview.pack(0, 0, 0) }, new int[] { 0 },
+				new int[0], new int[0], runStarts, runLengths, runPalette);
+
+		assertEquals(2, sent.getInteriorRunCount());
+		assertEquals(9, sent.getInteriorCellCount());
+
+		final FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
+		sent.write(buf);
+		final StructurePreview received = StructurePreview.read(buf);
+
+		assertEquals(0, buf.readableBytes(), "the preview was not read back to the end of what it wrote");
+		assertEquals(2, received.getInteriorRunCount());
+		assertEquals(9, received.getInteriorCellCount());
+		for (int run = 0; run < runStarts.length; run++) {
+			assertEquals(runStarts[run], received.getInteriorRunStart(run), "run " + run + " begins elsewhere");
+			assertEquals(runLengths[run], received.getInteriorRunLength(run), "run " + run + " is another length");
+			assertEquals(runPalette[run], received.getInteriorRunPaletteIndex(run), "run " + run + " is another material");
+		}
+		// The cells of a run are the packed positions after its start, which along a row is the next cell over
+		assertEquals(StructurePreview.pack(6, 1, 1), received.getInteriorRunStart(0) + 5);
+	}
+
+	@Test
+	void aPreviewWithNothingWalledInStillReadsBack() {
+		final StructurePreview sent = previewOf(new int[][] { { 1, 2, 3 } });
+		final FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
+		sent.write(buf);
+		final StructurePreview received = StructurePreview.read(buf);
+		assertEquals(0, buf.readableBytes());
+		assertEquals(0, received.getInteriorRunCount());
+		assertEquals(0, received.getInteriorCellCount());
+	}
+
+	@Test
+	void aRunNamingNoMaterialIsRefused() {
+		// A run whose palette entry does not exist is a malformed packet rather than a block
+		final StructurePreview sent = new StructurePreview(4, 4, 4, 1, 4, 4, 4, 1, 0, false,
+				new int[] { 7 }, new int[0], new int[0], new int[0], new int[0],
+				new int[] { StructurePreview.pack(1, 1, 1) }, new int[] { 2 }, new int[] { 1 });
+		final FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
+		sent.write(buf);
+		assertThrows(DecoderException.class, () -> StructurePreview.read(buf));
 	}
 
 	@Test

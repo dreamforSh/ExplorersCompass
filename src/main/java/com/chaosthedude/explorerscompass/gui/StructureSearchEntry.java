@@ -174,6 +174,12 @@ public class StructureSearchEntry extends ObjectSelectionList.Entry<StructureSea
 			// Right click stars an entry, pinning it to the top of the list
 			parentScreen.toggleFavorite(key);
 			return true;
+		} else if (button == 2) {
+			// Middle click looks at the structure, which is the quickest way from a name to a picture
+			parentScreen.clearMultiSelect();
+			searchList.selectEntry(this);
+			parentScreen.openPreview(key);
+			return true;
 		}
 		return false;
 	}

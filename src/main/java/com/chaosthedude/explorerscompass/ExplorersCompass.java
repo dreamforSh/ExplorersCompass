@@ -46,7 +46,7 @@ public class ExplorersCompass {
 	 * is then refused during the handshake with a clear message, instead of connecting and failing
 	 * to decode later.
 	 */
-	public static final String PROTOCOL_VERSION = "2.4";
+	public static final String PROTOCOL_VERSION = "2.5";
 
 	public static final Logger LOGGER = LogManager.getLogger(MODID);
 

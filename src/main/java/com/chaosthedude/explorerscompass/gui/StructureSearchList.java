@@ -58,6 +58,15 @@ public class StructureSearchList extends ObjectSelectionList<StructureSearchEntr
 	}
 
 	/**
+	 * The base class only ever hands the left button to a row. The rows here also star themselves on
+	 * the right button and open a preview on the middle one, so those have to be let through as well.
+	 */
+	@Override
+	protected boolean isValidMouseClick(int button) {
+		return button == 0 || button == 1 || button == 2;
+	}
+
+	/**
 	 * The base class draws a tiled backdrop behind the rows and rules across the top and bottom
 	 * edges. This list sits on the screen's own panel, so both are left out.
 	 */
