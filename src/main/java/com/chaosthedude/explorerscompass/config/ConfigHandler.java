@@ -5,6 +5,7 @@ import java.util.List;
 
 import com.chaosthedude.explorerscompass.client.OverlaySide;
 import com.chaosthedude.explorerscompass.client.TooltipDetail;
+import com.chaosthedude.explorerscompass.client.XaeroWaypointDisplay;
 import com.chaosthedude.explorerscompass.registry.ModDataComponents;
 
 import net.neoforged.neoforge.common.ModConfigSpec;
@@ -134,6 +135,10 @@ public class ConfigHandler {
 		public final ModConfigSpec.BooleanValue translateBiomeNames;
 		public final ModConfigSpec.BooleanValue createXaeroWaypoints;
 		public final ModConfigSpec.IntValue xaeroWaypointColor;
+		public final ModConfigSpec.EnumValue<XaeroWaypointDisplay> xaeroWaypointDisplay;
+		public final ModConfigSpec.IntValue maxWaypointsPerWorld;
+		public final ModConfigSpec.BooleanValue directionBarWaypoints;
+		public final ModConfigSpec.IntValue directionBarWaypointLimit;
 		public final ModConfigSpec.BooleanValue showOverlayWhileCarried;
 		public final ModConfigSpec.EnumValue<OverlaySide> overlaySide;
 		public final ModConfigSpec.IntValue overlayLineOffset;
@@ -166,13 +171,25 @@ public class ConfigHandler {
 			desc = "Attempts to translate biome names before fixing the unlocalized names. Unlike structures, almost every biome is named by the game itself or by the mod that adds it, so there is rarely anything left to fix up.";
 			translateBiomeNames = builder.comment(desc).define("translateBiomeNames", true);
 
-			desc = "Creates a waypoint in Xaero's Minimap for each located structure. Has no effect when that mod is not installed.";
+			desc = "Mirrors each waypoint the compass records into Xaero's Minimap as well. Has no effect when that mod is not installed. The compass keeps a waypoint of its own for every place it locates either way, marked on the direction strip and listed on the waypoints screen; this is about whether the minimap gets a copy.";
 			createXaeroWaypoints = builder.comment(desc).define("createXaeroWaypoints", true);
 
 			// The first entry in that list is black, which a waypoint marker is not readable in, so the
 			// gold this mod picks things out in elsewhere is used instead
-			desc = "The color of the waypoints created in Xaero's Minimap, as an index into its own color list.";
+			desc = "The color of the waypoints the compass records, as an index into Xaero's Minimap's own color list, which is also the game's list of text colors. Used on the direction strip as well as in the minimap.";
 			xaeroWaypointColor = builder.comment(desc).defineInRange("xaeroWaypointColor", 6, 0, 15);
+
+			desc = "Where Xaero's Minimap draws the waypoints this mod mirrors into it. The direction strip marks them in the world either way, so the minimap's own floating labels are one marker too many. WORLD_MAP_ONLY keeps them on the full-screen world map and nowhere else, which is the minimap's own \"world map only\" visibility; MINIMAP_AND_WORLD lets the minimap draw them everywhere as it did before; HIDDEN leaves them in the minimap's list but switched off there. Applies to every copy made from then on; the button on the waypoints screen changes this too and applies it to the copies already made. Ex: WORLD_MAP_ONLY, MINIMAP_AND_WORLD, HIDDEN";
+			xaeroWaypointDisplay = builder.comment(desc).defineEnum("xaeroWaypointDisplay", XaeroWaypointDisplay.WORLD_MAP_ONLY);
+
+			desc = "How many waypoints the compass keeps for one world or server before the oldest are forgotten. Set to 0 to keep them all.";
+			maxWaypointsPerWorld = builder.comment(desc).defineInRange("maxWaypointsPerWorld", 200, 0, 10000);
+
+			desc = "Marks the waypoints the compass has recorded in this dimension on the direction strip, each in its own color, with the name and distance of whichever lies nearest to straight ahead read out under the strip. The strip stays up for them while a compass is held, or carried where the strip is kept up for a carried compass, whether or not the compass is pointing at anything. Each waypoint can be taken off the strip on its own from the waypoints screen.";
+			directionBarWaypoints = builder.comment(desc).define("directionBarWaypoints", true);
+
+			desc = "How many waypoints the direction strip marks at once, nearest first, before it stops saying anything and just looks busy.";
+			directionBarWaypointLimit = builder.comment(desc).defineInRange("directionBarWaypointLimit", 12, 1, 64);
 
 			desc = "Keeps the panel of compass information on the HUD while the compass is only carried, rather than only while one is held. A carried compass reports what it is doing exactly as a held one does: how far the search it is running has got, where the place it points at lies, or that its last search came back empty. Where several are carried, the one pointing at a place located in this dimension is the one the panel speaks for.";
 			showOverlayWhileCarried = builder.comment(desc).define("showOverlayWhileCarried", false);

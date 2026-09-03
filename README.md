@@ -60,11 +60,21 @@ alone are what the upstream mod covers; biomes are its sister mod,
 - The compass needle itself points at the located place, as a compass should.
 - Every located place is remembered. Point the compass back at one, share it in chat with
   click-to-copy coordinates, or travel to it where the server allows that.
+- Every located place also becomes a waypoint of the compass's own, kept on your side per world or
+  server and shared by every compass you own. Waypoints are marked on the direction strip in their
+  own colours, with the name and distance of the one straight ahead read out under it, so the strip
+  keeps saying where things are after the compass has moved on. A waypoints screen, reached from the
+  flag beside the filter field, lists them: point the compass at one, travel to it, take it off the
+  strip, or forget it.
 
 **Integration**
 
-- Waypoints in [Xaero's Minimap](https://www.curseforge.com/minecraft/mc-mods/xaeros-minimap) are
-  created for each located place, when that mod is installed.
+- Waypoints are mirrored into [Xaero's Minimap](https://www.curseforge.com/minecraft/mc-mods/xaeros-minimap)
+  when that mod is installed. By default the copies are kept to the minimap's world map alone — the
+  strip already marks them in the world, so the minimap's floating labels would be one marker too
+  many — and this can be switched to the minimap's usual drawing, or to hidden, from the waypoints
+  screen. Removing a waypoint here removes its copy there; deleting the copy there removes the
+  waypoint here.
 - Resource packs can give the compass a different look per structure through custom model data.
 - Data packs and modpacks can define structure groups of their own.
 - Translated into English, German, Spanish, Japanese, Russian, Simplified Chinese and
@@ -111,6 +121,12 @@ Things worth knowing about:
 - `showDirectionBar`, `showDirectionBarWhileCarried`, `directionBarWidth`, `directionBarSpan` — the
   horizon strip. Pair a wide strip with a large span to have the whole horizon on screen at once. The
   strip can stay up while the compass is in the inventory rather than in hand.
+- `directionBarWaypoints`, `directionBarWaypointLimit`, `maxWaypointsPerWorld` — whether the strip
+  marks the waypoints of the dimension you are in, how many of the nearest it marks at once, and how
+  many a world keeps before the oldest are forgotten. `createXaeroWaypoints`, `xaeroWaypointColor`
+  and `xaeroWaypointDisplay` are about the copies in Xaero's Minimap: whether they are made, what
+  colour they and the marks on the strip take, and whether the minimap draws them everywhere, on its
+  world map alone, or not at all.
 - `showOverlayWhileCarried` — keeps the information panel up while the compass is in the inventory
   rather than in hand, the way the strip already can, and it reports on a carried compass exactly as
   it does on a held one. Off by default, so the panel appears only while a compass is held.

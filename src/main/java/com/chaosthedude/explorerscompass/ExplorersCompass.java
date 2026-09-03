@@ -17,6 +17,7 @@ import com.chaosthedude.explorerscompass.network.CancelSearchPacket;
 import com.chaosthedude.explorerscompass.network.ClearCachePacket;
 import com.chaosthedude.explorerscompass.network.CompassSearchForNextPacket;
 import com.chaosthedude.explorerscompass.network.CompassSearchPacket;
+import com.chaosthedude.explorerscompass.network.PointAtPacket;
 import com.chaosthedude.explorerscompass.network.ShareLocationPacket;
 import com.chaosthedude.explorerscompass.network.StructurePreviewPacket;
 import com.chaosthedude.explorerscompass.network.StructurePreviewRequestPacket;
@@ -46,7 +47,7 @@ public class ExplorersCompass {
 	 * is then refused during the handshake with a clear message, instead of connecting and failing
 	 * to decode later.
 	 */
-	public static final String PROTOCOL_VERSION = "2.5";
+	public static final String PROTOCOL_VERSION = "2.6";
 
 	public static final Logger LOGGER = LogManager.getLogger(MODID);
 
@@ -119,6 +120,7 @@ public class ExplorersCompass {
 		registrar.playToServer(ShareLocationPacket.TYPE, ShareLocationPacket.STREAM_CODEC, ShareLocationPacket::handle);
 		registrar.playToServer(CancelSearchPacket.TYPE, CancelSearchPacket.STREAM_CODEC, CancelSearchPacket::handle);
 		registrar.playToServer(StructurePreviewRequestPacket.TYPE, StructurePreviewRequestPacket.STREAM_CODEC, StructurePreviewRequestPacket::handle);
+		registrar.playToServer(PointAtPacket.TYPE, PointAtPacket.STREAM_CODEC, PointAtPacket::handle);
 
 		// Client packets
 		registrar.playToClient(SyncPacket.TYPE, SyncPacket.STREAM_CODEC, SyncPacket::handle);
