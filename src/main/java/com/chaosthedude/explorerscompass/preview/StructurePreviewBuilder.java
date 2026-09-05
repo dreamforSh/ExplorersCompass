@@ -10,6 +10,7 @@ import com.chaosthedude.explorerscompass.mixin.SinglePoolElementTemplateAccessor
 import com.chaosthedude.explorerscompass.mixin.StructureTemplatePalettesAccessor;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
 
+import it.unimi.dsi.fastutil.ints.Int2BooleanOpenHashMap;
 import it.unimi.dsi.fastutil.ints.Int2IntMap;
 import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
@@ -22,6 +23,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.StructureManager;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -419,6 +421,11 @@ public final class StructurePreviewBuilder {
 		private final Int2IntOpenHashMap cells = new Int2IntOpenHashMap();
 		/** Where the blocks drawn by a renderer of their own stand, packed cell to block state id. */
 		private final Int2IntOpenHashMap components = new Int2IntOpenHashMap();
+		/**
+		 * Which blocks hide the whole of a face laid against them, by state id, worked out once for
+		 * each rather than for each of the six neighbours of every cell.
+		 */
+		private final Int2BooleanOpenHashMap occluding = new Int2BooleanOpenHashMap();
 
 		private Grid(BoundingBox bounds, int step, int resolution) {
 			this.bounds = bounds;
@@ -426,6 +433,8 @@ public final class StructurePreviewBuilder {
 			sizeX = Math.min(resolution, divideCeil(bounds.getXSpan(), step));
 			sizeY = Math.min(resolution, divideCeil(bounds.getYSpan(), step));
 			sizeZ = Math.min(resolution, divideCeil(bounds.getZSpan(), step));
+			// So that a cell holding nothing answers with something no state id ever is: air is state 0
+			cells.defaultReturnValue(-1);
 		}
 
 		/** Throws everything an assembly holds onto this grid, outlines last. */
@@ -459,9 +468,26 @@ public final class StructurePreviewBuilder {
 			return StructurePreview.pack(cellOf(blockX - bounds.minX(), sizeX), cellOf(blockY - bounds.minY(), sizeY), cellOf(blockZ - bounds.minZ(), sizeZ));
 		}
 
-		private boolean isEmptyAt(int x, int y, int z) {
-			// Anything just outside the grid is open air, which is what makes the outermost cells show
-			return x < 0 || y < 0 || z < 0 || x >= sizeX || y >= sizeY || z >= sizeZ || !cells.containsKey(StructurePreview.pack(x, y, z));
+		/**
+		 * Whether the cell at the given position holds a block that hides the whole of any face laid
+		 * against it. Anything just outside the grid is open air, which is what makes the outermost
+		 * cells show; so is a cell holding nothing, and so, for this purpose, is one holding glass, a
+		 * fence or a slab, since a face against any of those can still be seen past it.
+		 */
+		private boolean isOccludingAt(int x, int y, int z) {
+			if (x < 0 || y < 0 || z < 0 || x >= sizeX || y >= sizeY || z >= sizeZ) {
+				return false;
+			}
+			final int stateId = cells.get(StructurePreview.pack(x, y, z));
+			if (stateId < 0) {
+				return false;
+			}
+			if (!occluding.containsKey(stateId)) {
+				// Answered off the state's own cache where it has one, which every state does once the
+				// registries are frozen, so the getter and the position are never actually consulted
+				occluding.put(stateId, Block.stateById(stateId).isSolidRender(EmptyBlockGetter.INSTANCE, BlockPos.ZERO));
+			}
+			return occluding.get(stateId);
 		}
 
 		/** Notes one of the blocks drawn by a renderer of its own, in whichever cell holds it. */
@@ -519,17 +545,19 @@ public final class StructurePreviewBuilder {
 			return visible;
 		}
 
+		/** Whether any face of the cell at the given position can be seen from outside the structure. */
 		private boolean isVisible(int x, int y, int z) {
-			return isEmptyAt(x - 1, y, z) || isEmptyAt(x + 1, y, z) || isEmptyAt(x, y - 1, z) || isEmptyAt(x, y + 1, z) || isEmptyAt(x, y, z - 1) || isEmptyAt(x, y, z + 1);
+			return !isOccludingAt(x - 1, y, z) || !isOccludingAt(x + 1, y, z) || !isOccludingAt(x, y - 1, z) || !isOccludingAt(x, y + 1, z) || !isOccludingAt(x, y, z - 1) || !isOccludingAt(x, y, z + 1);
 		}
 
 		/**
-		 * Collects what is visible into the preview.
+		 * Collects what is visible into the preview, and everything walled in behind it as runs.
 		 *
 		 * <p>The cells are sorted before they are walked, which puts them in the order the packing
 		 * sorts in: from the ground up, and along each layer. That order is what lets the positions
-		 * travel as the steps between them, and it is also what makes a structure that still does not
-		 * fit the budget lose its roof rather than the ground it stands on.
+		 * travel as the steps between them, what makes a structure that still does not fit the budget
+		 * lose its roof rather than the ground it stands on, and what lays the walled-in cells out in
+		 * the long runs of one material along a row that they are sent as.
 		 */
 		private StructurePreview toPreview(BoundingBox structureBounds, int pieces, int outlinedPieces, boolean truncated, int maxCells) {
 			final Int2IntOpenHashMap paletteIndices = new Int2IntOpenHashMap();
@@ -538,20 +566,15 @@ public final class StructurePreviewBuilder {
 			final IntArrayList palette = new IntArrayList();
 			final IntArrayList positions = new IntArrayList();
 			final IntArrayList indices = new IntArrayList();
+			final IntArrayList runStarts = new IntArrayList();
+			final IntArrayList runLengths = new IntArrayList();
+			final IntArrayList runPalette = new IntArrayList();
 
 			final int[] ordered = cells.keySet().toIntArray();
 			Arrays.sort(ordered);
 
 			boolean overflowed = false;
 			for (int cell : ordered) {
-				if (!isVisible(StructurePreview.unpackX(cell), StructurePreview.unpackY(cell), StructurePreview.unpackZ(cell))) {
-					continue;
-				}
-				if (positions.size() >= maxCells) {
-					overflowed = true;
-					break;
-				}
-
 				final int stateId = cells.get(cell);
 				int paletteIndex = paletteIndices.get(stateId);
 				if (paletteIndex < 0) {
@@ -559,6 +582,27 @@ public final class StructurePreviewBuilder {
 					paletteIndices.put(stateId, paletteIndex);
 					palette.add(stateId);
 				}
+
+				if (!isVisible(StructurePreview.unpackX(cell), StructurePreview.unpackY(cell), StructurePreview.unpackZ(cell))) {
+					// Grown onto the last run where it follows straight on from it in the same material,
+					// which along a row of a solid wall is nearly always
+					final int last = runStarts.size() - 1;
+					if (last >= 0 && runPalette.getInt(last) == paletteIndex && runStarts.getInt(last) + runLengths.getInt(last) == cell) {
+						runLengths.set(last, runLengths.getInt(last) + 1);
+					} else {
+						runStarts.add(cell);
+						runLengths.add(1);
+						runPalette.add(paletteIndex);
+					}
+					continue;
+				}
+				if (positions.size() >= maxCells) {
+					// The walled-in cells cost next to nothing to carry, so they go on being collected
+					// past the point where the shell itself has to stop
+					overflowed = true;
+					continue;
+				}
+
 				positions.add(cell);
 				indices.add(paletteIndex);
 			}
@@ -574,7 +618,7 @@ public final class StructurePreviewBuilder {
 				}
 			}
 
-			return new StructurePreview(sizeX, sizeY, sizeZ, step, structureBounds.getXSpan(), structureBounds.getYSpan(), structureBounds.getZSpan(), pieces, outlinedPieces, truncated || overflowed, palette.toIntArray(), positions.toIntArray(), indices.toIntArray(), componentPositions.toIntArray(), componentStates.toIntArray());
+			return new StructurePreview(sizeX, sizeY, sizeZ, step, structureBounds.getXSpan(), structureBounds.getYSpan(), structureBounds.getZSpan(), pieces, outlinedPieces, truncated || overflowed, palette.toIntArray(), positions.toIntArray(), indices.toIntArray(), componentPositions.toIntArray(), componentStates.toIntArray(), runStarts.toIntArray(), runLengths.toIntArray(), runPalette.toIntArray());
 		}
 
 	}

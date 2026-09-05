@@ -9,6 +9,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import com.chaosthedude.explorerscompass.client.ClientEventHandler;
+import com.chaosthedude.explorerscompass.gui.ConfigScreen;
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.config.CustomModelDataConfig;
 import com.chaosthedude.explorerscompass.config.StructureGroupsConfig;
@@ -18,6 +19,7 @@ import com.chaosthedude.explorerscompass.network.CancelSearchPacket;
 import com.chaosthedude.explorerscompass.network.ClearCachePacket;
 import com.chaosthedude.explorerscompass.network.CompassSearchForNextPacket;
 import com.chaosthedude.explorerscompass.network.CompassSearchPacket;
+import com.chaosthedude.explorerscompass.network.PointAtPacket;
 import com.chaosthedude.explorerscompass.network.ShareLocationPacket;
 import com.chaosthedude.explorerscompass.network.StructurePreviewPacket;
 import com.chaosthedude.explorerscompass.network.StructurePreviewRequestPacket;
@@ -41,6 +43,7 @@ import net.minecraft.world.entity.decoration.ItemFrame;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.client.ConfigScreenHandler;
 import net.minecraftforge.client.event.RegisterClientReloadListenersEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.DistExecutor;
@@ -63,7 +66,7 @@ public class ExplorersCompass {
 	 * is then refused during the handshake with a clear message, instead of connecting and failing
 	 * to decode later.
 	 */
-	public static final String PROTOCOL_VERSION = "2.4";
+	public static final String PROTOCOL_VERSION = "2.6";
 
 	public static final Logger LOGGER = LogManager.getLogger(MODID);
 
@@ -115,6 +118,7 @@ public class ExplorersCompass {
 		network.registerMessage(6, ShareLocationPacket.class, ShareLocationPacket::toBytes, ShareLocationPacket::new, ShareLocationPacket::handle);
 		network.registerMessage(7, CancelSearchPacket.class, CancelSearchPacket::toBytes, CancelSearchPacket::new, CancelSearchPacket::handle);
 		network.registerMessage(8, StructurePreviewRequestPacket.class, StructurePreviewRequestPacket::toBytes, StructurePreviewRequestPacket::new, StructurePreviewRequestPacket::handle);
+		network.registerMessage(10, PointAtPacket.class, PointAtPacket::toBytes, PointAtPacket::new, PointAtPacket::handle);
 
 		// Client packets
 		network.registerMessage(2, SyncPacket.class, SyncPacket::toBytes, SyncPacket::new, SyncPacket::handle);
@@ -133,9 +137,16 @@ public class ExplorersCompass {
 		clientSearchDataRevision = 0;
 	}
 	
+	/** The loading context is marked for removal for the same reason as in the constructor: see there. */
+	@SuppressWarnings("removal")
 	@OnlyIn(Dist.CLIENT)
 	public void clientSetup(FMLClientSetupEvent event) {
 		MinecraftForge.EVENT_BUS.register(new ClientEventHandler());
+		// The mod list's configure button opens the same settings screen the compass screen's gear does.
+		// A method reference rather than a lambda: a lambda here would leave a method on this class
+		// that returns a screen, and the server verifies this class's methods whether or not it ever
+		// calls them.
+		ModLoadingContext.get().registerExtensionPoint(ConfigScreenHandler.ConfigScreenFactory.class, ConfigScreen::modListFactory);
 		
 		event.enqueueWork(() -> {
 			ItemProperties.register(explorersCompass, new ResourceLocation("angle"), new ClampedItemPropertyFunction() {

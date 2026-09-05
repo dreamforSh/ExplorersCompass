@@ -595,13 +595,23 @@ public class ExplorersCompassItem extends Item {
 		}
 
 		final BookmarkEntry entry = bookmarks.get(index);
-		setSearchTarget(stack, entry.getSearchTarget());
-		setFound(stack, entry.getTargetKey(), entry.getX(), entry.getZ(), entry.getY(), entry.getDimensionKey(), 0);
+		pointAt(stack, entry.getSearchTarget(), entry.getTargetKey(), entry.getX(), entry.getY(), entry.getZ(), entry.getDimensionKey());
+	}
+
+	/**
+	 * Points the compass at a place it has been told of — a remembered location, or a waypoint the
+	 * client keeps — as though it had just located it there. The place itself is put back on the list
+	 * of places already located, so that searching for a further instance looks past it rather than
+	 * answering with the one being pointed at.
+	 */
+	public void pointAt(ItemStack stack, SearchTarget searchTarget, ResourceLocation targetKey, int x, int y, int z, ResourceLocation dimensionKey) {
+		setSearchTarget(stack, searchTarget);
+		setFound(stack, targetKey, x, z, y, dimensionKey, 0);
 		setIsGroup(stack, false);
 		setTargetCount(stack, 1);
 		setTargetKeys(stack, List.<ResourceLocation>of());
 		// Only the horizontal coordinates of these are ever compared
-		setPrevPos(stack, List.of(new BlockPos(entry.getX(), 0, entry.getZ())));
+		setPrevPos(stack, List.of(new BlockPos(x, 0, z)));
 	}
 
 	public void removeBookmark(ItemStack stack, int index) {

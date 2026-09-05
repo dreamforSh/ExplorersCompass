@@ -64,15 +64,19 @@ public class ExplorersCompassScreen extends Screen {
 	private static final String CLEAR_GLYPH = "✕";
 	private static final String SWITCH_GLYPH = "⇄";
 	private static final String PREVIEW_GLYPH = "▣";
+	private static final String WAYPOINTS_GLYPH = "⚑";
+	private static final String SETTINGS_GLYPH = "⚙";
 	/**
-	 * The control that shows what a structure looks like stands beside the filter field rather than in
-	 * the column of controls, which on the shortest screen the game scales itself down to has no room
-	 * left in it. Wide enough that the glyph on it still has room once the button has taken its own
-	 * padding out of it.
+	 * The controls that show what a structure looks like, that list the waypoints and that open the
+	 * settings stand either side of the filter field rather than in the column of controls, which on
+	 * the shortest screen the game scales itself down to has no room left in it. Wide enough that the
+	 * glyph on each still has room once the button has taken its own padding out of it.
 	 */
 	private static final int PREVIEW_BUTTON_WIDTH = 24;
 	private static final int PREVIEW_BUTTON_HEIGHT = 18;
 	private static final int PREVIEW_BUTTON_GAP = 4;
+	/** How many of those glyph buttons stand to the right of the field. */
+	private static final int RIGHT_GLYPH_BUTTONS = 2;
 
 	private Level level;
 	private Player player;
@@ -87,6 +91,8 @@ public class ExplorersCompassScreen extends Screen {
 	private ExplorersCompassItem explorersCompass;
 	private TransparentButton targetButton;
 	private TransparentButton previewButton;
+	private TransparentButton waypointsButton;
+	private TransparentButton settingsButton;
 	private TransparentButton searchButton;
 	private TransparentButton searchGroupButton;
 	private TransparentButton searchNextButton;
@@ -715,10 +721,17 @@ public class ExplorersCompassScreen extends Screen {
 	 * structure stands rather than a thing that was built.
 	 */
 	private void openPreview() {
-		if (searchTarget != SearchTarget.STRUCTURE || !selectionList.hasSelection()) {
+		if (selectionList.hasSelection()) {
+			openPreview(selectionList.getSelected().getKey());
+		}
+	}
+
+	/** Shows what the given structure looks like, where the server allows it and it is a structure at all. */
+	public void openPreview(ResourceLocation key) {
+		if (searchTarget != SearchTarget.STRUCTURE || !ExplorersCompass.canPreviewStructures || key == null) {
 			return;
 		}
-		minecraft.setScreen(new StructurePreviewScreen(this, selectionList.getSelected().getKey()));
+		minecraft.setScreen(new StructurePreviewScreen(this, key));
 	}
 
 	public void clearCache() {
@@ -898,7 +911,19 @@ public class ExplorersCompassScreen extends Screen {
 		previewButton = addRenderableWidget(new TransparentButton(columnLeft(), 8, PREVIEW_BUTTON_WIDTH, PREVIEW_BUTTON_HEIGHT, Component.literal(PREVIEW_GLYPH), (onPress) -> {
 			openPreview();
 		}));
-		previewButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.preview"), Component.translatable("string.explorerscompass.tooltip.previewStructuresOnly"));
+		previewButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.preview"), Component.translatable("string.explorerscompass.tooltip.previewStructuresOnly"), Component.translatable("string.explorerscompass.tooltip.previewMiddleClick"));
+
+		// At the other end of the filter field: the waypoints and the settings belong to the player
+		// rather than to the compass, so they stand apart from the controls that act on it
+		final int rightButtonsLeft = columnLeft() + columnWidth() - RIGHT_GLYPH_BUTTONS * PREVIEW_BUTTON_WIDTH - (RIGHT_GLYPH_BUTTONS - 1) * PREVIEW_BUTTON_GAP;
+		waypointsButton = addRenderableWidget(new TransparentButton(rightButtonsLeft, 8, PREVIEW_BUTTON_WIDTH, PREVIEW_BUTTON_HEIGHT, Component.literal(WAYPOINTS_GLYPH), (onPress) -> {
+			minecraft.setScreen(new WaypointsScreen(this, player));
+		}));
+		waypointsButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.waypoints"), Component.translatable("string.explorerscompass.tooltip.waypoints.detail"));
+		settingsButton = addRenderableWidget(new TransparentButton(rightButtonsLeft + PREVIEW_BUTTON_WIDTH + PREVIEW_BUTTON_GAP, 8, PREVIEW_BUTTON_WIDTH, PREVIEW_BUTTON_HEIGHT, Component.literal(SETTINGS_GLYPH), (onPress) -> {
+			minecraft.setScreen(new ConfigScreen(this));
+		}));
+		settingsButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.settings"), Component.translatable("string.explorerscompass.tooltip.settings.detail"));
 
 		searchButton = addSidebarButton(Component.translatable("string.explorerscompass.search"), (onPress) -> {
 			// Anything picked with Ctrl-click wins, however much of it there is: the button lights up
@@ -994,8 +1019,9 @@ public class ExplorersCompassScreen extends Screen {
 		final ResourceLocation previousSelectionKey = selectionList != null && selectionList.hasSelection() ? selectionList.getSelected().getKey() : null;
 		selectionList = null;
 
+		// Between the glyph buttons, with a gap either side
 		final int fieldLeft = columnLeft() + PREVIEW_BUTTON_WIDTH + PREVIEW_BUTTON_GAP;
-		searchTextField = new TransparentTextField(font, fieldLeft, 8, columnWidth() - PREVIEW_BUTTON_WIDTH - PREVIEW_BUTTON_GAP, 18, Component.translatable("string.explorerscompass.searchHint"));
+		searchTextField = new TransparentTextField(font, fieldLeft, 8, columnWidth() - (1 + RIGHT_GLYPH_BUTTONS) * (PREVIEW_BUTTON_WIDTH + PREVIEW_BUTTON_GAP), 18, Component.translatable("string.explorerscompass.searchHint"));
 		// The box's own limit is 32, which a filter naming a couple of quoted terms already passes
 		searchTextField.setMaxLength(256);
 		searchTextField.setValue(previousSearchTerm);

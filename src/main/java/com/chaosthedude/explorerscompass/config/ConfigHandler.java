@@ -5,6 +5,8 @@ import java.util.List;
 
 import com.chaosthedude.explorerscompass.client.OverlaySide;
 import com.chaosthedude.explorerscompass.client.TooltipDetail;
+import com.chaosthedude.explorerscompass.client.WaypointMarkerStyle;
+import com.chaosthedude.explorerscompass.client.XaeroWaypointDisplay;
 
 import net.minecraftforge.common.ForgeConfigSpec;
 
@@ -18,6 +20,38 @@ public class ConfigHandler {
 
 	public static final ForgeConfigSpec GENERAL_SPEC = GENERAL_BUILDER.build();
 	public static final ForgeConfigSpec CLIENT_SPEC = CLIENT_BUILDER.build();
+
+	/**
+	 * A handful of settings that belong together, for the settings screen to lay out under one
+	 * heading. The files keep their flat layout, which is what every config already written expects;
+	 * the grouping is only for reading them on a screen.
+	 *
+	 * @param key    what the group is called, as the last part of a translation key
+	 * @param values the settings in it, in the order they are shown
+	 */
+	public record Group(String key, List<ForgeConfigSpec.ConfigValue<?>> values) {
+	}
+
+	/** The server's settings, grouped for the settings screen. */
+	public static List<Group> generalGroups() {
+		return List.of(
+				new Group("search", List.of(GENERAL.maxRadius, GENERAL.maxSamples, GENERAL.maxNextSearches, GENERAL.asyncStructureSearch, GENERAL.maxSearchTimePerTick, GENERAL.searchRequestCooldownMillis)),
+				new Group("biomeSearch", List.of(GENERAL.maxBiomeSamples, GENERAL.biomeSampleSpacing, GENERAL.biomeVerticalSampleSpacing, GENERAL.biomeDepthSampleInterval, GENERAL.asyncBiomeSearch)),
+				new Group("lists", List.of(GENERAL.structureBlacklist, GENERAL.biomeBlacklist, GENERAL.hideStructuresThatCannotGenerate)),
+				new Group("players", List.of(GENERAL.displayCoordinates, GENERAL.allowTeleport, GENERAL.teleportCooldownMillis, GENERAL.allowSharing, GENERAL.shareCooldownMillis, GENERAL.maxBookmarks)),
+				new Group("preview", List.of(GENERAL.allowStructurePreview, GENERAL.structurePreviewResolution, GENERAL.structurePreviewMaxBlocks)));
+	}
+
+	/** This computer's settings, grouped for the settings screen. */
+	public static List<Group> clientGroups() {
+		return List.of(
+				new Group("hud", List.of(CLIENT.displayWithChatOpen, CLIENT.showOverlayWhileCarried, CLIENT.overlaySide, CLIENT.overlayLineOffset, CLIENT.overlayBackground, CLIENT.tooltipDetail)),
+				new Group("directionBar", List.of(CLIENT.showDirectionBar, CLIENT.showDirectionBarWhileCarried, CLIENT.directionBarY, CLIENT.directionBarWidth, CLIENT.directionBarSpan, CLIENT.directionBarBackground)),
+				new Group("waypoints", List.of(CLIENT.directionBarWaypoints, CLIENT.directionBarWaypointStyle, CLIENT.directionBarWaypointLimit, CLIENT.xaeroWaypointColor, CLIENT.maxWaypointsPerWorld)),
+				new Group("xaero", List.of(CLIENT.createXaeroWaypoints, CLIENT.xaeroWaypointDisplay)),
+				new Group("screens", List.of(CLIENT.guiHeaderBackground, CLIENT.guiSidebarBackground, CLIENT.guiStatusBarBackground, CLIENT.translateStructureNames, CLIENT.translateBiomeNames)),
+				new Group("preview", List.of(CLIENT.structurePreviewAutoSpin, CLIENT.structurePreviewDetailLimit)));
+	}
 
 	private ConfigHandler() {
 	}
@@ -131,6 +165,11 @@ public class ConfigHandler {
 		public final ForgeConfigSpec.BooleanValue translateBiomeNames;
 		public final ForgeConfigSpec.BooleanValue createXaeroWaypoints;
 		public final ForgeConfigSpec.IntValue xaeroWaypointColor;
+		public final ForgeConfigSpec.EnumValue<XaeroWaypointDisplay> xaeroWaypointDisplay;
+		public final ForgeConfigSpec.IntValue maxWaypointsPerWorld;
+		public final ForgeConfigSpec.BooleanValue directionBarWaypoints;
+		public final ForgeConfigSpec.IntValue directionBarWaypointLimit;
+		public final ForgeConfigSpec.EnumValue<WaypointMarkerStyle> directionBarWaypointStyle;
 		public final ForgeConfigSpec.BooleanValue showOverlayWhileCarried;
 		public final ForgeConfigSpec.EnumValue<OverlaySide> overlaySide;
 		public final ForgeConfigSpec.IntValue overlayLineOffset;
@@ -163,13 +202,28 @@ public class ConfigHandler {
 			desc = "Attempts to translate biome names before fixing the unlocalized names. Unlike structures, almost every biome is named by the game itself or by the mod that adds it, so there is rarely anything left to fix up.";
 			translateBiomeNames = builder.comment(desc).define("translateBiomeNames", true);
 
-			desc = "Creates a waypoint in Xaero's Minimap for each located structure. Has no effect when that mod is not installed.";
+			desc = "Mirrors each waypoint the compass records into Xaero's Minimap as well. Has no effect when that mod is not installed. The compass keeps a waypoint of its own for every place it locates either way, marked on the direction strip and listed on the waypoints screen; this is about whether the minimap gets a copy.";
 			createXaeroWaypoints = builder.comment(desc).define("createXaeroWaypoints", true);
 
 			// The first entry in that list is black, which a waypoint marker is not readable in, so the
 			// gold this mod picks things out in elsewhere is used instead
-			desc = "The color of the waypoints created in Xaero's Minimap, as an index into its own color list.";
+			desc = "The color of the waypoints the compass records, as an index into Xaero's Minimap's own color list, which is also the game's list of text colors. Used on the direction strip as well as in the minimap.";
 			xaeroWaypointColor = builder.comment(desc).defineInRange("xaeroWaypointColor", 6, 0, 15);
+
+			desc = "Where Xaero's Minimap draws the waypoints this mod mirrors into it. The direction strip marks them in the world either way, so the minimap's own floating labels are one marker too many. WORLD_MAP_ONLY keeps them on the full-screen world map and nowhere else, which is the minimap's own \"world map only\" visibility; MINIMAP_AND_WORLD lets the minimap draw them everywhere as it did before; HIDDEN leaves them in the minimap's list but switched off there. Applies to every copy made from then on; the button on the waypoints screen changes this too and applies it to the copies already made. Ex: WORLD_MAP_ONLY, MINIMAP_AND_WORLD, HIDDEN";
+			xaeroWaypointDisplay = builder.comment(desc).defineEnum("xaeroWaypointDisplay", XaeroWaypointDisplay.WORLD_MAP_ONLY);
+
+			desc = "How many waypoints the compass keeps for one world or server before the oldest are forgotten. Set to 0 to keep them all.";
+			maxWaypointsPerWorld = builder.comment(desc).defineInRange("maxWaypointsPerWorld", 200, 0, 10000);
+
+			desc = "Marks the waypoints the compass has recorded in this dimension on the direction strip, each in its own color, with the name and distance of whichever lies nearest to straight ahead read out under the strip. The strip stays up for them while a compass is held, or carried where the strip is kept up for a carried compass, whether or not the compass is pointing at anything. Each waypoint can be taken off the strip on its own from the waypoints screen.";
+			directionBarWaypoints = builder.comment(desc).define("directionBarWaypoints", true);
+
+			desc = "How many waypoints the direction strip marks at once, nearest first, before it stops saying anything and just looks busy.";
+			directionBarWaypointLimit = builder.comment(desc).defineInRange("directionBarWaypointLimit", 12, 1, 64);
+
+			desc = "The shape a waypoint is marked with on the direction strip, and beside its name on the waypoints screen. BOOKMARK hangs a notched ribbon from the top of the strip; PIN stands a round-headed pin on the bottom of it; FLAG stands a pole with a pennant; DIAMOND puts a small diamond in the middle, which takes the least room. Ex: BOOKMARK, PIN, FLAG, DIAMOND";
+			directionBarWaypointStyle = builder.comment(desc).defineEnum("directionBarWaypointStyle", WaypointMarkerStyle.BOOKMARK);
 
 			desc = "Keeps the panel of compass information on the HUD while the compass is only carried, rather than only while one is held. A carried compass reports what it is doing exactly as a held one does: how far the search it is running has got, where the place it points at lies, or that its last search came back empty. Where several are carried, the one pointing at a place located in this dimension is the one the panel speaks for.";
 			showOverlayWhileCarried = builder.comment(desc).define("showOverlayWhileCarried", false);
@@ -215,8 +269,8 @@ public class ConfigHandler {
 			desc = "Turns a structure preview slowly on its own, so that it is seen from more than one side without being dragged around. The button on the preview screen switches this on and off as well.";
 			structurePreviewAutoSpin = builder.comment(desc).define("structurePreviewAutoSpin", true);
 
-			desc = "How many cells a structure preview may hold before it is drawn as coloured blocks instead of real ones. Both are one cell to one block; what the coloured tier gives up is the textures, not the detail. Real blocks take far longer to assemble into a model, so a large structure is shown as its shape and its colours rather than after a long wait. Raise this to see real blocks on larger structures, at the cost of that wait when a preview opens; set it to 0 to always show colours.";
-			structurePreviewDetailLimit = builder.comment(desc).defineInRange("structurePreviewDetailLimit", 20000, 0, 400000);
+			desc = "How many cells a structure preview may hold before it opens drawn as coloured blocks instead of real ones. Both are one cell to one block; what the coloured tier gives up is the textures, not the detail. Real blocks take longer to assemble into a model, which happens in the background while a coloured stand-in is shown, so this decides which of the two a large structure settles on rather than how long it takes to appear. The button on the preview screen switches between the two for the structure being looked at either way. Raise this to have real blocks on larger structures by default; set it to 0 to open every preview in colours.";
+			structurePreviewDetailLimit = builder.comment(desc).defineInRange("structurePreviewDetailLimit", 40000, 0, 400000);
 
 			builder.pop();
 		}

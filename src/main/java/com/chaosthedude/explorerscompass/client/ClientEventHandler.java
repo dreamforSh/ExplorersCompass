@@ -3,6 +3,7 @@ package com.chaosthedude.explorerscompass.client;
 import com.chaosthedude.explorerscompass.ExplorersCompass;
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.gui.GuiTheme;
+import com.chaosthedude.explorerscompass.gui.WaypointMarkers;
 import com.chaosthedude.explorerscompass.items.ExplorersCompassItem;
 import com.chaosthedude.explorerscompass.util.CompassState;
 import com.chaosthedude.explorerscompass.util.ItemUtils;
@@ -11,6 +12,7 @@ import com.chaosthedude.explorerscompass.util.SearchTarget;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 import net.minecraft.Util;
@@ -74,15 +76,24 @@ public class ClientEventHandler {
 	private static final float MINIMUM_FADE = 0.05F;
 	/** How near the middle of the strip the target has to sit to count as being faced. */
 	private static final double ON_TARGET_DEGREES = 3.0D;
+	/**
+	 * How near the middle of the strip a waypoint has to lie to have its name read out under it.
+	 * Wider than for the target: the target is one mark and known, where a waypoint among several is
+	 * the one being asked about.
+	 */
+	private static final double WAYPOINT_READOUT_DEGREES = 8.0D;
 	/** How near the located structure counts as having arrived at it. */
 	private static final int ARRIVED_DISTANCE = 32;
 	/** How long the panel picks itself out after a search finishes. */
 	private static final long ANNOUNCE_MILLIS = 2500L;
+	/** How often the waypoints are checked against the minimap's copies of them. */
+	private static final int RECONCILE_INTERVAL_TICKS = 100;
 
 	// Filled shapes take their alpha from the top byte, where text has it added for it
 	private static final int MARKER_COLOR = 0xFF000000 | GuiTheme.ACCENT;
 	private static final int ON_TARGET_COLOR = 0xFF000000 | GuiTheme.TEXT_SUCCESS;
 	private static final int PREVIOUS_MARKER_COLOR = 0x59FFC24B;
+	private static final int WAYPOINT_MARKER_ALPHA = 0xE6000000;
 	/** What the marks on the strip are shadowed with when there is no panel behind them. */
 	private static final int MARK_SHADOW_COLOR = 0xA0000000;
 	private static final int BAR_BORDER_COLOR = 0xB0000000;
@@ -105,6 +116,19 @@ public class ClientEventHandler {
 	private CompassState lastState;
 	private long announceUntil;
 	private HudData hudData;
+	private int ticksUntilReconcile;
+	/**
+	 * The place a waypoint was last recorded for, so that a place is recorded once per finding rather
+	 * than on every tick the compass goes on pointing at it: a waypoint the player deletes while the
+	 * compass still points there has to stay deleted until the compass finds the place again.
+	 */
+	private LocatedPlace lastRecorded;
+	/** A waypoint the minimap did not have the world open for yet, to be mirrored when it does. */
+	private CompassWaypoint pendingMirror;
+
+	/** Where a compass points, as far as recording a waypoint for it is concerned. */
+	private record LocatedPlace(ResourceLocation dimension, int x, int z) {
+	}
 
 	/** One labelled value in the panel of compass information. */
 	private static class HudRow {
@@ -119,6 +143,10 @@ public class ClientEventHandler {
 			this.color = color;
 		}
 
+	}
+
+	/** One of the waypoints the strip marks, with everything drawing it needs already looked up. */
+	private record HudWaypoint(String name, int x, int y, int z, int color) {
 	}
 
 	/** Everything the HUD can resolve once per client tick rather than once per rendered frame. */
@@ -136,6 +164,8 @@ public class ClientEventHandler {
 		private final int targetY;
 		private final int targetZ;
 		private final List<BlockPos> previousLocations;
+		/** The waypoints in this dimension the strip marks, nearest first. */
+		private final List<HudWaypoint> waypoints;
 		/**
 		 * Which parts of the HUD this compass is drawn as. Both are drawn for one in hand; for one
 		 * merely carried, each is kept on screen or not as the player asked.
@@ -146,7 +176,7 @@ public class ClientEventHandler {
 		private HudData(CompassState state, String headline, String target, int dotColor,
 				float progress, List<HudRow> rows, boolean inFoundDimension,
 				boolean displayCoordinates, int targetX, int targetY, int targetZ,
-				List<BlockPos> previousLocations, boolean showDirectionBar, boolean showInfoPanel) {
+				List<BlockPos> previousLocations, List<HudWaypoint> waypoints, boolean showDirectionBar, boolean showInfoPanel) {
 			this.state = state;
 			this.headline = headline;
 			this.target = target;
@@ -159,8 +189,24 @@ public class ClientEventHandler {
 			this.targetY = targetY;
 			this.targetZ = targetZ;
 			this.previousLocations = previousLocations;
+			this.waypoints = waypoints;
 			this.showDirectionBar = showDirectionBar;
 			this.showInfoPanel = showInfoPanel;
+		}
+
+		/** Whether the compass is pointing at somewhere the strip can mark. */
+		private boolean hasTarget() {
+			return state == CompassState.FOUND && inFoundDimension;
+		}
+
+		/** Whether the strip has anything at all to mark: the target, or waypoints in its absence. */
+		private boolean hasSomethingToMark() {
+			return hasTarget() || !waypoints.isEmpty();
+		}
+
+		/** Whether the panel has anything to report: a compass doing nothing has nothing. */
+		private boolean hasSomethingToReport() {
+			return state != null && state != CompassState.INACTIVE;
 		}
 
 	}
@@ -175,11 +221,20 @@ public class ClientEventHandler {
 			lastState = null;
 			lastPrevPosTag = null;
 			cachedPrevPos = List.of();
+			lastRecorded = null;
+			pendingMirror = null;
 			// Not in a world any more, so nothing held about the last one still means anything. What a
 			// structure looks like follows from a server's data packs, and the next server joined may
 			// load different ones.
 			StructurePreviewCache.clear();
 			return;
+		}
+
+		// Every so often, rather than every tick: it walks the minimap's waypoints, which is cheap but
+		// not free, and a copy deleted in the minimap can wait a few seconds to be noticed
+		if (--ticksUntilReconcile <= 0) {
+			ticksUntilReconcile = RECONCILE_INTERVAL_TICKS;
+			CompassWaypoints.reconcileWithXaero();
 		}
 
 		final Player player = mc.player;
@@ -191,17 +246,39 @@ public class ClientEventHandler {
 
 		final CompassState state = compass.getState(stack);
 		updateAnnouncement(state);
-		if (state == null || state == CompassState.INACTIVE) {
+		if (state == null) {
 			hudData = null;
 			return;
 		}
 
-		if (state == CompassState.SEARCHING) {
-			XaeroMinimapIntegration.reset();
-		} else if (state == CompassState.FOUND && isInFoundDimension(player, compass, stack)) {
-			XaeroMinimapIntegration.createWaypointForLocation(player, compass, stack);
+		if (state == CompassState.FOUND) {
+			recordWaypoint(player, compass, stack);
+		} else if (state == CompassState.SEARCHING) {
+			// Whatever this search finds is a fresh finding, even of a place found before
+			lastRecorded = null;
+			pendingMirror = null;
 		}
-		hudData = createHudData(player, compass, stack, state, true);
+		// A compass doing nothing still has the waypoints of this dimension for the strip to mark
+		final HudData data = createHudData(player, compass, stack, state, true);
+		hudData = data.hasSomethingToReport() || data.hasSomethingToMark() ? data : null;
+	}
+
+	/**
+	 * Keeps a waypoint for the place the compass has located, once per finding, and mirrors it into
+	 * the minimap where there is one. The record is kept whatever dimension the player is in; the
+	 * mirror has to wait for the player to be in the dimension it belongs to, since that is the only
+	 * world the minimap has open, and for the minimap to have opened it.
+	 */
+	private void recordWaypoint(Player player, ExplorersCompassItem compass, ItemStack stack) {
+		final ResourceLocation dimension = compass.getFoundDimension(stack) != null ? compass.getFoundDimension(stack) : player.level().dimension().location();
+		final LocatedPlace place = new LocatedPlace(dimension, compass.getFoundStructureX(stack), compass.getFoundStructureZ(stack));
+		if (!place.equals(lastRecorded)) {
+			lastRecorded = place;
+			pendingMirror = CompassWaypoints.record(player, compass, stack);
+		}
+		if (pendingMirror != null && isInFoundDimension(player, compass, stack) && XaeroMinimapIntegration.mirror(pendingMirror)) {
+			pendingMirror = null;
+		}
 	}
 
 	/** Starts the announcement when the search the panel was reporting on has just ended. */
@@ -233,34 +310,47 @@ public class ClientEventHandler {
 		if (!(stack.getItem() instanceof ExplorersCompassItem compass)) {
 			return null;
 		}
-		final CompassState state = compass.getState(stack);
-		if (state == null || state == CompassState.INACTIVE) {
+		final CompassState state = stateOf(compass, stack);
+		if (state == null) {
 			return null;
 		}
-		if (infoPanel) {
+		if (infoPanel && state != CompassState.INACTIVE) {
 			// The pulse a finished search is announced with is part of the panel, so a search that
 			// ends with no panel on screen is left to be announced when the compass is next held
 			updateAnnouncement(state);
 		}
-		return createHudData(player, compass, stack, state, false);
+		final HudData data = createHudData(player, compass, stack, state, false);
+		return (data.showInfoPanel && data.hasSomethingToReport()) || (data.showDirectionBar && data.hasSomethingToMark()) ? data : null;
+	}
+
+	/**
+	 * What a compass is doing, without giving one that has never been used a tag just to ask it: a
+	 * compass with nothing written on it is doing nothing, and writing an empty tag onto a stack on
+	 * this side alone would have it disagree with the server's copy.
+	 */
+	private static CompassState stateOf(ExplorersCompassItem compass, ItemStack stack) {
+		return stack.hasTag() ? compass.getState(stack) : CompassState.INACTIVE;
 	}
 
 	/**
 	 * The compass in the inventory the HUD speaks for while none is held. One pointing at a place
-	 * located in this dimension comes first, since that is the only kind the direction strip has
-	 * anything to mark; where the panel is wanted as well, any other compass that is doing something
-	 * stands in for it.
+	 * located in this dimension comes first, since that is what the direction strip is for; where the
+	 * panel is wanted as well, any other compass that is doing something stands in for it; and
+	 * failing either, any compass at all, since the strip has the waypoints of this dimension to mark
+	 * for as long as a compass is carried.
 	 */
 	private static ItemStack findCarriedCompass(Player player, boolean acceptAnyState) {
 		ItemStack candidate = ItemStack.EMPTY;
+		ItemStack idle = ItemStack.EMPTY;
 		for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
 			final ItemStack stack = player.getInventory().getItem(i);
-			// A compass that was never used carries no tag and is doing nothing, so it is passed over
-			// here rather than being given one just to be asked about
-			if (!(stack.getItem() instanceof ExplorersCompassItem compass) || !stack.hasTag()) {
+			if (!(stack.getItem() instanceof ExplorersCompassItem compass)) {
 				continue;
 			}
-			final CompassState state = compass.getState(stack);
+			if (idle.isEmpty()) {
+				idle = stack;
+			}
+			final CompassState state = stateOf(compass, stack);
 			if (state == CompassState.FOUND && isInFoundDimension(player, compass, stack)) {
 				return stack;
 			}
@@ -269,7 +359,7 @@ public class ClientEventHandler {
 				candidate = stack;
 			}
 		}
-		return candidate;
+		return candidate.isEmpty() ? idle : candidate;
 	}
 
 	/**
@@ -303,11 +393,11 @@ public class ClientEventHandler {
 		// rather than having someone else's text come out on top of its own background
 		guiGraphics.flush();
 
-		if (data.showDirectionBar && data.state == CompassState.FOUND && data.inFoundDimension) {
+		if (data.showDirectionBar && data.hasSomethingToMark()) {
 			renderDirectionBar(guiGraphics, player, data);
 		}
 
-		if (data.showInfoPanel) {
+		if (data.showInfoPanel && data.hasSomethingToReport()) {
 			renderInfoPanel(guiGraphics, data);
 		}
 	}
@@ -447,7 +537,7 @@ public class ClientEventHandler {
 							previous, GuiTheme.TEXT_SECONDARY));
 				}
 			}
-		} else {
+		} else if (state == CompassState.NOT_FOUND) {
 			headline = I18n.get("string.explorerscompass.notFound");
 			target = compass.getSearchTarget(stack).getPrettyName(compass.getTargetKey(stack));
 			rows.add(new HudRow(I18n.get("string.explorerscompass.radius"),
@@ -455,6 +545,11 @@ public class ClientEventHandler {
 					GuiTheme.TEXT_PRIMARY));
 			rows.add(new HudRow(I18n.get("string.explorerscompass.samples"),
 					String.format("%,d", compass.getSamples(stack)), GuiTheme.TEXT_PRIMARY));
+		} else {
+			// A compass doing nothing: nothing for the panel, but the strip may still have waypoints
+			headline = I18n.get("string.explorerscompass.inactive");
+			target = "";
+			dotColor = GuiTheme.TEXT_MUTED;
 		}
 
 		// Both parts of the HUD are drawn for a compass in hand; for one merely carried, each is
@@ -462,10 +557,41 @@ public class ClientEventHandler {
 		final boolean showDirectionBar = ConfigHandler.CLIENT.showDirectionBar.get()
 				&& (held || ConfigHandler.CLIENT.showDirectionBarWhileCarried.get());
 		final boolean showInfoPanel = held || ConfigHandler.CLIENT.showOverlayWhileCarried.get();
+		final boolean hasTarget = state == CompassState.FOUND && inFoundDimension;
+		final List<HudWaypoint> waypoints = showDirectionBar ? waypointsToMark(player, hasTarget, targetX, targetZ) : List.of();
 
 		return new HudData(state, headline, target, dotColor, progress, List.copyOf(rows),
 				inFoundDimension, displayCoordinates, targetX, targetY, targetZ,
-				previousLocations, showDirectionBar, showInfoPanel);
+				previousLocations, waypoints, showDirectionBar, showInfoPanel);
+	}
+
+	/**
+	 * The waypoints of this dimension the strip marks, nearest first and only so many of them. The
+	 * one the compass is pointing at is left out, since the target marker already stands there.
+	 */
+	private static List<HudWaypoint> waypointsToMark(Player player, boolean hasTarget, int targetX, int targetZ) {
+		if (!ConfigHandler.CLIENT.directionBarWaypoints.get()) {
+			return List.of();
+		}
+		final List<CompassWaypoint> candidates = new ArrayList<CompassWaypoint>();
+		for (CompassWaypoint waypoint : CompassWaypoints.inCurrentDimension()) {
+			if (waypoint.isShownOnHud() && !(hasTarget && waypoint.getX() == targetX && waypoint.getZ() == targetZ)) {
+				candidates.add(waypoint);
+			}
+		}
+		if (candidates.isEmpty()) {
+			return List.of();
+		}
+		final BlockPos here = player.blockPosition();
+		candidates.sort(Comparator.comparingLong((waypoint) -> StructureUtils.getHorizontalDistanceSqrToLocation(here, waypoint.getX(), waypoint.getZ())));
+
+		final int limit = Math.min(candidates.size(), ConfigHandler.CLIENT.directionBarWaypointLimit.get());
+		final List<HudWaypoint> marked = new ArrayList<HudWaypoint>(limit);
+		for (int i = 0; i < limit; i++) {
+			final CompassWaypoint waypoint = candidates.get(i);
+			marked.add(new HudWaypoint(waypoint.getName(), waypoint.getX(), waypoint.getY(), waypoint.getZ(), waypoint.getColor()));
+		}
+		return marked;
 	}
 
 	/**
@@ -554,6 +680,7 @@ public class ClientEventHandler {
 		// Drawn first, so that the marks of the horizon and their names stay crisp over them
 		drawPreviousMarkers(player, data.previousLocations, bar);
 		drawBarTicks(bar);
+		final HudWaypoint facedWaypoint = drawWaypointMarkers(player, data.waypoints, bar);
 		drawBarLabels(guiGraphics, bar);
 
 		if (bar.background) {
@@ -566,21 +693,85 @@ public class ClientEventHandler {
 		// Straight ahead, so that how far off the target lies reads at a glance
 		drawBarMark(bar, bar.centerX, bar.top, bar.bottom, BAR_CENTER_COLOR, 1.0F);
 
-		final double relative = Mth.wrapDegrees(bearingTo(player, targetX, targetZ) - bar.playerBearing);
-		// Turning the marker green the moment the target is straight ahead saves lining it up against
-		// a one pixel wide line by eye
-		final int markerColor = Math.abs(relative) <= ON_TARGET_DEGREES ? ON_TARGET_COLOR : MARKER_COLOR;
-		final boolean inSpan = Math.abs(relative) <= bar.halfSpan;
-		if (inSpan) {
-			drawTargetMarker(bar, bar.xFor(relative), markerColor);
-		} else {
-			// The structure lies outside the stretch of horizon the strip covers, so point the way to
-			// turn to bring it into view instead
-			drawEdgeArrow(bar, relative > 0.0D ? bar.right - 2 : bar.left + 1, relative > 0.0D, markerColor);
+		int readoutY = bar.bottom + 3;
+		if (data.hasTarget()) {
+			final double relative = Mth.wrapDegrees(bearingTo(player, targetX, targetZ) - bar.playerBearing);
+			// Turning the marker green the moment the target is straight ahead saves lining it up
+			// against a one pixel wide line by eye
+			final int markerColor = Math.abs(relative) <= ON_TARGET_DEGREES ? ON_TARGET_COLOR : MARKER_COLOR;
+			final boolean inSpan = Math.abs(relative) <= bar.halfSpan;
+			if (inSpan) {
+				drawTargetMarker(bar, bar.xFor(relative), markerColor);
+			} else {
+				// The structure lies outside the stretch of horizon the strip covers, so point the way
+				// to turn to bring it into view instead
+				drawEdgeArrow(bar, relative > 0.0D ? bar.right - 2 : bar.left + 1, relative > 0.0D, markerColor);
+			}
+
+			if (drawBarReadout(guiGraphics, player, data.displayCoordinates, bar.centerX, readoutY,
+					targetX, targetY, targetZ, relative, inSpan, markerColor & 0xFFFFFF)) {
+				readoutY += HUD_ROW_HEIGHT;
+			}
 		}
 
-		drawBarReadout(guiGraphics, player, data.displayCoordinates, bar.centerX, bar.bottom,
-				targetX, targetY, targetZ, relative, inSpan, markerColor & 0xFFFFFF);
+		if (facedWaypoint != null) {
+			drawWaypointReadout(guiGraphics, player, facedWaypoint, bar.centerX, readoutY);
+		}
+	}
+
+	/**
+	 * Marks the waypoints of this dimension along the strip, each in its own colour and in the shape
+	 * the player has chosen, and answers with the one lying nearest to straight ahead, if any lies
+	 * near enough to be the one being looked at. The names of the wind points are drawn after these,
+	 * so that a mark standing under one never hides it.
+	 */
+	private HudWaypoint drawWaypointMarkers(Player player, List<HudWaypoint> waypoints, BarLayout bar) {
+		final WaypointMarkerStyle style = ConfigHandler.CLIENT.directionBarWaypointStyle.get();
+		HudWaypoint faced = null;
+		double facedOffset = WAYPOINT_READOUT_DEGREES;
+		for (HudWaypoint waypoint : waypoints) {
+			final double relative = Mth.wrapDegrees(bearingTo(player, waypoint.x(), waypoint.z()) - bar.playerBearing);
+			if (Math.abs(relative) > bar.halfSpan) {
+				continue;
+			}
+			final int x = bar.xFor(relative);
+			final float fade = bar.fade(x);
+			if (fade < MINIMUM_FADE) {
+				continue;
+			}
+			final int color = fadeFill(WAYPOINT_MARKER_ALPHA | (waypoint.color() & 0xFFFFFF), fade);
+			if (bar.background) {
+				WaypointMarkers.draw(style, x, bar.top + 1, bar.bottom, color);
+			} else {
+				WaypointMarkers.drawWithShadow(style, x, bar.top + 1, bar.bottom, color, fadeFill(MARK_SHADOW_COLOR, fade));
+			}
+
+			if (Math.abs(relative) < facedOffset) {
+				facedOffset = Math.abs(relative);
+				faced = waypoint;
+			}
+		}
+		return faced;
+	}
+
+	/**
+	 * Names the waypoint lying nearest to straight ahead under the strip, with how far off it is: a
+	 * dot in its colour, so that it can be told from its neighbours, then its name and its distance.
+	 */
+	private void drawWaypointReadout(GuiGraphics guiGraphics, Player player, HudWaypoint waypoint, int centerX, int y) {
+		final StringBuilder readout = new StringBuilder(waypoint.name());
+		readout.append(" · ").append(String.format("%,d", StructureUtils.getHorizontalDistanceToLocation(player, waypoint.x(), waypoint.z())));
+		if (waypoint.y() != ExplorersCompassItem.UNKNOWN_Y) {
+			final int climb = waypoint.y() - player.getBlockY();
+			if (climb != 0) {
+				readout.append("  ").append(climb > 0 ? "↑ " : "↓ ").append(Math.abs(climb));
+			}
+		}
+		final String text = RenderUtils.trimToWidth(readout.toString(), Math.max(80, mc.getWindow().getGuiScaledWidth() / 3));
+		final int dotWidth = mc.font.width(DOT_GLYPH) + 3;
+		final int left = centerX - (dotWidth + mc.font.width(text)) / 2;
+		guiGraphics.drawString(mc.font, DOT_GLYPH, left, y, 0xFF000000 | (waypoint.color() & 0xFFFFFF), true);
+		guiGraphics.drawString(mc.font, text, left + dotWidth, y, GuiTheme.TEXT_PRIMARY, true);
 	}
 
 	/**
@@ -746,9 +937,10 @@ public class ClientEventHandler {
 	/**
 	 * What is left to travel, under the strip: the distance, how far up or down the structure sits
 	 * when that is known, and how far there is left to turn while it lies off the strip altogether.
+	 * Answers whether there was anything to say, so that whatever is read out next goes under it.
 	 */
-	private void drawBarReadout(GuiGraphics guiGraphics, Player player,
-			boolean displayCoordinates, int centerX, int bottom, int targetX, int targetY,
+	private boolean drawBarReadout(GuiGraphics guiGraphics, Player player,
+			boolean displayCoordinates, int centerX, int y, int targetX, int targetY,
 			int targetZ, double relative, boolean inSpan, int color) {
 		final StringBuilder readout = new StringBuilder();
 		// The distance is as much of a coordinate as the coordinates themselves, so it is held back
@@ -767,10 +959,11 @@ public class ClientEventHandler {
 			readout.append(readout.length() == 0 ? "" : "   ").append(relative > 0.0D ? "→ " : "← ").append(Math.round(Math.abs(relative))).append("°");
 		}
 		if (readout.length() == 0) {
-			return;
+			return false;
 		}
 
-		guiGraphics.drawCenteredString(mc.font, readout.toString(), centerX, bottom + 3, color);
+		guiGraphics.drawCenteredString(mc.font, readout.toString(), centerX, y, color);
+		return true;
 	}
 
 }
