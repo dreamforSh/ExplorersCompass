@@ -83,8 +83,12 @@ alone are what the upstream mod covers; biomes are its sister mod,
 
 ## Configuration
 
-Server-side options live in `config/explorerscompass-common.toml`, client-side ones in
-`config/explorerscompass-client.toml`.
+Every setting can be changed in the game: the gear beside the filter field on the compass screen,
+and the configure button in the mod list, both open a settings screen with one tab for this
+computer's settings and one for the server's. Each setting is named and explained there, changed in
+place, and written out as it is changed; ↺ puts a single setting back, and a button puts a whole
+tab back. The files behind it are `config/explorerscompass-common.toml` for the server's settings
+and `config/explorerscompass-client.toml` for this computer's, and can still be edited by hand.
 
 Things worth knowing about:
 
@@ -121,12 +125,13 @@ Things worth knowing about:
 - `showDirectionBar`, `showDirectionBarWhileCarried`, `directionBarWidth`, `directionBarSpan` — the
   horizon strip. Pair a wide strip with a large span to have the whole horizon on screen at once. The
   strip can stay up while the compass is in the inventory rather than in hand.
-- `directionBarWaypoints`, `directionBarWaypointLimit`, `maxWaypointsPerWorld` — whether the strip
-  marks the waypoints of the dimension you are in, how many of the nearest it marks at once, and how
-  many a world keeps before the oldest are forgotten. `createXaeroWaypoints`, `xaeroWaypointColor`
-  and `xaeroWaypointDisplay` are about the copies in Xaero's Minimap: whether they are made, what
-  colour they and the marks on the strip take, and whether the minimap draws them everywhere, on its
-  world map alone, or not at all.
+- `directionBarWaypoints`, `directionBarWaypointStyle`, `directionBarWaypointLimit`,
+  `maxWaypointsPerWorld` — whether the strip marks the waypoints of the dimension you are in, what
+  shape it marks them with (a bookmark hanging from the top of the strip, a pin, a flag or a
+  diamond), how many of the nearest it marks at once, and how many a world keeps before the oldest
+  are forgotten. `createXaeroWaypoints`, `xaeroWaypointColor` and `xaeroWaypointDisplay` are about
+  the copies in Xaero's Minimap: whether they are made, what colour they and the marks on the strip
+  take, and whether the minimap draws them everywhere, on its world map alone, or not at all.
 - `showOverlayWhileCarried` — keeps the information panel up while the compass is in the inventory
   rather than in hand, the way the strip already can, and it reports on a carried compass exactly as
   it does on a held one. Off by default, so the panel appears only while a compass is held.

@@ -3,6 +3,7 @@ package com.chaosthedude.explorerscompass.client;
 import com.chaosthedude.explorerscompass.ExplorersCompass;
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.gui.GuiTheme;
+import com.chaosthedude.explorerscompass.gui.WaypointMarkers;
 import com.chaosthedude.explorerscompass.items.ExplorersCompassItem;
 import com.chaosthedude.explorerscompass.util.CompassState;
 import com.chaosthedude.explorerscompass.util.ItemUtils;
@@ -709,12 +710,13 @@ public class ClientEventHandler {
 	}
 
 	/**
-	 * Marks the waypoints of this dimension along the strip, each as a pin in its own colour, and
-	 * answers with the one lying nearest to straight ahead, if any lies near enough to be the one
-	 * being looked at. The pins stand in the lower half of the strip, under the names of the wind
-	 * points, so that neither is drawn over the other.
+	 * Marks the waypoints of this dimension along the strip, each in its own colour and in the shape
+	 * the player has chosen, and answers with the one lying nearest to straight ahead, if any lies
+	 * near enough to be the one being looked at. The names of the wind points are drawn after these,
+	 * so that a mark standing under one never hides it.
 	 */
 	private HudWaypoint drawWaypointMarkers(GuiGraphics guiGraphics, Player player, List<HudWaypoint> waypoints, BarLayout bar) {
+		final WaypointMarkerStyle style = ConfigHandler.CLIENT.directionBarWaypointStyle.get();
 		HudWaypoint faced = null;
 		double facedOffset = WAYPOINT_READOUT_DEGREES;
 		for (HudWaypoint waypoint : waypoints) {
@@ -727,11 +729,12 @@ public class ClientEventHandler {
 			if (fade < MINIMUM_FADE) {
 				continue;
 			}
-			final int color = WAYPOINT_MARKER_ALPHA | (waypoint.color() & 0xFFFFFF);
-			if (!bar.background) {
-				drawPinShape(guiGraphics, x + 1, bar.bottom + 1, fadeFill(MARK_SHADOW_COLOR, fade));
+			final int color = fadeFill(WAYPOINT_MARKER_ALPHA | (waypoint.color() & 0xFFFFFF), fade);
+			if (bar.background) {
+				WaypointMarkers.draw(guiGraphics, style, x, bar.top + 1, bar.bottom, color);
+			} else {
+				WaypointMarkers.drawWithShadow(guiGraphics, style, x, bar.top + 1, bar.bottom, color, fadeFill(MARK_SHADOW_COLOR, fade));
 			}
-			drawPinShape(guiGraphics, x, bar.bottom, fadeFill(color, fade));
 
 			if (Math.abs(relative) < facedOffset) {
 				facedOffset = Math.abs(relative);
@@ -739,12 +742,6 @@ public class ClientEventHandler {
 			}
 		}
 		return faced;
-	}
-
-	/** A pin: a head three pixels square on a stem down to the bottom edge of the strip. */
-	private static void drawPinShape(GuiGraphics guiGraphics, int x, int bottom, int color) {
-		RenderUtils.drawRect(guiGraphics, x - 1, bottom - 8, x + 2, bottom - 5, color);
-		RenderUtils.drawRect(guiGraphics, x, bottom - 5, x + 1, bottom - 1, color);
 	}
 
 	/**

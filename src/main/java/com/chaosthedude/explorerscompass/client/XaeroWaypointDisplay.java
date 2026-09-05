@@ -29,8 +29,9 @@ public enum XaeroWaypointDisplay {
 		return values()[(ordinal() + 1) % values().length];
 	}
 
+	/** Named where the settings screen names every choice, so that the two screens agree on what to call it. */
 	public String getTranslationKey() {
-		return "string.explorerscompass.xaeroDisplay." + name().toLowerCase(java.util.Locale.ROOT);
+		return "explorerscompass.configuration.enum.XaeroWaypointDisplay." + name().toLowerCase(java.util.Locale.ROOT);
 	}
 
 }

@@ -8,6 +8,7 @@ import java.util.List;
 import com.chaosthedude.explorerscompass.client.ClientEventHandler;
 import com.chaosthedude.explorerscompass.client.CompassWaypoint;
 import com.chaosthedude.explorerscompass.client.XaeroMinimapIntegration;
+import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.util.RenderUtils;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -30,7 +31,9 @@ import net.neoforged.api.distmarker.OnlyIn;
 public class WaypointListEntry extends ObjectSelectionList.Entry<WaypointListEntry> {
 
 	private static final String HUD_CHIP = "HUD";
-	private static final int SWATCH_SIZE = 7;
+	/** The room the mark beside the name takes: the widest of the shapes, and the height of the name line. */
+	private static final int MARK_WIDTH = WaypointMarkers.HALF_WIDTH * 2 + 2;
+	private static final int MARK_HEIGHT = 12;
 
 	private final Minecraft mc;
 	private final WaypointsScreen parentScreen;
@@ -92,11 +95,12 @@ public class WaypointListEntry extends ObjectSelectionList.Entry<WaypointListEnt
 				onHud ? GuiTheme.CHIP_ACCENT_BACKGROUND : 0x20FFFFFF,
 				onHud ? GuiTheme.ACCENT : GuiTheme.TEXT_DISABLED);
 
-		// The colour the waypoint is drawn in, on the strip and in the minimap, as a swatch by its name
-		final int swatchTop = par2 + 2;
-		RenderUtils.drawRect(guiGraphics, left, swatchTop, left + SWATCH_SIZE, swatchTop + SWATCH_SIZE, 0xFF000000 | waypoint.getColor());
-		RenderUtils.drawOutline(guiGraphics, left, swatchTop, left + SWATCH_SIZE, swatchTop + SWATCH_SIZE, 0x60000000);
-		guiGraphics.drawString(mc.font, cachedName, left + SWATCH_SIZE + 4, par2 + 2, onHud ? GuiTheme.TEXT_PRIMARY : GuiTheme.TEXT_SECONDARY, false);
+		// The mark the strip draws for this waypoint, in its colour, so that the row and the strip can be
+		// matched up by eye; dimmed along with the name when the strip is not drawing it
+		final int markX = left + WaypointMarkers.HALF_WIDTH;
+		final int markColor = (onHud ? 0xFF000000 : 0x80000000) | waypoint.getColor();
+		WaypointMarkers.drawWithShadow(guiGraphics, ConfigHandler.CLIENT.directionBarWaypointStyle.get(), markX, par2, par2 + MARK_HEIGHT, markColor, 0x60000000);
+		guiGraphics.drawString(mc.font, cachedName, left + MARK_WIDTH + 4, par2 + 2, onHud ? GuiTheme.TEXT_PRIMARY : GuiTheme.TEXT_SECONDARY, false);
 
 		guiGraphics.drawString(mc.font, cachedCoordinates, left, par2 + 14, GuiTheme.TEXT_MUTED, false);
 
@@ -229,7 +233,7 @@ public class WaypointListEntry extends ObjectSelectionList.Entry<WaypointListEnt
 		// Both chips end level with the name, so the name stops short of the second of them
 		final int chipsWidth = mc.font.width(cachedBadge) + 8 + 4 + mc.font.width(HUD_CHIP) + 8;
 		final int badgeLeft = left + rowWidth - 2 - chipsWidth;
-		cachedName = RenderUtils.trimToWidth(waypoint.getName(), badgeLeft - left - SWATCH_SIZE - 4 - 6);
+		cachedName = RenderUtils.trimToWidth(waypoint.getName(), badgeLeft - left - MARK_WIDTH - 4 - 6);
 		cachedCoordinates = RenderUtils.trimToWidth(coordinateLine, rowWidth - 6);
 	}
 

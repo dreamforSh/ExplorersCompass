@@ -5,6 +5,7 @@ import java.util.List;
 
 import com.chaosthedude.explorerscompass.client.OverlaySide;
 import com.chaosthedude.explorerscompass.client.TooltipDetail;
+import com.chaosthedude.explorerscompass.client.WaypointMarkerStyle;
 import com.chaosthedude.explorerscompass.client.XaeroWaypointDisplay;
 import com.chaosthedude.explorerscompass.registry.ModDataComponents;
 
@@ -20,6 +21,38 @@ public class ConfigHandler {
 
 	public static final ModConfigSpec GENERAL_SPEC = GENERAL_BUILDER.build();
 	public static final ModConfigSpec CLIENT_SPEC = CLIENT_BUILDER.build();
+
+	/**
+	 * A handful of settings that belong together, for the settings screen to lay out under one
+	 * heading. The files keep their flat layout, which is what every config already written expects;
+	 * the grouping is only for reading them on a screen.
+	 *
+	 * @param key    what the group is called, as the last part of a translation key
+	 * @param values the settings in it, in the order they are shown
+	 */
+	public record Group(String key, List<ModConfigSpec.ConfigValue<?>> values) {
+	}
+
+	/** The server's settings, grouped for the settings screen. */
+	public static List<Group> generalGroups() {
+		return List.of(
+				new Group("search", List.of(GENERAL.maxRadius, GENERAL.maxSamples, GENERAL.maxNextSearches, GENERAL.asyncStructureSearch, GENERAL.maxSearchTimePerTick, GENERAL.searchRequestCooldownMillis)),
+				new Group("biomeSearch", List.of(GENERAL.maxBiomeSamples, GENERAL.biomeSampleSpacing, GENERAL.biomeVerticalSampleSpacing, GENERAL.biomeDepthSampleInterval, GENERAL.asyncBiomeSearch)),
+				new Group("lists", List.of(GENERAL.structureBlacklist, GENERAL.biomeBlacklist, GENERAL.hideStructuresThatCannotGenerate)),
+				new Group("players", List.of(GENERAL.displayCoordinates, GENERAL.allowTeleport, GENERAL.teleportCooldownMillis, GENERAL.allowSharing, GENERAL.shareCooldownMillis, GENERAL.maxBookmarks)),
+				new Group("preview", List.of(GENERAL.allowStructurePreview, GENERAL.structurePreviewResolution, GENERAL.structurePreviewMaxBlocks)));
+	}
+
+	/** This computer's settings, grouped for the settings screen. */
+	public static List<Group> clientGroups() {
+		return List.of(
+				new Group("hud", List.of(CLIENT.displayWithChatOpen, CLIENT.showOverlayWhileCarried, CLIENT.overlaySide, CLIENT.overlayLineOffset, CLIENT.overlayBackground, CLIENT.tooltipDetail)),
+				new Group("directionBar", List.of(CLIENT.showDirectionBar, CLIENT.showDirectionBarWhileCarried, CLIENT.directionBarY, CLIENT.directionBarWidth, CLIENT.directionBarSpan, CLIENT.directionBarBackground)),
+				new Group("waypoints", List.of(CLIENT.directionBarWaypoints, CLIENT.directionBarWaypointStyle, CLIENT.directionBarWaypointLimit, CLIENT.xaeroWaypointColor, CLIENT.maxWaypointsPerWorld)),
+				new Group("xaero", List.of(CLIENT.createXaeroWaypoints, CLIENT.xaeroWaypointDisplay)),
+				new Group("screens", List.of(CLIENT.guiHeaderBackground, CLIENT.guiSidebarBackground, CLIENT.guiStatusBarBackground, CLIENT.translateStructureNames, CLIENT.translateBiomeNames)),
+				new Group("preview", List.of(CLIENT.structurePreviewAutoSpin, CLIENT.structurePreviewDetailLimit)));
+	}
 
 	private ConfigHandler() {
 	}
@@ -139,6 +172,7 @@ public class ConfigHandler {
 		public final ModConfigSpec.IntValue maxWaypointsPerWorld;
 		public final ModConfigSpec.BooleanValue directionBarWaypoints;
 		public final ModConfigSpec.IntValue directionBarWaypointLimit;
+		public final ModConfigSpec.EnumValue<WaypointMarkerStyle> directionBarWaypointStyle;
 		public final ModConfigSpec.BooleanValue showOverlayWhileCarried;
 		public final ModConfigSpec.EnumValue<OverlaySide> overlaySide;
 		public final ModConfigSpec.IntValue overlayLineOffset;
@@ -190,6 +224,9 @@ public class ConfigHandler {
 
 			desc = "How many waypoints the direction strip marks at once, nearest first, before it stops saying anything and just looks busy.";
 			directionBarWaypointLimit = builder.comment(desc).defineInRange("directionBarWaypointLimit", 12, 1, 64);
+
+			desc = "The shape a waypoint is marked with on the direction strip, and beside its name on the waypoints screen. BOOKMARK hangs a notched ribbon from the top of the strip; PIN stands a round-headed pin on the bottom of it; FLAG stands a pole with a pennant; DIAMOND puts a small diamond in the middle, which takes the least room. Ex: BOOKMARK, PIN, FLAG, DIAMOND";
+			directionBarWaypointStyle = builder.comment(desc).defineEnum("directionBarWaypointStyle", WaypointMarkerStyle.BOOKMARK);
 
 			desc = "Keeps the panel of compass information on the HUD while the compass is only carried, rather than only while one is held. A carried compass reports what it is doing exactly as a held one does: how far the search it is running has got, where the place it points at lies, or that its last search came back empty. Where several are carried, the one pointing at a place located in this dimension is the one the panel speaks for.";
 			showOverlayWhileCarried = builder.comment(desc).define("showOverlayWhileCarried", false);
