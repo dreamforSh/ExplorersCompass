@@ -5,6 +5,8 @@ import java.util.List;
 
 import com.chaosthedude.explorerscompass.client.OverlaySide;
 import com.chaosthedude.explorerscompass.client.TooltipDetail;
+import com.chaosthedude.explorerscompass.client.WaypointMarkerStyle;
+import com.chaosthedude.explorerscompass.client.XaeroWaypointDisplay;
 
 import net.minecraftforge.common.ForgeConfigSpec;
 
@@ -19,16 +21,50 @@ public class ConfigHandler {
 	public static final ForgeConfigSpec GENERAL_SPEC = GENERAL_BUILDER.build();
 	public static final ForgeConfigSpec CLIENT_SPEC = CLIENT_BUILDER.build();
 
+	/**
+	 * A handful of settings that belong together, for the settings screen to lay out under one
+	 * heading. The files keep their flat layout, which is what every config already written expects;
+	 * the grouping is only for reading them on a screen.
+	 *
+	 * @param key    what the group is called, as the last part of a translation key
+	 * @param values the settings in it, in the order they are shown
+	 */
+	public record Group(String key, List<ForgeConfigSpec.ConfigValue<?>> values) {
+	}
+
+	/** The server's settings, grouped for the settings screen. */
+	public static List<Group> generalGroups() {
+		return List.of(
+				new Group("search", List.of(GENERAL.maxRadius, GENERAL.maxSamples, GENERAL.maxNextSearches, GENERAL.asyncStructureSearch, GENERAL.maxSearchTimePerTick, GENERAL.searchRequestCooldownMillis)),
+				new Group("biomeSearch", List.of(GENERAL.maxBiomeSamples, GENERAL.biomeSampleSpacing, GENERAL.biomeVerticalSampleSpacing, GENERAL.biomeDepthSampleInterval, GENERAL.asyncBiomeSearch)),
+				new Group("lists", List.of(GENERAL.structureBlacklist, GENERAL.biomeBlacklist, GENERAL.hideStructuresThatCannotGenerate)),
+				new Group("players", List.of(GENERAL.displayCoordinates, GENERAL.allowTeleport, GENERAL.teleportCooldownMillis, GENERAL.allowSharing, GENERAL.shareCooldownMillis, GENERAL.maxBookmarks)),
+				new Group("preview", List.of(GENERAL.allowStructurePreview, GENERAL.structurePreviewResolution, GENERAL.structurePreviewMaxBlocks)));
+	}
+
+	/** This computer's settings, grouped for the settings screen. */
+	public static List<Group> clientGroups() {
+		return List.of(
+				new Group("hud", List.of(CLIENT.displayWithChatOpen, CLIENT.showOverlayWhileCarried, CLIENT.overlaySide, CLIENT.overlayLineOffset, CLIENT.overlayBackground, CLIENT.tooltipDetail)),
+				new Group("directionBar", List.of(CLIENT.showDirectionBar, CLIENT.showDirectionBarWhileCarried, CLIENT.directionBarY, CLIENT.directionBarWidth, CLIENT.directionBarSpan, CLIENT.directionBarBackground)),
+				new Group("waypoints", List.of(CLIENT.directionBarWaypoints, CLIENT.directionBarWaypointStyle, CLIENT.directionBarWaypointLimit, CLIENT.xaeroWaypointColor, CLIENT.maxWaypointsPerWorld)),
+				new Group("xaero", List.of(CLIENT.createXaeroWaypoints, CLIENT.xaeroWaypointDisplay)),
+				new Group("screens", List.of(CLIENT.guiHeaderBackground, CLIENT.guiSidebarBackground, CLIENT.guiStatusBarBackground, CLIENT.translateStructureNames, CLIENT.translateBiomeNames)),
+				new Group("preview", List.of(CLIENT.structurePreviewAutoSpin, CLIENT.structurePreviewDetailLimit)));
+	}
+
 	private ConfigHandler() {
 	}
 
 	public static class General {
 		public final ForgeConfigSpec.BooleanValue allowTeleport;
+		public final ForgeConfigSpec.IntValue teleportCooldownMillis;
 		public final ForgeConfigSpec.IntValue maxNextSearches;
 		public final ForgeConfigSpec.BooleanValue displayCoordinates;
 		public final ForgeConfigSpec.IntValue maxRadius;
 		public final ForgeConfigSpec.ConfigValue<List<String>> structureBlacklist;
 		public final ForgeConfigSpec.ConfigValue<List<String>> biomeBlacklist;
+		public final ForgeConfigSpec.BooleanValue hideStructuresThatCannotGenerate;
 		public final ForgeConfigSpec.IntValue maxSamples;
 		public final ForgeConfigSpec.IntValue maxBiomeSamples;
 		public final ForgeConfigSpec.IntValue biomeSampleSpacing;
@@ -52,7 +88,10 @@ public class ConfigHandler {
 			desc = "Allows a player to teleport to a located structure when in creative mode, opped, or in cheat mode.";
 			allowTeleport = builder.comment(desc).define("allowTeleport", true);
 
-			desc = "The maximum number of times a player can search for the next instance of a located structure, skipping the locations already found. Once this many locations have been collected the next search starts over from the closest one again. Set to 0 to disable searching for further instances and make the compass always locate the nearest one.";
+			desc = "The minimum time in milliseconds between teleports requested by the same player. Teleporting loads, and usually generates, the destination chunk, so this keeps a modified client from queueing up that work as fast as it can send packets. Set to 0 to disable.";
+			teleportCooldownMillis = builder.comment(desc).defineInRange("teleportCooldownMillis", 2000, 0, 60000);
+
+			desc = "The maximum number of times a player can search for the next instance of a located structure, skipping the locations already found. The collected locations are forgotten and the search starts over from the closest instance again once this many have been collected, and likewise once every instance within the search radius has been collected. Set to 0 to disable searching for further instances and make the compass always locate the nearest one.";
 			maxNextSearches = builder.comment(desc).defineInRange("maxNextSearches", 100, 0, 10000);
 			
 			desc = "Allows players to view the precise coordinates and distance of a located structure on the HUD, rather than relying on the direction the compass is pointing.";
@@ -66,6 +105,9 @@ public class ConfigHandler {
 
 			desc = "A list of biomes that the compass will not display in the GUI and will not be able to search for. Wildcards work the same way they do for the structure blacklist. Ex: [\"minecraft:deep_dark\", \"minecraft:*ocean*\"]";
 			biomeBlacklist = builder.comment(desc).define("biomeBlacklist", new ArrayList<String>());
+
+			desc = "Leaves the structures this world cannot generate out of the compass, rather than offering them and having every search for one report that nothing was found. A structure is only ever placed by a structure set that names it and whose biomes this world actually has, so what this drops is the structures no dimension of this world could place: the ones whose biome tag a data pack has emptied out, the ones a data pack has taken out of every structure set, the ones belonging to no set in the first place, and every structure at once in a superflat world configured without any or in a world generating no structures at all. This is the same rule the compass already searches by, so what it leaves out is exactly what a search could never find. Turn it off to be offered every structure this world's registries hold, whether it can generate or not.";
+			hideStructuresThatCannotGenerate = builder.comment(desc).define("hideStructuresThatCannotGenerate", true);
 
 			desc = "The maximum number of samples to be taken when searching for a structure.";
 			maxSamples = builder.comment(desc).defineInRange("maxSamples", 100000, 0, 100000000);
@@ -103,7 +145,7 @@ public class ConfigHandler {
 			desc = "The minimum time in milliseconds between locations shared by the same player, so that sharing cannot be used to flood chat. Set to 0 to disable.";
 			shareCooldownMillis = builder.comment(desc).defineInRange("shareCooldownMillis", 3000, 0, 60000);
 
-			desc = "Allows players to see what a structure looks like before searching for one. The server assembles the structure the way world generation would, without placing any of it anywhere, and sends back a small model of it. This is done once per structure and then kept for as long as the server runs, so looking at the same structure again costs nothing. Turn it off to have the compass answer that there is nothing to show.";
+			desc = "Allows players to see what a structure looks like before searching for one. The server assembles the structure the way world generation would, without placing any of it anywhere, off the server thread, and sends back a small model of it. The most recently viewed structures are kept assembled, so looking at one again costs nothing while it stays in use. Turn it off to have the compass answer that there is nothing to show.";
 			allowStructurePreview = builder.comment(desc).define("allowStructurePreview", true);
 
 			desc = "How many cells across a structure preview may be. The default is large enough that no structure is shrunk to fit it, so a preview is one cell to one block and shows the structure at its own size; lower it to cap how large a preview may be however large the structure is. What actually decides whether a preview is shown one to one is the cell budget below.";
@@ -123,6 +165,12 @@ public class ConfigHandler {
 		public final ForgeConfigSpec.BooleanValue translateBiomeNames;
 		public final ForgeConfigSpec.BooleanValue createXaeroWaypoints;
 		public final ForgeConfigSpec.IntValue xaeroWaypointColor;
+		public final ForgeConfigSpec.EnumValue<XaeroWaypointDisplay> xaeroWaypointDisplay;
+		public final ForgeConfigSpec.IntValue maxWaypointsPerWorld;
+		public final ForgeConfigSpec.BooleanValue directionBarWaypoints;
+		public final ForgeConfigSpec.IntValue directionBarWaypointLimit;
+		public final ForgeConfigSpec.EnumValue<WaypointMarkerStyle> directionBarWaypointStyle;
+		public final ForgeConfigSpec.BooleanValue showOverlayWhileCarried;
 		public final ForgeConfigSpec.EnumValue<OverlaySide> overlaySide;
 		public final ForgeConfigSpec.IntValue overlayLineOffset;
 		public final ForgeConfigSpec.BooleanValue overlayBackground;
@@ -130,6 +178,7 @@ public class ConfigHandler {
 		public final ForgeConfigSpec.BooleanValue guiSidebarBackground;
 		public final ForgeConfigSpec.BooleanValue guiStatusBarBackground;
 		public final ForgeConfigSpec.BooleanValue showDirectionBar;
+		public final ForgeConfigSpec.BooleanValue showDirectionBarWhileCarried;
 		public final ForgeConfigSpec.IntValue directionBarY;
 		public final ForgeConfigSpec.IntValue directionBarWidth;
 		public final ForgeConfigSpec.IntValue directionBarSpan;
@@ -153,11 +202,31 @@ public class ConfigHandler {
 			desc = "Attempts to translate biome names before fixing the unlocalized names. Unlike structures, almost every biome is named by the game itself or by the mod that adds it, so there is rarely anything left to fix up.";
 			translateBiomeNames = builder.comment(desc).define("translateBiomeNames", true);
 
-			desc = "Creates a waypoint in Xaero's Minimap for each located structure. Has no effect when that mod is not installed.";
+			desc = "Mirrors each waypoint the compass records into Xaero's Minimap as well. Has no effect when that mod is not installed. The compass keeps a waypoint of its own for every place it locates either way, marked on the direction strip and listed on the waypoints screen; this is about whether the minimap gets a copy.";
 			createXaeroWaypoints = builder.comment(desc).define("createXaeroWaypoints", true);
 
-			desc = "The color of the waypoints created in Xaero's Minimap, as an index into its own color list.";
-			xaeroWaypointColor = builder.comment(desc).defineInRange("xaeroWaypointColor", 0, 0, 15);
+			// The first entry in that list is black, which a waypoint marker is not readable in, so the
+			// gold this mod picks things out in elsewhere is used instead
+			desc = "The color of the waypoints the compass records, as an index into Xaero's Minimap's own color list, which is also the game's list of text colors. Used on the direction strip as well as in the minimap.";
+			xaeroWaypointColor = builder.comment(desc).defineInRange("xaeroWaypointColor", 6, 0, 15);
+
+			desc = "Where Xaero's Minimap draws the waypoints this mod mirrors into it. The direction strip marks them in the world either way, so the minimap's own floating labels are one marker too many. WORLD_MAP_ONLY keeps them on the full-screen world map and nowhere else, which is the minimap's own \"world map only\" visibility; MINIMAP_AND_WORLD lets the minimap draw them everywhere as it did before; HIDDEN leaves them in the minimap's list but switched off there. Applies to every copy made from then on; the button on the waypoints screen changes this too and applies it to the copies already made. Ex: WORLD_MAP_ONLY, MINIMAP_AND_WORLD, HIDDEN";
+			xaeroWaypointDisplay = builder.comment(desc).defineEnum("xaeroWaypointDisplay", XaeroWaypointDisplay.WORLD_MAP_ONLY);
+
+			desc = "How many waypoints the compass keeps for one world or server before the oldest are forgotten. Set to 0 to keep them all.";
+			maxWaypointsPerWorld = builder.comment(desc).defineInRange("maxWaypointsPerWorld", 200, 0, 10000);
+
+			desc = "Marks the waypoints the compass has recorded in this dimension on the direction strip, each in its own color, with the name and distance of whichever lies nearest to straight ahead read out under the strip. The strip stays up for them while a compass is held, or carried where the strip is kept up for a carried compass, whether or not the compass is pointing at anything. Each waypoint can be taken off the strip on its own from the waypoints screen.";
+			directionBarWaypoints = builder.comment(desc).define("directionBarWaypoints", true);
+
+			desc = "How many waypoints the direction strip marks at once, nearest first, before it stops saying anything and just looks busy.";
+			directionBarWaypointLimit = builder.comment(desc).defineInRange("directionBarWaypointLimit", 12, 1, 64);
+
+			desc = "The shape a waypoint is marked with on the direction strip, and beside its name on the waypoints screen. BOOKMARK hangs a notched ribbon from the top of the strip; PIN stands a round-headed pin on the bottom of it; FLAG stands a pole with a pennant; DIAMOND puts a small diamond in the middle, which takes the least room. Ex: BOOKMARK, PIN, FLAG, DIAMOND";
+			directionBarWaypointStyle = builder.comment(desc).defineEnum("directionBarWaypointStyle", WaypointMarkerStyle.BOOKMARK);
+
+			desc = "Keeps the panel of compass information on the HUD while the compass is only carried, rather than only while one is held. A carried compass reports what it is doing exactly as a held one does: how far the search it is running has got, where the place it points at lies, or that its last search came back empty. Where several are carried, the one pointing at a place located in this dimension is the one the panel speaks for.";
+			showOverlayWhileCarried = builder.comment(desc).define("showOverlayWhileCarried", false);
 
 			desc = "The line offset for information rendered on the HUD.";
 			overlayLineOffset = builder.comment(desc).defineInRange("overlayLineOffset", 1, 0, 50);
@@ -182,6 +251,9 @@ public class ConfigHandler {
 			desc = "Displays a compass strip at the top of the screen marking the direction of the located structure.";
 			showDirectionBar = builder.comment(desc).define("showDirectionBar", true);
 
+			desc = "Keeps the direction strip on the HUD while the compass is only carried, rather than only while one is held, so long as the carried one is pointing at a place located in this dimension. Turn this off to have the strip appear only while the compass is in hand. What the panel of compass information does while one is only carried is showOverlayWhileCarried's to say.";
+			showDirectionBarWhileCarried = builder.comment(desc).define("showDirectionBarWhileCarried", true);
+
 			desc = "How far down from the top of the screen the direction strip is drawn.";
 			directionBarY = builder.comment(desc).defineInRange("directionBarY", 4, 0, 200);
 
@@ -197,8 +269,8 @@ public class ConfigHandler {
 			desc = "Turns a structure preview slowly on its own, so that it is seen from more than one side without being dragged around. The button on the preview screen switches this on and off as well.";
 			structurePreviewAutoSpin = builder.comment(desc).define("structurePreviewAutoSpin", true);
 
-			desc = "How many cells a structure preview may hold before it is drawn as coloured blocks instead of real ones. Both are one cell to one block; what the coloured tier gives up is the textures, not the detail. Real blocks take far longer to assemble into a model, so a large structure is shown as its shape and its colours rather than after a long wait. Raise this to see real blocks on larger structures, at the cost of that wait when a preview opens; set it to 0 to always show colours.";
-			structurePreviewDetailLimit = builder.comment(desc).defineInRange("structurePreviewDetailLimit", 20000, 0, 400000);
+			desc = "How many cells a structure preview may hold before it opens drawn as coloured blocks instead of real ones. Both are one cell to one block; what the coloured tier gives up is the textures, not the detail. Real blocks take longer to assemble into a model, which happens in the background while a coloured stand-in is shown, so this decides which of the two a large structure settles on rather than how long it takes to appear. The button on the preview screen switches between the two for the structure being looked at either way. Raise this to have real blocks on larger structures by default; set it to 0 to open every preview in colours.";
+			structurePreviewDetailLimit = builder.comment(desc).defineInRange("structurePreviewDetailLimit", 40000, 0, 400000);
 
 			builder.pop();
 		}

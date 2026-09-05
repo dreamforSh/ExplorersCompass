@@ -1,0 +1,93 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "java",
+      "request": "launch",
+      "name": "Client",
+      "presentation": {
+        "group": "Mod Development - ExplorersCompass",
+        "order": 0
+      },
+      "projectName": "ExplorersCompass",
+      "mainClass": "net.neoforged.devlaunch.Main",
+      "args": [
+        "@F:\\CancriRecoleta\\ExplorersCompass\\build\\moddev\\clientRunProgramArgs.txt"
+      ],
+      "vmArgs": [
+        "@F:\\CancriRecoleta\\ExplorersCompass\\build\\moddev\\clientRunVmArgs.txt",
+        "-Dfml.modFolders\u003dexplorerscompass%%F:\\CancriRecoleta\\ExplorersCompass\\bin\\main"
+      ],
+      "cwd": "${workspaceFolder}\\run",
+      "env": {},
+      "console": "internalConsole",
+      "shortenCommandLine": "none"
+    },
+    {
+      "type": "java",
+      "request": "launch",
+      "name": "Data",
+      "presentation": {
+        "group": "Mod Development - ExplorersCompass",
+        "order": 1
+      },
+      "projectName": "ExplorersCompass",
+      "mainClass": "net.neoforged.devlaunch.Main",
+      "args": [
+        "@F:\\CancriRecoleta\\ExplorersCompass\\build\\moddev\\dataRunProgramArgs.txt"
+      ],
+      "vmArgs": [
+        "@F:\\CancriRecoleta\\ExplorersCompass\\build\\moddev\\dataRunVmArgs.txt",
+        "-Dfml.modFolders\u003dexplorerscompass%%F:\\CancriRecoleta\\ExplorersCompass\\bin\\main"
+      ],
+      "cwd": "${workspaceFolder}\\run",
+      "env": {},
+      "console": "internalConsole",
+      "shortenCommandLine": "none"
+    },
+    {
+      "type": "java",
+      "request": "launch",
+      "name": "GameTestServer",
+      "presentation": {
+        "group": "Mod Development - ExplorersCompass",
+        "order": 2
+      },
+      "projectName": "ExplorersCompass",
+      "mainClass": "net.neoforged.devlaunch.Main",
+      "args": [
+        "@F:\\CancriRecoleta\\ExplorersCompass\\build\\moddev\\gameTestServerRunProgramArgs.txt"
+      ],
+      "vmArgs": [
+        "@F:\\CancriRecoleta\\ExplorersCompass\\build\\moddev\\gameTestServerRunVmArgs.txt",
+        "-Dfml.modFolders\u003dexplorerscompass%%F:\\CancriRecoleta\\ExplorersCompass\\bin\\main"
+      ],
+      "cwd": "${workspaceFolder}\\run",
+      "env": {},
+      "console": "internalConsole",
+      "shortenCommandLine": "none"
+    },
+    {
+      "type": "java",
+      "request": "launch",
+      "name": "Server",
+      "presentation": {
+        "group": "Mod Development - ExplorersCompass",
+        "order": 3
+      },
+      "projectName": "ExplorersCompass",
+      "mainClass": "net.neoforged.devlaunch.Main",
+      "args": [
+        "@F:\\CancriRecoleta\\ExplorersCompass\\build\\moddev\\serverRunProgramArgs.txt"
+      ],
+      "vmArgs": [
+        "@F:\\CancriRecoleta\\ExplorersCompass\\build\\moddev\\serverRunVmArgs.txt",
+        "-Dfml.modFolders\u003dexplorerscompass%%F:\\CancriRecoleta\\ExplorersCompass\\bin\\main"
+      ],
+      "cwd": "${workspaceFolder}\\run",
+      "env": {},
+      "console": "internalConsole",
+      "shortenCommandLine": "none"
+    }
+  ]
+}

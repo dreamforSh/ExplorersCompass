@@ -53,4 +53,42 @@ class SearchQueryTest {
 		assertFalse(SearchQuery.parse("unknown:value").matches(VILLAGE));
 	}
 
+	@Test
+	void chineseDisplayNamesMatchBySubstring() {
+		final SearchDocument village = new SearchDocument(
+				"minecraft:village", "村庄", "Minecraft", "村庄结构", "主世界");
+		assertTrue(SearchQuery.parse("村庄").matches(village));
+		assertTrue(SearchQuery.parse("name:村庄").matches(village));
+		assertFalse(SearchQuery.parse("传送门").matches(village));
+	}
+
+	@Test
+	void processSearchTermContainsLoopAgreesWithMatches() {
+		final SearchDocument[] documents = { VILLAGE, RUINED_PORTAL, MODDED_BIOME };
+		final String[] queries = {
+				"village", "name:\"ruined portal\"", "@minecraft dim:overworld -id:ruined",
+				"dim:the_nether", "unknown:value", "村庄"
+		};
+		for (String input : queries) {
+			final SearchQuery query = SearchQuery.parse(input);
+			for (SearchDocument document : documents) {
+				assertTrue(query.matches(document) == matchesTheWayTheScreenDoes(query, document));
+			}
+		}
+	}
+
+	/**
+	 * The same {@link String#contains} loop {@code ExplorersCompassScreen.processSearchTerm}
+	 * runs, so that a refactor cannot split the two without this test noticing.
+	 */
+	private static boolean matchesTheWayTheScreenDoes(SearchQuery query, SearchDocument document) {
+		for (SearchQuery.SearchTerm term : query.terms()) {
+			final boolean contains = document.textFor(term.field).contains(term.value);
+			if (term.excluded ? contains : !contains) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 }

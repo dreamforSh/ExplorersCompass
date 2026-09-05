@@ -64,15 +64,19 @@ public class ExplorersCompassScreen extends Screen {
 	private static final String CLEAR_GLYPH = "✕";
 	private static final String SWITCH_GLYPH = "⇄";
 	private static final String PREVIEW_GLYPH = "▣";
+	private static final String WAYPOINTS_GLYPH = "⚑";
+	private static final String SETTINGS_GLYPH = "⚙";
 	/**
-	 * The control that shows what a structure looks like stands beside the filter field rather than in
-	 * the column of controls, which on the shortest screen the game scales itself down to has no room
-	 * left in it. Wide enough that the glyph on it still has room once the button has taken its own
-	 * padding out of it.
+	 * The controls that show what a structure looks like, that list the waypoints and that open the
+	 * settings stand either side of the filter field rather than in the column of controls, which on
+	 * the shortest screen the game scales itself down to has no room left in it. Wide enough that the
+	 * glyph on each still has room once the button has taken its own padding out of it.
 	 */
 	private static final int PREVIEW_BUTTON_WIDTH = 24;
 	private static final int PREVIEW_BUTTON_HEIGHT = 18;
 	private static final int PREVIEW_BUTTON_GAP = 4;
+	/** How many of those glyph buttons stand to the right of the field. */
+	private static final int RIGHT_GLYPH_BUTTONS = 2;
 
 	private Level level;
 	private Player player;
@@ -87,6 +91,8 @@ public class ExplorersCompassScreen extends Screen {
 	private ExplorersCompassItem explorersCompass;
 	private TransparentButton targetButton;
 	private TransparentButton previewButton;
+	private TransparentButton waypointsButton;
+	private TransparentButton settingsButton;
 	private TransparentButton searchButton;
 	private TransparentButton searchGroupButton;
 	private TransparentButton searchNextButton;
@@ -140,6 +146,7 @@ public class ExplorersCompassScreen extends Screen {
 	/** Everything that can change how the action buttons look or whether they can be used. */
 	private record ButtonState(
 			boolean hasSelection,
+			boolean selectionHasGroup,
 			int multiSelected,
 			SearchTarget searchTarget,
 			CompassState compassState,
@@ -279,6 +286,15 @@ public class ExplorersCompassScreen extends Screen {
 			// as empty header
 			font.draw(poseStack, RenderUtils.trimToWidth(I18n.get("string.explorerscompass.listHint"), chipsRight - chipsLeft), chipsLeft + 1, chipsY + 2, GuiTheme.TEXT_MUTED);
 			return;
+		}
+
+		// Emptied before layout, so a chip there turns out to be no room for cannot be clicked where
+		// it happened to stand the last time it was drawn
+		for (FilterChip chip : filterChips) {
+			chip.left = 0;
+			chip.right = 0;
+			chip.top = 0;
+			chip.bottom = 0;
 		}
 
 		int chipX = chipsLeft;
@@ -491,7 +507,9 @@ public class ExplorersCompassScreen extends Screen {
 	 * entry, or, when nothing has been selected yet, the first one the filter left in the list.
 	 */
 	private boolean searchFromKeyboard() {
-		if (multiSelectedKeys.size() > 1) {
+		// However much was picked with Ctrl-click, that is what was picked; falling through to the
+		// first row of the list would search something that was never chosen at all
+		if (!multiSelectedKeys.isEmpty()) {
 			searchForMultiSelection();
 			return true;
 		}
@@ -558,6 +576,9 @@ public class ExplorersCompassScreen extends Screen {
 	 * whatever is already typed in the filter.
 	 */
 	private void rebuildList() {
+		// Held on to across the rebuild, so that the server re-syncing the list, or the language
+		// changing, under an open screen does not throw the player's choice away
+		final ResourceLocation selectedKey = selectionList != null && selectionList.hasSelection() ? selectionList.getSelected().getKey() : null;
 		removeWidget(selectionList);
 		allowedKeys = new ArrayList<ResourceLocation>(searchTarget.getAllowedKeys());
 		searchDocuments = createSearchDocuments();
@@ -574,6 +595,11 @@ public class ExplorersCompassScreen extends Screen {
 		selectionList = null;
 		processSearchTerm();
 		selectionList = addRenderableWidget(createSelectionList());
+		if (selectedKey != null) {
+			// Quietly comes to nothing when the new list no longer holds it, or when the screen has
+			// switched to the other kind of target, where the key means nothing
+			selectionList.selectByKey(selectedKey);
+		}
 		updateButtons();
 	}
 
@@ -616,7 +642,30 @@ public class ExplorersCompassScreen extends Screen {
 		}
 	}
 
+	/** When this client last asked for a search. Shared across screens: each search closes its own. */
+	private static long lastSearchRequestTime;
+
+	/**
+	 * Whether a search may be asked for right now, taking the slot when it may. The server quietly
+	 * ignores requests that arrive inside its cooldown, so a click that would only be ignored is
+	 * refused here instead, where refusing reads as a button that did not take rather than as a
+	 * search that silently never started. Judged against this side's copy of the cooldown setting;
+	 * a server configured stricter still has the last word.
+	 */
+	private static boolean tryAcquireSearchRequestSlot() {
+		final long now = System.currentTimeMillis();
+		final int cooldown = ConfigHandler.GENERAL.searchRequestCooldownMillis.get();
+		if (cooldown > 0 && now - lastSearchRequestTime < cooldown) {
+			return false;
+		}
+		lastSearchRequestTime = now;
+		return true;
+	}
+
 	public void searchForTarget(ResourceLocation key) {
+		if (!tryAcquireSearchRequestSlot()) {
+			return;
+		}
 		SearchHistory.pushRecent(searchTarget, key);
 		ExplorersCompass.network.sendToServer(CompassSearchPacket.forTargets(searchTarget, List.of(key)));
 		minecraft.setScreen(null);
@@ -624,6 +673,9 @@ public class ExplorersCompassScreen extends Screen {
 
 	/** Searches for the nearest of everything picked with Ctrl-click. */
 	public void searchForMultiSelection() {
+		if (!tryAcquireSearchRequestSlot()) {
+			return;
+		}
 		final List<ResourceLocation> keys = new ArrayList<ResourceLocation>(multiSelectedKeys);
 		for (ResourceLocation key : keys) {
 			SearchHistory.pushRecent(searchTarget, key);
@@ -633,7 +685,7 @@ public class ExplorersCompassScreen extends Screen {
 	}
 
 	public void searchForGroup(ResourceLocation key) {
-		if (key == null) {
+		if (key == null || !tryAcquireSearchRequestSlot()) {
 			return;
 		}
 		ExplorersCompass.network.sendToServer(CompassSearchPacket.forGroup(searchTarget, key));
@@ -641,6 +693,9 @@ public class ExplorersCompassScreen extends Screen {
 	}
 
 	public void searchForNext() {
+		if (!tryAcquireSearchRequestSlot()) {
+			return;
+		}
 		ExplorersCompass.network.sendToServer(new CompassSearchForNextPacket());
 		minecraft.setScreen(null);
 	}
@@ -651,10 +706,17 @@ public class ExplorersCompassScreen extends Screen {
 	 * structure stands rather than a thing that was built.
 	 */
 	private void openPreview() {
-		if (searchTarget != SearchTarget.STRUCTURE || !selectionList.hasSelection()) {
+		if (selectionList.hasSelection()) {
+			openPreview(selectionList.getSelected().getKey());
+		}
+	}
+
+	/** Shows what the given structure looks like, where the server allows it and it is a structure at all. */
+	public void openPreview(ResourceLocation key) {
+		if (searchTarget != SearchTarget.STRUCTURE || !ExplorersCompass.canPreviewStructures || key == null) {
 			return;
 		}
-		minecraft.setScreen(new StructurePreviewScreen(this, selectionList.getSelected().getKey()));
+		minecraft.setScreen(new StructurePreviewScreen(this, key));
 	}
 
 	public void clearCache() {
@@ -689,13 +751,32 @@ public class ExplorersCompassScreen extends Screen {
 		ExplorersCompass.network.sendToServer(new ShareLocationPacket(ShareLocationPacket.CURRENT_TARGET));
 	}
 
+	/**
+	 * Rebuilds the visible list from the filter field.
+	 *
+	 * <p>Matching has to call {@link String#contains} in this method rather than in
+	 * {@link SearchQuery} or {@link SearchDocument}. Just Enough Characters rewrites that
+	 * invoke when it is installed, which is how a pinyin query matches a translated Chinese
+	 * name. The method name and descriptor must stay {@code processSearchTerm()V}: that is
+	 * the target JECH ships for this screen.
+	 */
 	public void processSearchTerm() {
 		final SearchQuery query = SearchQuery.parse(searchTextField.getValue());
 		keysMatchingSearch = new ArrayList<ResourceLocation>();
 		for (ResourceLocation key : allowedKeys) {
 			final SearchDocument document = searchDocuments.get(key);
-			if (document != null && matchesModFilter(key)
-					&& matchesDimensionFilter(document) && query.matches(document)) {
+			if (document == null || !matchesModFilter(key) || !matchesDimensionFilter(document)) {
+				continue;
+			}
+			boolean matches = true;
+			for (SearchQuery.SearchTerm term : query.terms()) {
+				final boolean contains = document.textFor(term.field).contains(term.value);
+				if (term.excluded ? contains : !contains) {
+					matches = false;
+					break;
+				}
+			}
+			if (matches) {
 				keysMatchingSearch.add(key);
 			}
 		}
@@ -815,10 +896,24 @@ public class ExplorersCompassScreen extends Screen {
 		previewButton = addRenderableWidget(new TransparentButton(columnLeft(), 8, PREVIEW_BUTTON_WIDTH, PREVIEW_BUTTON_HEIGHT, Component.literal(PREVIEW_GLYPH), (onPress) -> {
 			openPreview();
 		}));
-		previewButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.preview"), Component.translatable("string.explorerscompass.tooltip.previewStructuresOnly"));
+		previewButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.preview"), Component.translatable("string.explorerscompass.tooltip.previewStructuresOnly"), Component.translatable("string.explorerscompass.tooltip.previewMiddleClick"));
+
+		// At the other end of the filter field: the waypoints and the settings belong to the player
+		// rather than to the compass, so they stand apart from the controls that act on it
+		final int rightButtonsLeft = columnLeft() + columnWidth() - RIGHT_GLYPH_BUTTONS * PREVIEW_BUTTON_WIDTH - (RIGHT_GLYPH_BUTTONS - 1) * PREVIEW_BUTTON_GAP;
+		waypointsButton = addRenderableWidget(new TransparentButton(rightButtonsLeft, 8, PREVIEW_BUTTON_WIDTH, PREVIEW_BUTTON_HEIGHT, Component.literal(WAYPOINTS_GLYPH), (onPress) -> {
+			minecraft.setScreen(new WaypointsScreen(this, player));
+		}));
+		waypointsButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.waypoints"), Component.translatable("string.explorerscompass.tooltip.waypoints.detail"));
+		settingsButton = addRenderableWidget(new TransparentButton(rightButtonsLeft + PREVIEW_BUTTON_WIDTH + PREVIEW_BUTTON_GAP, 8, PREVIEW_BUTTON_WIDTH, PREVIEW_BUTTON_HEIGHT, Component.literal(SETTINGS_GLYPH), (onPress) -> {
+			minecraft.setScreen(new ConfigScreen(this));
+		}));
+		settingsButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.settings"), Component.translatable("string.explorerscompass.tooltip.settings.detail"));
 
 		searchButton = addSidebarButton(Component.translatable("string.explorerscompass.search"), (onPress) -> {
-			if (multiSelectedKeys.size() > 1) {
+			// Anything picked with Ctrl-click wins, however much of it there is: the button lights up
+			// for a single pick as much as for several, and it has to act on what lit it up
+			if (!multiSelectedKeys.isEmpty()) {
 				searchForMultiSelection();
 			} else if (selectionList.hasSelection()) {
 				selectionList.getSelected().search();
@@ -909,8 +1004,11 @@ public class ExplorersCompassScreen extends Screen {
 		final ResourceLocation previousSelectionKey = selectionList != null && selectionList.hasSelection() ? selectionList.getSelected().getKey() : null;
 		selectionList = null;
 
+		// Between the glyph buttons, with a gap either side
 		final int fieldLeft = columnLeft() + PREVIEW_BUTTON_WIDTH + PREVIEW_BUTTON_GAP;
-		searchTextField = new TransparentTextField(font, fieldLeft, 8, columnWidth() - PREVIEW_BUTTON_WIDTH - PREVIEW_BUTTON_GAP, 18, Component.translatable("string.explorerscompass.searchHint"));
+		searchTextField = new TransparentTextField(font, fieldLeft, 8, columnWidth() - (1 + RIGHT_GLYPH_BUTTONS) * (PREVIEW_BUTTON_WIDTH + PREVIEW_BUTTON_GAP), 18, Component.translatable("string.explorerscompass.searchHint"));
+		// The box's own limit is 32, which a filter naming a couple of quoted terms already passes
+		searchTextField.setMaxLength(256);
 		searchTextField.setValue(previousSearchTerm);
 		// Filtering as the field changes covers every way it can: typing, pasting, and the button that
 		// empties it
@@ -970,12 +1068,15 @@ public class ExplorersCompassScreen extends Screen {
 	/** Keeps the buttons in step with what the compass is currently able to do. */
 	private void updateButtons() {
 		final boolean hasSelection = selectionList != null && selectionList.hasSelection();
+		// Not everything belongs to a group: nothing the packs group together, and no biome carrying no
+		// tag that says what kind of biome it is
+		final boolean selectionHasGroup = hasSelection && selectionList.getSelected().hasGroup();
 		final int multiSelected = multiSelectedKeys.size();
 		final CompassState state = explorersCompass.getState(stack);
 		final boolean located = state == CompassState.FOUND;
 		final ResourceLocation foundDimension = explorersCompass.getFoundDimension(stack);
 		final ResourceLocation currentDimension = player.level.dimension().location();
-		final ButtonState buttonState = new ButtonState(hasSelection, multiSelected, searchTarget, state,
+		final ButtonState buttonState = new ButtonState(hasSelection, selectionHasGroup, multiSelected, searchTarget, state,
 				cachedLocations, ExplorersCompass.canTeleport, ExplorersCompass.canPreviewStructures,
 				ConfigHandler.GENERAL.allowSharing.get(), foundDimension, currentDimension);
 		if (buttonState.equals(lastButtonState)) {
@@ -987,9 +1088,11 @@ public class ExplorersCompassScreen extends Screen {
 		// Nothing to show for a biome, nothing to show without something picked, and nothing to show at
 		// all where the server has switched previews off
 		previewButton.active = searchTarget == SearchTarget.STRUCTURE && hasSelection && ExplorersCompass.canPreviewStructures;
-		searchButton.setMessage(multiSelected > 1 ? Component.translatable("string.explorerscompass.search").append(Component.literal(" (" + multiSelected + ")")) : Component.translatable("string.explorerscompass.search"));
-		// A group search applies to the group of a single entry
-		searchGroupButton.active = hasSelection && multiSelected <= 1;
+		// The count shows from the first Ctrl-click on, since from then on the button acts on the
+		// picks rather than on the selected row
+		searchButton.setMessage(multiSelected >= 1 ? Component.translatable("string.explorerscompass.search").append(Component.literal(" (" + multiSelected + ")")) : Component.translatable("string.explorerscompass.search"));
+		// A group search applies to the group of a single entry, and only where there is one
+		searchGroupButton.active = selectionHasGroup && multiSelected <= 1;
 
 		// Searching for a further instance needs something to have been located to look past
 		if (searchNextButton != null) {

@@ -153,6 +153,12 @@ public class StructureSearchEntry extends ObjectSelectionList.Entry<StructureSea
 			// Right click stars an entry, pinning it to the top of the list
 			parentScreen.toggleFavorite(key);
 			return true;
+		} else if (button == 2) {
+			// Middle click looks at the structure, which is the quickest way from a name to a picture
+			parentScreen.clearMultiSelect();
+			searchList.selectEntry(this);
+			parentScreen.openPreview(key);
+			return true;
 		}
 		return false;
 	}
@@ -190,6 +196,11 @@ public class StructureSearchEntry extends ObjectSelectionList.Entry<StructureSea
 	public void search() {
 		mc.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.0F));
 		parentScreen.searchForTarget(key);
+	}
+
+	/** Whether this belongs to a group at all, and so whether searching for its group means anything. */
+	public boolean hasGroup() {
+		return parentScreen.getSearchTarget().getGroupKey(key) != null;
 	}
 
 	public void searchForGroup() {

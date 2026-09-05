@@ -44,8 +44,12 @@ public class SearchExecutor {
 		return MAX_THREADS;
 	}
 
-	/** Runs a search on one of these threads, waiting for a free one when they are all busy. */
-	static synchronized void execute(Runnable search) {
+	/**
+	 * Runs a task on one of these threads, waiting for a free one when they are all busy. What may
+	 * run here is anything that follows from the seed, the noise and the registries alone; assembling
+	 * a structure preview qualifies the same way sampling for a search does.
+	 */
+	public static synchronized void execute(Runnable search) {
 		if (executor == null) {
 			executor = new ThreadPoolExecutor(MAX_THREADS, MAX_THREADS, KEEP_ALIVE_SECONDS, TimeUnit.SECONDS, new LinkedBlockingQueue<Runnable>(), SearchExecutor::createThread);
 			executor.allowCoreThreadTimeOut(true);

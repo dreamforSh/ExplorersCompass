@@ -1,5 +1,6 @@
 package com.chaosthedude.explorerscompass.preview;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -8,6 +9,7 @@ import java.util.UUID;
 
 import com.chaosthedude.explorerscompass.ExplorersCompass;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
+import com.chaosthedude.explorerscompass.worker.SearchExecutor;
 
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
@@ -18,13 +20,16 @@ import net.minecraft.server.level.ServerPlayer;
  * Hands out previews of structures, and remembers the ones it has already worked out.
  *
  * <p>Building one costs about what generating a structure costs, which is far too much to repeat
- * every time a player opens the same one, and nothing about a preview changes while a server runs:
- * what a structure looks like follows from the data packs it was loaded from. So each one is built
- * once and kept. The few most recently asked for are held, which is enough for someone looking
- * through a list, and everything is dropped when the server stops so that none of it outlives the
- * world it was derived from.
+ * every time a player opens the same one, and far too much for the server thread to stand still
+ * for: a large structure takes long enough to assemble to hold up a whole tick. So a preview is
+ * built on the threads searches run on — assembling one asks nothing of the world, only of the
+ * seed, the noise and the registries, which is the same ground a search covers there — and the
+ * players waiting on it are answered when it lands. The most recently asked for are then kept,
+ * which is enough for someone looking through a list, and everything is dropped when the server
+ * stops so that none of it outlives the world it was derived from.
  *
- * <p>Only ever touched from the server thread.
+ * <p>Every field here is only ever touched from the server thread: a build hands its result back
+ * to the server thread rather than writing anything itself.
  */
 public final class StructurePreviewService {
 
@@ -59,11 +64,24 @@ public final class StructurePreviewService {
 	/** Structures that could not be previewed, so that asking again does not try to build one again. */
 	private static final Map<String, Boolean> unavailable = new HashMap<String, Boolean>();
 
+	/**
+	 * The builds currently on their way, each carrying the players to answer when it lands. A
+	 * structure several players ask about at once is built once, not once per asker.
+	 */
+	private static final Map<String, List<ServerPlayer>> building = new HashMap<String, List<ServerPlayer>>();
+
 	/** When each player last asked for a preview, for rate limiting. */
 	private static final Map<UUID, Long> lastRequestTimes = new HashMap<UUID, Long>();
 
 	/** The server everything cached here was derived from. */
 	private static MinecraftServer cachedServer;
+
+	/** How a finished preview is handed back to a player. Always called on the server thread. */
+	public interface Delivery {
+
+		void deliver(ServerPlayer player, StructurePreview preview);
+
+	}
 
 	private StructurePreviewService() {
 	}
@@ -81,13 +99,16 @@ public final class StructurePreviewService {
 	}
 
 	/**
-	 * A preview of the given structure for the given player, or null when there is none to be had.
-	 * Built on first asking and answered from what was built after that.
+	 * Answers the given player with a preview of the given structure, or with nothing when there is
+	 * none to be had. A preview already worked out is delivered before this returns; one still to be
+	 * built is built off the server thread, and everyone who asked for it meanwhile is answered when
+	 * it lands. Runs on the server thread, which is also where the delivery is called.
 	 */
-	public static StructurePreview get(ServerPlayer player, ResourceLocation structureKey) {
+	public static void request(ServerPlayer player, ResourceLocation structureKey, Delivery delivery) {
 		final ServerLevel level = levelFor(player, structureKey);
 		if (level == null) {
-			return null;
+			delivery.deliver(player, null);
+			return;
 		}
 
 		forgetIfServerChanged(level.getServer());
@@ -95,26 +116,94 @@ public final class StructurePreviewService {
 		final String cacheKey = level.dimension().location() + "|" + structureKey;
 		final StructurePreview cached = cache.get(cacheKey);
 		if (cached != null) {
-			return cached;
+			delivery.deliver(player, cached);
+			return;
 		}
 		if (unavailable.containsKey(cacheKey)) {
-			return null;
+			delivery.deliver(player, null);
+			return;
 		}
 
-		final long startedAt = System.currentTimeMillis();
-		final StructurePreview preview = StructurePreviewBuilder.build(level, structureKey);
-		final long took = System.currentTimeMillis() - startedAt;
-		if (took >= SLOW_BUILD_MILLIS) {
-			ExplorersCompass.LOGGER.info("Building a preview of " + structureKey + " took " + took + "ms; it is kept, so this is paid once");
+		final List<ServerPlayer> waiters = building.get(cacheKey);
+		if (waiters != null) {
+			// Already being built for someone else; this player is answered when it lands. Not answered
+			// with nothing meanwhile: the client would read that as the structure having no preview.
+			if (!waiters.contains(player)) {
+				waiters.add(player);
+			}
+			return;
+		}
+
+		final List<ServerPlayer> newWaiters = new ArrayList<ServerPlayer>();
+		newWaiters.add(player);
+		building.put(cacheKey, newWaiters);
+
+		final MinecraftServer server = level.getServer();
+		try {
+			SearchExecutor.execute(() -> {
+				final long startedAt = System.currentTimeMillis();
+				StructurePreview built = null;
+				Throwable failure = null;
+				try {
+					built = StructurePreviewBuilder.build(level, structureKey);
+				} catch (Throwable t) {
+					failure = t;
+				}
+
+				// Everything a result touches belongs to the server thread, so the result is handed
+				// back rather than written from here
+				final StructurePreview preview = built;
+				final Throwable error = failure;
+				final long took = System.currentTimeMillis() - startedAt;
+				server.execute(() -> completeBuild(server, cacheKey, structureKey, preview, error, took, delivery));
+			});
+		} catch (Throwable t) {
+			// Nothing is going to build it, so nobody can be left waiting for it
+			building.remove(cacheKey);
+			ExplorersCompass.LOGGER.error("Could not start building a preview of " + structureKey, t);
+			delivery.deliver(player, null);
+		}
+	}
+
+	/**
+	 * Takes note of what a build came back with, and answers everyone who was waiting on it. Runs on
+	 * the server thread.
+	 */
+	private static void completeBuild(MinecraftServer server, String cacheKey, ResourceLocation structureKey, StructurePreview preview, Throwable failure, long took, Delivery delivery) {
+		// A server that has stopped runs handed-in tasks on whatever thread handed them in, and
+		// nothing here may be touched from one of those
+		if (!server.isSameThread()) {
+			return;
+		}
+
+		final List<ServerPlayer> waiters = building.remove(cacheKey);
+
+		// The world this was built from is gone, and so are the players who asked
+		if (server != cachedServer) {
+			return;
+		}
+
+		if (failure != null) {
+			ExplorersCompass.LOGGER.error("Failed to build a preview of " + structureKey, failure);
+		} else if (took >= SLOW_BUILD_MILLIS) {
+			ExplorersCompass.LOGGER.info("Building a preview of " + structureKey + " took " + took + "ms off the server thread; it is kept, so this is not paid again while it stays in use");
 		}
 
 		if (preview == null) {
 			unavailable.put(cacheKey, Boolean.TRUE);
-			return null;
+		} else {
+			cache.put(cacheKey, preview);
 		}
 
-		cache.put(cacheKey, preview);
-		return preview;
+		if (waiters == null) {
+			return;
+		}
+		for (ServerPlayer waiter : waiters) {
+			// A player who left while it was being built has nowhere to be answered
+			if (!waiter.hasDisconnected()) {
+				delivery.deliver(waiter, preview);
+			}
+		}
 	}
 
 	/**
@@ -154,6 +243,9 @@ public final class StructurePreviewService {
 	public static void invalidateCache() {
 		cache.clear();
 		unavailable.clear();
+		// A build still on its way belongs to the world that is going away; completeBuild sees the
+		// server no longer matches and drops its result
+		building.clear();
 		cachedServer = null;
 	}
 

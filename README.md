@@ -40,25 +40,41 @@ alone are what the upstream mod covers; biomes are its sister mod,
   dimension or source mod.
 - See what a structure looks like before spending a search on it: the server assembles it the way
   world generation would, without placing any of it anywhere, and the compass draws it as a model
-  you can turn, zoom and cut layers off to look inside. It is one cell to one block: what you see is
-  the structure at its own size, not a sketch of it. Small ones are drawn from the blocks' own
-  models, chests and beds and banners included; large ones are drawn as coloured blocks instead, at
-  the same size, so that a mansion or a stronghold can be looked over rather than waited on.
+  you can turn, slide, zoom, look at from set angles and cut open layer by layer down a slider to
+  look inside. It is one cell to one block: what you see is the structure at its own size, not a
+  sketch of it. The blocks are drawn the way the world draws them — faces that cannot be seen left
+  out, corners darkened where blocks meet, grass and leaves in their biome colours, glass and ice
+  see-through, chests and beds and banners included — and the model is built off the render thread,
+  with a version in flat colours standing in until it lands, so that a mansion or a stronghold never
+  holds the game up. A button switches between the textured and the coloured drawing, a compass in
+  the corner says which way north lies, and a grid under the model says how large it is.
 
 **After a search**
 
 - A heads-up panel says what the compass is doing: search radius and progress while it runs, then
-  the coordinates, the distance and the compass point once it lands.
+  the coordinates, the distance and the compass point once it lands. It can be kept up while the
+  compass is only carried, so a search can be watched with something else in hand.
 - A direction strip across the top of the screen marks where the target lies against the horizon,
-  turns green when you are facing it, and points the way to turn when it is off screen.
+  turns green when you are facing it, and points the way to turn when it is off screen. It stays
+  up while the compass is still carried, not only while it is in hand.
 - The compass needle itself points at the located place, as a compass should.
 - Every located place is remembered. Point the compass back at one, share it in chat with
   click-to-copy coordinates, or travel to it where the server allows that.
+- Every located place also becomes a waypoint of the compass's own, kept on your side per world or
+  server and shared by every compass you own. Waypoints are marked on the direction strip in their
+  own colours, with the name and distance of the one straight ahead read out under it, so the strip
+  keeps saying where things are after the compass has moved on. A waypoints screen, reached from the
+  flag beside the filter field, lists them: point the compass at one, travel to it, take it off the
+  strip, or forget it.
 
 **Integration**
 
-- Waypoints in [Xaero's Minimap](https://www.curseforge.com/minecraft/mc-mods/xaeros-minimap) are
-  created for each located place, when that mod is installed.
+- Waypoints are mirrored into [Xaero's Minimap](https://www.curseforge.com/minecraft/mc-mods/xaeros-minimap)
+  when that mod is installed. By default the copies are kept to the minimap's world map alone — the
+  strip already marks them in the world, so the minimap's floating labels would be one marker too
+  many — and this can be switched to the minimap's usual drawing, or to hidden, from the waypoints
+  screen. Removing a waypoint here removes its copy there; deleting the copy there removes the
+  waypoint here.
 - Resource packs can give the compass a different look per structure through custom model data.
 - Data packs and modpacks can define structure groups of their own.
 - Translated into English, German, Spanish, Japanese, Russian, Simplified Chinese and
@@ -67,8 +83,12 @@ alone are what the upstream mod covers; biomes are its sister mod,
 
 ## Configuration
 
-Server-side options live in `config/explorerscompass-common.toml`, client-side ones in
-`config/explorerscompass-client.toml`.
+Every setting can be changed in the game: the gear beside the filter field on the compass screen,
+and the configure button in the mod list, both open a settings screen with one tab for this
+computer's settings and one for the server's. Each setting is named and explained there, changed in
+place, and written out as it is changed; ↺ puts a single setting back, and a button puts a whole
+tab back. The files behind it are `config/explorerscompass-common.toml` for the server's settings
+and `config/explorerscompass-client.toml` for this computer's, and can still be edited by hand.
 
 Things worth knowing about:
 
@@ -89,14 +109,32 @@ Things worth knowing about:
   generate now. Turn it off to have every location answered by chunk storage as before.
 - `structureBlacklist` / `biomeBlacklist` — what the compass will not show or search for. `*` matches
   any number of characters and `?` matches one, so `minecraft:*village*` works.
+- `hideStructuresThatCannotGenerate` — leaves out the structures this world could never place, rather
+  than offering them and having every search for one come back empty. A structure is only placed by a
+  structure set that names it and whose biomes the world has, so this covers the structures a data
+  pack disabled by emptying their biome tag or taking them out of every set, the ones belonging to no
+  set at all, and every structure at once in a superflat world configured without any or in a world
+  generating no structures. Turn it off to be offered everything the registries hold.
 - `allowTeleport`, `allowSharing`, and their cooldowns — what players are allowed to do with a result.
 - `allowStructurePreview`, `structurePreviewResolution`, `structurePreviewMaxBlocks` — whether players
-  may see what a structure looks like, how finely it is shown, and how much of it is drawn. Each
-  structure is assembled once and then kept for as long as the server runs, so a preview costs
-  nothing to open again. `structurePreviewDetailLimit`, client side, is where a preview stops being
-  drawn from real blocks and starts being drawn as coloured ones.
-- `showDirectionBar`, `directionBarWidth`, `directionBarSpan` — the horizon strip. Pair a wide strip
-  with a large span to have the whole horizon on screen at once.
+  may see what a structure looks like, how finely it is shown, and how much of it is drawn. Structures
+  are assembled off the server thread and the most recently viewed ones are kept assembled, so a
+  preview costs nothing to open again while it stays in use. `structurePreviewDetailLimit`, client
+  side, is the size past which a preview opens drawn as coloured blocks rather than textured ones;
+  the button on the preview screen switches between the two either way.
+- `showDirectionBar`, `showDirectionBarWhileCarried`, `directionBarWidth`, `directionBarSpan` — the
+  horizon strip. Pair a wide strip with a large span to have the whole horizon on screen at once. The
+  strip can stay up while the compass is in the inventory rather than in hand.
+- `directionBarWaypoints`, `directionBarWaypointStyle`, `directionBarWaypointLimit`,
+  `maxWaypointsPerWorld` — whether the strip marks the waypoints of the dimension you are in, what
+  shape it marks them with (a bookmark hanging from the top of the strip, a pin, a flag or a
+  diamond), how many of the nearest it marks at once, and how many a world keeps before the oldest
+  are forgotten. `createXaeroWaypoints`, `xaeroWaypointColor` and `xaeroWaypointDisplay` are about
+  the copies in Xaero's Minimap: whether they are made, what colour they and the marks on the strip
+  take, and whether the minimap draws them everywhere, on its world map alone, or not at all.
+- `showOverlayWhileCarried` — keeps the information panel up while the compass is in the inventory
+  rather than in hand, the way the strip already can, and it reports on a carried compass exactly as
+  it does on a held one. Off by default, so the panel appears only while a compass is held.
 - `overlayBackground`, `guiHeaderBackground`, `guiSidebarBackground`, `guiStatusBarBackground` — each
   panel can be filled in or left outlined and see-through on its own.
 

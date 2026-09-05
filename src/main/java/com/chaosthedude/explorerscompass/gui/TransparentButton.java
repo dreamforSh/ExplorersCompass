@@ -51,6 +51,15 @@ public class TransparentButton extends Button {
 		return tooltipLines;
 	}
 
+	/**
+	 * Whether this button is the one being pointed at, and so the one to pick out and to explain. In
+	 * this version a click does not leave a button holding the focus, so being hovered or focused is
+	 * exactly that; the name is kept for the screens shared with later versions, where it is not.
+	 */
+	public boolean isPointedAt() {
+		return isHoveredOrFocused();
+	}
+
 	@Override
 	public void renderButton(PoseStack poseStack, int mouseX, int mouseY, float partialTicks) {
 		if (!visible) {

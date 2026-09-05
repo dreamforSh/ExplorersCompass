@@ -218,6 +218,17 @@ public class SearchContext {
 			return;
 		}
 
+		if (!prevPos.isEmpty()) {
+			// A search that was passing over what was already collected and still found nothing has
+			// collected everything within its reach, so the only further instance there is to offer is
+			// the closest one over again. Ending on "not found" instead would leave the compass with
+			// nothing located, and one with nothing located cannot even be asked for a further
+			// instance, so it would dead-end there for as long as the collected locations were kept.
+			ExplorersCompass.LOGGER.info("Search " + id + ": located nothing beyond the " + prevPos.size() + " location(s) already collected, so they are forgotten and the search starts over from the closest one");
+			compass().startOver(level, player, startPos, stack);
+			return;
+		}
+
 		compass().fail(player, stack, radius, totalSamples);
 	}
 

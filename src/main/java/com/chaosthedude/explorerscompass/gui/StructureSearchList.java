@@ -156,12 +156,16 @@ public class StructureSearchList extends ObjectSelectionList<StructureSearchEntr
 		}
 	}
 
-	/** Selects the entry for the given key, if the list holds one, and scrolls it into view. */
+	/**
+	 * Selects the entry for the given key, if the list holds one, and scrolls it into view. Scrolled
+	 * no further than into view: this runs again for every keystroke in the filter, and pulling the
+	 * selection to the middle each time would have the list jumping about while it is being typed at.
+	 */
 	public void selectByKey(ResourceLocation key) {
 		for (StructureSearchEntry entry : children()) {
 			if (entry.getKey().equals(key)) {
 				selectEntry(entry);
-				centerScrollOn(entry);
+				ensureVisible(entry);
 				return;
 			}
 		}

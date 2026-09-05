@@ -9,10 +9,11 @@ import net.minecraft.world.level.block.state.BlockState;
  * What a structure looks like, small enough to send to a client and to draw in one frame.
  *
  * <p>A structure is assembled once on the server and thrown onto a grid of cells, each of which
- * holds whichever block fell into it. Cells with a block on every side of them are dropped, since
- * nothing inside a building is visible from outside it, and what is left is the shell that gets
- * drawn. A preview is therefore a fixed amount of data no matter how large the structure it stands
- * for is: a village and an igloo both arrive as a shell of at most so many cells.
+ * holds whichever block fell into it. Cells with a solid block on every side of them are taken out
+ * of the shell, since nothing inside a building is visible from outside it, and what is left is the
+ * shell that gets drawn. A preview is therefore a bounded amount of data however large the
+ * structure it stands for is: a village and an igloo both arrive as a shell of at most so many
+ * cells.
  *
  * <p>Positions are grid cells rather than blocks. One cell is {@link #getStep()} blocks along each
  * axis, which is 1 for anything that fits the grid outright and more for anything that has to be
@@ -22,6 +23,13 @@ import net.minecraft.world.level.block.state.BlockState;
  * <p>The chests, beds, banners and signs are carried apart from the rest. They are drawn by a
  * renderer of their own rather than from a block model, so they can neither be built into the
  * model the rest of the shell becomes nor left in it as holes: see {@link #getComponentCount}.
+ *
+ * <p>The cells dropped from the shell are not lost altogether. Every one of them is walled in on
+ * all six sides by a block that hides the whole face against it, so runs of them along a row are
+ * long and of one material, and they travel as those runs: see {@link #getInteriorRunCount}. What
+ * the drawing side does with them is close the faces of the shell that look inwards, which it could
+ * not otherwise tell from faces looking out into open air, and fill in the solid middle of a
+ * structure that has been cut open to look inside.
  */
 public class StructurePreview {
 
@@ -40,6 +48,9 @@ public class StructurePreview {
 	private static final int MAX_CELLS = 1 << 20;
 	private static final int MAX_PALETTE = 1 << 14;
 	private static final int MAX_COMPONENTS = 1 << 12;
+	private static final int MAX_INTERIOR_RUNS = 1 << 19;
+	/** The runs are expanded cell by cell on the drawing side, so what they add up to is bounded too. */
+	private static final int MAX_INTERIOR_CELLS = 1 << 21;
 
 	private final int gridX;
 	private final int gridY;
@@ -68,8 +79,21 @@ public class StructurePreview {
 	private final int[] componentPositions;
 	/** What each of them is, as an id into the block state registry, parallel to it. */
 	private final int[] componentStates;
+	/**
+	 * The cells walled in on every side, as runs of consecutive packed positions: where each run
+	 * begins, how many cells it covers, and which entry of the palette all of them hold. Ascending,
+	 * and never overlapping a cell of the shell.
+	 */
+	private final int[] interiorRunStarts;
+	private final int[] interiorRunLengths;
+	private final int[] interiorRunPalette;
+	private final int interiorCellCount;
 
 	StructurePreview(int gridX, int gridY, int gridZ, int step, int blockX, int blockY, int blockZ, int pieces, int outlinedPieces, boolean truncated, int[] palette, int[] positions, int[] paletteIndices, int[] componentPositions, int[] componentStates) {
+		this(gridX, gridY, gridZ, step, blockX, blockY, blockZ, pieces, outlinedPieces, truncated, palette, positions, paletteIndices, componentPositions, componentStates, new int[0], new int[0], new int[0]);
+	}
+
+	StructurePreview(int gridX, int gridY, int gridZ, int step, int blockX, int blockY, int blockZ, int pieces, int outlinedPieces, boolean truncated, int[] palette, int[] positions, int[] paletteIndices, int[] componentPositions, int[] componentStates, int[] interiorRunStarts, int[] interiorRunLengths, int[] interiorRunPalette) {
 		this.gridX = gridX;
 		this.gridY = gridY;
 		this.gridZ = gridZ;
@@ -85,6 +109,14 @@ public class StructurePreview {
 		this.paletteIndices = paletteIndices;
 		this.componentPositions = componentPositions;
 		this.componentStates = componentStates;
+		this.interiorRunStarts = interiorRunStarts;
+		this.interiorRunLengths = interiorRunLengths;
+		this.interiorRunPalette = interiorRunPalette;
+		int interiorCells = 0;
+		for (int length : interiorRunLengths) {
+			interiorCells += length;
+		}
+		interiorCellCount = interiorCells;
 	}
 
 	/**
@@ -191,6 +223,16 @@ public class StructurePreview {
 		return Block.stateById(palette[paletteIndex]);
 	}
 
+	/** The block behind the given palette entry, as its id into the block state registry. */
+	public int getPaletteStateId(int paletteIndex) {
+		return palette[paletteIndex];
+	}
+
+	/** The id into the block state registry of the block drawn by a renderer of its own at the given index. */
+	public int getComponentStateId(int index) {
+		return componentStates[index];
+	}
+
 	/**
 	 * How many of the blocks that are drawn by a renderer of their own — chests, beds, banners,
 	 * signs, shulker boxes — this preview carries.
@@ -219,15 +261,39 @@ public class StructurePreview {
 		return Block.stateById(componentStates[index]);
 	}
 
-	static int unpackX(int packed) {
+	/** How many runs of walled-in cells this preview carries. */
+	public int getInteriorRunCount() {
+		return interiorRunStarts.length;
+	}
+
+	/** How many cells all of those runs come to between them. */
+	public int getInteriorCellCount() {
+		return interiorCellCount;
+	}
+
+	/** The packed position the given run begins at; the cells that follow are the packed values after it. */
+	public int getInteriorRunStart(int run) {
+		return interiorRunStarts[run];
+	}
+
+	public int getInteriorRunLength(int run) {
+		return interiorRunLengths[run];
+	}
+
+	/** Which entry of the palette every cell of the given run holds. */
+	public int getInteriorRunPaletteIndex(int run) {
+		return interiorRunPalette[run];
+	}
+
+	public static int unpackX(int packed) {
 		return packed & AXIS_MASK;
 	}
 
-	static int unpackY(int packed) {
+	public static int unpackY(int packed) {
 		return (packed >>> (AXIS_BITS * 2)) & AXIS_MASK;
 	}
 
-	static int unpackZ(int packed) {
+	public static int unpackZ(int packed) {
 		return (packed >>> AXIS_BITS) & AXIS_MASK;
 	}
 
@@ -263,6 +329,16 @@ public class StructurePreview {
 		for (int i = 0; i < componentPositions.length; i++) {
 			buf.writeVarInt(componentPositions[i]);
 			buf.writeVarInt(componentStates[i]);
+		}
+
+		// The runs ascend the same way the cells do, so their starts travel as steps too
+		buf.writeVarInt(interiorRunStarts.length);
+		previous = 0;
+		for (int i = 0; i < interiorRunStarts.length; i++) {
+			buf.writeVarInt(interiorRunStarts[i] - previous);
+			previous = interiorRunStarts[i];
+			buf.writeVarInt(interiorRunLengths[i]);
+			buf.writeVarInt(interiorRunPalette[i]);
 		}
 	}
 
@@ -315,7 +391,32 @@ public class StructurePreview {
 			componentStates[i] = buf.readVarInt();
 		}
 
-		return new StructurePreview(gridX, gridY, gridZ, step, blockX, blockY, blockZ, pieces, outlinedPieces, truncated, palette, positions, paletteIndices, componentPositions, componentStates);
+		final int runCount = buf.readVarInt();
+		if (runCount < 0 || runCount > MAX_INTERIOR_RUNS) {
+			throw new DecoderException("Structure preview carries " + runCount + " runs of interior cells");
+		}
+		final int[] interiorRunStarts = new int[runCount];
+		final int[] interiorRunLengths = new int[runCount];
+		final int[] interiorRunPalette = new int[runCount];
+		previous = 0;
+		long interiorCells = 0;
+		for (int i = 0; i < runCount; i++) {
+			previous += buf.readVarInt();
+			interiorRunStarts[i] = previous;
+			final int length = buf.readVarInt();
+			interiorCells += length;
+			if (length <= 0 || interiorCells > MAX_INTERIOR_CELLS) {
+				throw new DecoderException("Structure preview carries a run of " + length + " interior cells, " + interiorCells + " in all");
+			}
+			interiorRunLengths[i] = length;
+			final int paletteIndex = buf.readVarInt();
+			if (paletteIndex < 0 || paletteIndex >= paletteSize) {
+				throw new DecoderException("Structure preview names palette entry " + paletteIndex + " of " + paletteSize + " for an interior run");
+			}
+			interiorRunPalette[i] = paletteIndex;
+		}
+
+		return new StructurePreview(gridX, gridY, gridZ, step, blockX, blockY, blockZ, pieces, outlinedPieces, truncated, palette, positions, paletteIndices, componentPositions, componentStates, interiorRunStarts, interiorRunLengths, interiorRunPalette);
 	}
 
 }
