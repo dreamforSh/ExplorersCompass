@@ -75,6 +75,11 @@ alone are what the upstream mod covers; biomes are its sister mod,
   many — and this can be switched to the minimap's usual drawing, or to hidden, from the waypoints
   screen. Removing a waypoint here removes its copy there; deleting the copy there removes the
   waypoint here.
+- Structures a mod places by a placement type of its own — the landmarks of
+  [Twilight Forest](https://www.curseforge.com/minecraft/mc-mods/the-twilight-forest), for one — are
+  searched for by asking that mod's chunk generator for the nearest, the same way `/locate` asks it,
+  so whatever `/locate` can find in such a mod's dimension the compass finds too, and at once. Only
+  where the generator knows of none are the chunks walked one at a time.
 - Resource packs can give the compass a different look per structure through custom model data.
 - Data packs and modpacks can define structure groups of their own.
 - Translated into English, German, Spanish, Japanese, Russian, Simplified Chinese and
