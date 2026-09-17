@@ -170,13 +170,14 @@ class StructurePreviewTest {
 	void lootMarkersTravelWithTheTablesTheyName() {
 		final String[] tableIds = { "minecraft:chests/simple_dungeon", "" };
 		final int[][] tableItems = { { 11, 22, 33 }, { 7 } };
+		final int[][] tableChances = { { 200, 50, 10 }, { 1000 } };
 		final int[] markerPositions = { StructurePreview.pack(4, 2, 6), StructurePreview.pack(8, 1, 3) };
 		final int[] markerStates = { 41, 42 };
 		final int[] markerTables = { 0, 1 };
 		final StructurePreview sent = new StructurePreview(16, 8, 16, 1, 16, 8, 16, 1, 0, false,
 				new int[] { 7 }, new int[] { StructurePreview.pack(0, 0, 0) }, new int[] { 0 },
 				new int[0], new int[0], new int[0], new int[0], new int[0],
-				tableIds, tableItems, markerPositions, markerStates, markerTables);
+				tableIds, tableItems, tableChances, markerPositions, markerStates, markerTables);
 
 		final FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
 		sent.write(buf);
@@ -190,6 +191,10 @@ class StructurePreviewTest {
 		assertEquals(22, received.getLootTableItems(0)[1]);
 		assertEquals(33, received.getLootTableItems(0)[2]);
 		assertEquals(7, received.getLootTableItems(1)[0]);
+		assertEquals(200, received.getLootTableChances(0)[0]);
+		assertEquals(50, received.getLootTableChances(0)[1]);
+		assertEquals(10, received.getLootTableChances(0)[2]);
+		assertEquals(1000, received.getLootTableChances(1)[0]);
 		assertEquals(2, received.getLootMarkerCount());
 		assertEquals(4, received.getLootMarkerX(0));
 		assertEquals(2, received.getLootMarkerY(0));
@@ -204,7 +209,7 @@ class StructurePreviewTest {
 		final StructurePreview sent = new StructurePreview(4, 4, 4, 1, 4, 4, 4, 1, 0, false,
 				new int[] { 7 }, new int[] { StructurePreview.pack(0, 0, 0) }, new int[] { 0 },
 				new int[0], new int[0], new int[0], new int[0], new int[0],
-				new String[] { "minecraft:chests/simple_dungeon" }, new int[][] { new int[0] },
+				new String[] { "minecraft:chests/simple_dungeon" }, new int[][] { new int[0] }, new int[][] { new int[0] },
 				new int[] { StructurePreview.pack(1, 1, 1) }, new int[] { 5 }, new int[] { 1 });
 		final FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
 		sent.write(buf);

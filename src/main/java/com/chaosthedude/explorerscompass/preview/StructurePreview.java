@@ -99,6 +99,8 @@ public class StructurePreview {
 	private final String[] lootTableIds;
 	/** The items each table may drop, as ids into the item registry, parallel to {@link #lootTableIds}. */
 	private final int[][] lootTableItems;
+	/** How likely each item is to appear, in thousandths, parallel to {@link #lootTableItems}. */
+	private final int[][] lootTableChances;
 	/** Where the loot containers stand, packed the same way as the cells. */
 	private final int[] lootMarkerPositions;
 	/** What each container is, as an id into the block state registry, parallel to it. */
@@ -111,10 +113,10 @@ public class StructurePreview {
 	}
 
 	StructurePreview(int gridX, int gridY, int gridZ, int step, int blockX, int blockY, int blockZ, int pieces, int outlinedPieces, boolean truncated, int[] palette, int[] positions, int[] paletteIndices, int[] componentPositions, int[] componentStates, int[] interiorRunStarts, int[] interiorRunLengths, int[] interiorRunPalette) {
-		this(gridX, gridY, gridZ, step, blockX, blockY, blockZ, pieces, outlinedPieces, truncated, palette, positions, paletteIndices, componentPositions, componentStates, interiorRunStarts, interiorRunLengths, interiorRunPalette, new String[0], new int[0][], new int[0], new int[0], new int[0]);
+		this(gridX, gridY, gridZ, step, blockX, blockY, blockZ, pieces, outlinedPieces, truncated, palette, positions, paletteIndices, componentPositions, componentStates, interiorRunStarts, interiorRunLengths, interiorRunPalette, new String[0], new int[0][], new int[0][], new int[0], new int[0], new int[0]);
 	}
 
-	StructurePreview(int gridX, int gridY, int gridZ, int step, int blockX, int blockY, int blockZ, int pieces, int outlinedPieces, boolean truncated, int[] palette, int[] positions, int[] paletteIndices, int[] componentPositions, int[] componentStates, int[] interiorRunStarts, int[] interiorRunLengths, int[] interiorRunPalette, String[] lootTableIds, int[][] lootTableItems, int[] lootMarkerPositions, int[] lootMarkerStates, int[] lootMarkerTables) {
+	StructurePreview(int gridX, int gridY, int gridZ, int step, int blockX, int blockY, int blockZ, int pieces, int outlinedPieces, boolean truncated, int[] palette, int[] positions, int[] paletteIndices, int[] componentPositions, int[] componentStates, int[] interiorRunStarts, int[] interiorRunLengths, int[] interiorRunPalette, String[] lootTableIds, int[][] lootTableItems, int[][] lootTableChances, int[] lootMarkerPositions, int[] lootMarkerStates, int[] lootMarkerTables) {
 		this.gridX = gridX;
 		this.gridY = gridY;
 		this.gridZ = gridZ;
@@ -135,6 +137,7 @@ public class StructurePreview {
 		this.interiorRunPalette = interiorRunPalette;
 		this.lootTableIds = lootTableIds;
 		this.lootTableItems = lootTableItems;
+		this.lootTableChances = lootTableChances;
 		this.lootMarkerPositions = lootMarkerPositions;
 		this.lootMarkerStates = lootMarkerStates;
 		this.lootMarkerTables = lootMarkerTables;
@@ -326,6 +329,11 @@ public class StructurePreview {
 		return lootTableItems[index];
 	}
 
+	/** How likely each item of the given table is to appear, in thousandths, parallel to the items. */
+	public int[] getLootTableChances(int index) {
+		return lootTableChances[index];
+	}
+
 	/** How many loot containers this preview marks. */
 	public int getLootMarkerCount() {
 		return lootMarkerPositions.length;
@@ -416,8 +424,9 @@ public class StructurePreview {
 		for (int i = 0; i < lootTableIds.length; i++) {
 			buf.writeUtf(lootTableIds[i], MAX_LOOT_TABLE_ID);
 			buf.writeVarInt(lootTableItems[i].length);
-			for (int itemId : lootTableItems[i]) {
-				buf.writeVarInt(itemId);
+			for (int item = 0; item < lootTableItems[i].length; item++) {
+				buf.writeVarInt(lootTableItems[i][item]);
+				buf.writeVarInt(lootTableChances[i][item]);
 			}
 		}
 
@@ -509,6 +518,7 @@ public class StructurePreview {
 		}
 		final String[] lootTableIds = new String[tableCount];
 		final int[][] lootTableItems = new int[tableCount][];
+		final int[][] lootTableChances = new int[tableCount][];
 		for (int i = 0; i < tableCount; i++) {
 			lootTableIds[i] = buf.readUtf(MAX_LOOT_TABLE_ID);
 			final int itemCount = buf.readVarInt();
@@ -516,10 +526,17 @@ public class StructurePreview {
 				throw new DecoderException("Structure preview names " + itemCount + " items for a loot table");
 			}
 			final int[] items = new int[itemCount];
+			final int[] chances = new int[itemCount];
 			for (int item = 0; item < itemCount; item++) {
 				items[item] = buf.readVarInt();
+				final int chance = buf.readVarInt();
+				if (chance < 0 || chance > 1000) {
+					throw new DecoderException("Structure preview names a loot chance of " + chance);
+				}
+				chances[item] = chance;
 			}
 			lootTableItems[i] = items;
+			lootTableChances[i] = chances;
 		}
 
 		final int markerCount = buf.readVarInt();
@@ -539,7 +556,7 @@ public class StructurePreview {
 			lootMarkerTables[i] = tableIndex;
 		}
 
-		return new StructurePreview(gridX, gridY, gridZ, step, blockX, blockY, blockZ, pieces, outlinedPieces, truncated, palette, positions, paletteIndices, componentPositions, componentStates, interiorRunStarts, interiorRunLengths, interiorRunPalette, lootTableIds, lootTableItems, lootMarkerPositions, lootMarkerStates, lootMarkerTables);
+		return new StructurePreview(gridX, gridY, gridZ, step, blockX, blockY, blockZ, pieces, outlinedPieces, truncated, palette, positions, paletteIndices, componentPositions, componentStates, interiorRunStarts, interiorRunLengths, interiorRunPalette, lootTableIds, lootTableItems, lootTableChances, lootMarkerPositions, lootMarkerStates, lootMarkerTables);
 	}
 
 }

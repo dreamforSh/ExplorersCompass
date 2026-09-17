@@ -9,8 +9,11 @@
   "mixins": [
     "ChunkGeneratorTerrainHeightMixin",
     "CompositeEntryBaseAccessor",
+    "CompositeLootItemConditionAccessor",
+    "LootEntryConditionsAccessor",
     "LootItemAccessor",
     "LootPoolEntriesAccessor",
+    "LootPoolSingletonWeightAccessor",
     "LootTablePoolsAccessor",
     "NestedLootTableAccessor",
     "SinglePoolElementTemplateAccessor",

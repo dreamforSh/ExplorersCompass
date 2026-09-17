@@ -426,19 +426,19 @@ public final class StructurePreviewBuilder {
 			}
 			final BlockEntity entity = entry.getValue();
 			String tableId = "";
-			int[] items = new int[0];
+			LootTableItems.Drops drops = LootTableItems.Drops.EMPTY;
 			if (entity instanceof RandomizableContainer container && container.getLootTable() != null) {
 				tableId = container.getLootTable().location().toString();
-				items = tables.itemsOf(container.getLootTable());
+				drops = tables.itemsOf(container.getLootTable());
 			} else if (entity instanceof Container container) {
-				items = itemsIn(container);
+				drops = itemsIn(container);
 			}
-			loot.add(new LootCapture(entry.getLongKey(), stateId, tableId, items));
+			loot.add(new LootCapture(entry.getLongKey(), stateId, tableId, drops.itemIds, drops.permilles));
 		}
 		return loot;
 	}
 
-	private static int[] itemsIn(Container container) {
+	private static LootTableItems.Drops itemsIn(Container container) {
 		final IntArrayList ids = new IntArrayList();
 		for (int slot = 0; slot < container.getContainerSize(); slot++) {
 			final ItemStack stack = container.getItem(slot);
@@ -453,7 +453,12 @@ public final class StructurePreviewBuilder {
 				break;
 			}
 		}
-		return ids.toIntArray();
+		final int[] itemIds = ids.toIntArray();
+		final int[] permilles = new int[itemIds.length];
+		for (int i = 0; i < permilles.length; i++) {
+			permilles[i] = LootTableItems.PERMILLE_ALWAYS;
+		}
+		return new LootTableItems.Drops(itemIds, permilles);
 	}
 
 	/** How many blocks one cell has to stand for, for a structure of this size to fit the grid. */
@@ -471,7 +476,7 @@ public final class StructurePreviewBuilder {
 	}
 
 	/** One loot container, still in world coordinates, ready to be thrown onto a grid of any coarseness. */
-	private record LootCapture(long packedPos, int stateId, String tableId, int[] itemIds) {
+	private record LootCapture(long packedPos, int stateId, String tableId, int[] itemIds, int[] permilles) {
 	}
 
 	/**
@@ -712,6 +717,7 @@ public final class StructurePreviewBuilder {
 
 			final List<String> lootTableIds = new ArrayList<String>();
 			final List<int[]> lootTableItemLists = new ArrayList<int[]>();
+			final List<int[]> lootTableChanceLists = new ArrayList<int[]>();
 			final Object2IntOpenHashMap<String> namedTables = new Object2IntOpenHashMap<String>();
 			namedTables.defaultReturnValue(-1);
 			final IntArrayList lootPositions = new IntArrayList();
@@ -729,19 +735,21 @@ public final class StructurePreviewBuilder {
 						namedTables.put(capture.tableId(), existing);
 						lootTableIds.add(capture.tableId());
 						lootTableItemLists.add(capture.itemIds());
+						lootTableChanceLists.add(capture.permilles());
 					}
 					tableIndex = existing;
 				} else {
 					tableIndex = lootTableIds.size();
 					lootTableIds.add("");
 					lootTableItemLists.add(capture.itemIds());
+					lootTableChanceLists.add(capture.permilles());
 				}
 				lootPositions.add(cell);
 				lootStates.add(capture.stateId());
 				lootTables.add(tableIndex);
 			}
 
-			return new StructurePreview(sizeX, sizeY, sizeZ, step, structureBounds.getXSpan(), structureBounds.getYSpan(), structureBounds.getZSpan(), pieces, outlinedPieces, truncated || overflowed, palette.toIntArray(), positions.toIntArray(), indices.toIntArray(), componentPositions.toIntArray(), componentStates.toIntArray(), runStarts.toIntArray(), runLengths.toIntArray(), runPalette.toIntArray(), lootTableIds.toArray(new String[0]), lootTableItemLists.toArray(new int[0][]), lootPositions.toIntArray(), lootStates.toIntArray(), lootTables.toIntArray());
+			return new StructurePreview(sizeX, sizeY, sizeZ, step, structureBounds.getXSpan(), structureBounds.getYSpan(), structureBounds.getZSpan(), pieces, outlinedPieces, truncated || overflowed, palette.toIntArray(), positions.toIntArray(), indices.toIntArray(), componentPositions.toIntArray(), componentStates.toIntArray(), runStarts.toIntArray(), runLengths.toIntArray(), runPalette.toIntArray(), lootTableIds.toArray(new String[0]), lootTableItemLists.toArray(new int[0][]), lootTableChanceLists.toArray(new int[0][]), lootPositions.toIntArray(), lootStates.toIntArray(), lootTables.toIntArray());
 		}
 
 	}

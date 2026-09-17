@@ -300,6 +300,7 @@ public class StructurePreviewScreen extends Screen {
 			}
 		}
 		final int[] items = preview.getLootTableItems(table);
+		final int[] chances = preview.getLootTableChances(table);
 		final int cols = Math.min(8, Math.max(1, items.length));
 		final int rows = items.length == 0 ? 0 : (items.length + cols - 1) / cols;
 		int textWidth = 0;
@@ -338,8 +339,33 @@ public class StructurePreviewScreen extends Screen {
 				final int slotX = left + 5 + (i % cols) * 18;
 				final int slotY = y + (i / cols) * 18;
 				guiGraphics.renderItem(new ItemStack(item), slotX, slotY);
+				if (i < chances.length) {
+					drawLootChance(guiGraphics, chances[i], slotX, slotY);
+				}
 			}
 		}
+	}
+
+	private void drawLootChance(GuiGraphics guiGraphics, int permille, int slotX, int slotY) {
+		final String text = formatLootChance(permille);
+		guiGraphics.pose().pushPose();
+		guiGraphics.pose().translate(slotX + 17, slotY + 17, 200.0F);
+		guiGraphics.pose().scale(0.5F, 0.5F, 1.0F);
+		guiGraphics.drawString(font, text, -font.width(text), -font.lineHeight, 0xFFFFC24B, true);
+		guiGraphics.pose().popPose();
+	}
+
+	private static String formatLootChance(int permille) {
+		if (permille >= 1000) {
+			return "100%";
+		}
+		if (permille <= 0) {
+			return "0%";
+		}
+		if (permille % 10 == 0) {
+			return (permille / 10) + "%";
+		}
+		return (permille / 10) + "." + (permille % 10) + "%";
 	}
 
 	private void renderButtonTooltip(GuiGraphics guiGraphics, int mouseX, int mouseY) {
