@@ -108,6 +108,10 @@
     "string.explorerscompass.tooltip.renderMode": "Dibuja la estructura con sus bloques y texturas, o con colores planos.",
     "string.explorerscompass.tooltip.renderMode.cost": "Las texturas de una estructura grande tardan un momento en construirse; los colores son inmediatos.",
     "string.explorerscompass.tooltip.layerSlider": "Secciona la estructura de arriba abajo para ver su interior.",
+    "string.explorerscompass.lootMarkers": "Cofres",
+    "string.explorerscompass.tooltip.lootMarkers": "Marca cada cofre y contenedor de botín, incluso a través de las paredes.",
+    "string.explorerscompass.previewLootMarkers": "Cofres",
+    "string.explorerscompass.noLootTable": "Sin tabla de botín",
 
     "_comment.waypoints": "STRINGS - WAYPOINTS",
     "string.explorerscompass.waypoints": "Puntos de ruta",
@@ -295,6 +299,8 @@
     "explorerscompass.configuration.directionBarBackground.tooltip": "Dibuja la franja sobre un panel propio. Desactivado deja solo las marcas, que llevan su propia sombra.",
     "explorerscompass.configuration.structurePreviewAutoSpin": "Girar la vista previa sola",
     "explorerscompass.configuration.structurePreviewAutoSpin.tooltip": "Gira despacio la vista previa por sí sola. El botón de la pantalla de vista previa también lo cambia.",
+    "explorerscompass.configuration.structurePreviewLootMarkers": "Marcar cofres en las vistas previas",
+    "explorerscompass.configuration.structurePreviewLootMarkers.tooltip": "Marca cofres y otros contenedores de botín en la vista previa de una estructura, incluso a través de las paredes. El botón de la pantalla de vista previa también lo cambia.",
     "explorerscompass.configuration.structurePreviewDetailLimit": "Límite de la vista previa con texturas",
     "explorerscompass.configuration.structurePreviewDetailLimit.tooltip": "Las vistas previas con más celdas que esto se abren en colores planos mientras las texturas se construyen en segundo plano. El botón de la pantalla de vista previa cambia en ambos sentidos.",
 

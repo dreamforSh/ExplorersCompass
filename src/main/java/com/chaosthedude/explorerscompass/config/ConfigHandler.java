@@ -51,7 +51,7 @@ public class ConfigHandler {
 				new Group("waypoints", List.of(CLIENT.directionBarWaypoints, CLIENT.directionBarWaypointStyle, CLIENT.directionBarWaypointLimit, CLIENT.xaeroWaypointColor, CLIENT.maxWaypointsPerWorld)),
 				new Group("xaero", List.of(CLIENT.createXaeroWaypoints, CLIENT.xaeroWaypointDisplay)),
 				new Group("screens", List.of(CLIENT.guiHeaderBackground, CLIENT.guiSidebarBackground, CLIENT.guiStatusBarBackground, CLIENT.translateStructureNames, CLIENT.translateBiomeNames)),
-				new Group("preview", List.of(CLIENT.structurePreviewAutoSpin, CLIENT.structurePreviewDetailLimit)));
+				new Group("preview", List.of(CLIENT.structurePreviewAutoSpin, CLIENT.structurePreviewLootMarkers, CLIENT.structurePreviewDetailLimit)));
 	}
 
 	private ConfigHandler() {
@@ -187,6 +187,7 @@ public class ConfigHandler {
 		public final ModConfigSpec.IntValue directionBarSpan;
 		public final ModConfigSpec.BooleanValue directionBarBackground;
 		public final ModConfigSpec.BooleanValue structurePreviewAutoSpin;
+		public final ModConfigSpec.BooleanValue structurePreviewLootMarkers;
 		public final ModConfigSpec.IntValue structurePreviewDetailLimit;
 
 		Client(ModConfigSpec.Builder builder) {
@@ -271,6 +272,9 @@ public class ConfigHandler {
 
 			desc = "Turns a structure preview slowly on its own, so that it is seen from more than one side without being dragged around. The button on the preview screen switches this on and off as well.";
 			structurePreviewAutoSpin = builder.comment(desc).define("structurePreviewAutoSpin", true);
+
+			desc = "Marks chests and other loot containers on a structure preview, even through walls, so they can be found without cutting the building open. The button on the preview screen switches this on and off as well.";
+			structurePreviewLootMarkers = builder.comment(desc).define("structurePreviewLootMarkers", true);
 
 			desc = "How many cells a structure preview may hold before it opens drawn as coloured blocks instead of real ones. Both are one cell to one block; what the coloured tier gives up is the textures, not the detail. Real blocks take longer to assemble into a model, which happens in the background while a coloured stand-in is shown, so this decides which of the two a large structure settles on rather than how long it takes to appear. The button on the preview screen switches between the two for the structure being looked at either way. Raise this to have real blocks on larger structures by default; set it to 0 to open every preview in colours.";
 			structurePreviewDetailLimit = builder.comment(desc).defineInRange("structurePreviewDetailLimit", 40000, 0, 400000);

@@ -108,6 +108,10 @@
     "string.explorerscompass.tooltip.renderMode": "Zeichnet das Bauwerk aus seinen Blöcken mit Texturen oder in flachen Farben.",
     "string.explorerscompass.tooltip.renderMode.cost": "Texturen brauchen bei einem großen Bauwerk einen Moment; Farben stehen sofort.",
     "string.explorerscompass.tooltip.layerSlider": "Schneidet das Bauwerk von oben her Schicht für Schicht auf, um hineinzusehen.",
+    "string.explorerscompass.lootMarkers": "Truhen",
+    "string.explorerscompass.tooltip.lootMarkers": "Markiert jede Truhe und jeden Beutebehälter, auch durch Wände.",
+    "string.explorerscompass.previewLootMarkers": "Truhen",
+    "string.explorerscompass.noLootTable": "Keine Beutetabelle",
 
     "_comment.waypoints": "STRINGS - WAYPOINTS",
     "string.explorerscompass.waypoints": "Wegpunkte",
@@ -295,6 +299,8 @@
     "explorerscompass.configuration.directionBarBackground.tooltip": "Zeichnet den Streifen auf ein eigenes Feld. Aus lässt nur die Marken mit ihren eigenen Schatten.",
     "explorerscompass.configuration.structurePreviewAutoSpin": "Vorschau von selbst drehen",
     "explorerscompass.configuration.structurePreviewAutoSpin.tooltip": "Dreht eine Bauwerkvorschau langsam von selbst. Die Schaltfläche auf dem Vorschau-Bildschirm schaltet das ebenfalls um.",
+    "explorerscompass.configuration.structurePreviewLootMarkers": "Truhen in Vorschauen markieren",
+    "explorerscompass.configuration.structurePreviewLootMarkers.tooltip": "Markiert Truhen und andere Beutebehälter in einer Struktursvorschau, auch durch Wände. Die Schaltfläche auf dem Vorschaubildschirm schaltet dies ebenfalls um.",
     "explorerscompass.configuration.structurePreviewDetailLimit": "Grenze für Vorschauen mit Texturen",
     "explorerscompass.configuration.structurePreviewDetailLimit.tooltip": "Vorschauen mit mehr Zellen als dieser Zahl öffnen sich in flachen Farben, während die Texturen im Hintergrund aufgebaut werden. Die Schaltfläche auf dem Vorschau-Bildschirm schaltet in beide Richtungen.",
 

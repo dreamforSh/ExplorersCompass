@@ -108,6 +108,10 @@
     "string.explorerscompass.tooltip.renderMode": "構造物をテクスチャ付きの実際のブロックで描くか、単色のブロックで描くかを切り替えます。",
     "string.explorerscompass.tooltip.renderMode.cost": "大きな構造物ではテクスチャの構築に少し時間がかかります。単色は即座に表示されます。",
     "string.explorerscompass.tooltip.layerSlider": "構造物を上から層ごとに切り取って、内部を見ます。",
+    "string.explorerscompass.lootMarkers": "チェスト",
+    "string.explorerscompass.tooltip.lootMarkers": "壁越しでも、すべてのチェストとルートコンテナを示します。",
+    "string.explorerscompass.previewLootMarkers": "チェスト",
+    "string.explorerscompass.noLootTable": "ルートテーブルなし",
 
     "_comment.waypoints": "STRINGS - WAYPOINTS",
     "string.explorerscompass.waypoints": "ウェイポイント",
@@ -295,6 +299,8 @@
     "explorerscompass.configuration.directionBarBackground.tooltip": "方向バーを専用のパネル上に描きます。オフなら影付きの印だけになります。",
     "explorerscompass.configuration.structurePreviewAutoSpin": "プレビューを自動回転",
     "explorerscompass.configuration.structurePreviewAutoSpin.tooltip": "構造物プレビューをゆっくり自動で回します。プレビュー画面のボタンでも切り替えられます。",
+    "explorerscompass.configuration.structurePreviewLootMarkers": "プレビューでチェストを表示",
+    "explorerscompass.configuration.structurePreviewLootMarkers.tooltip": "構造物プレビューでチェストやルートコンテナを、壁越しでも示します。プレビュー画面のボタンでも切り替えられます。",
     "explorerscompass.configuration.structurePreviewDetailLimit": "テクスチャ表示の上限",
     "explorerscompass.configuration.structurePreviewDetailLimit.tooltip": "これよりマスが多いプレビューは単色で開き、テクスチャは背景で構築されます。プレビュー画面のボタンでいつでも切り替えられます。",
 

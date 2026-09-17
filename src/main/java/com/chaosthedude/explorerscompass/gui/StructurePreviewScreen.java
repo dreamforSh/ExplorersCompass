@@ -13,12 +13,15 @@ import com.chaosthedude.explorerscompass.preview.StructurePreview;
 import com.chaosthedude.explorerscompass.util.RenderUtils;
 import com.chaosthedude.explorerscompass.util.SearchTarget;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
@@ -82,7 +85,10 @@ public class StructurePreviewScreen extends Screen {
 	private TransparentButton resetButton;
 	private TransparentButton viewButton;
 	private TransparentButton modeButton;
+	private TransparentButton lootMarkersButton;
 	private TransparentButton backButton;
+	/** The loot marker under the pointer, or -1. */
+	private int hoveredLootMarker = -1;
 	private LayerSlider layerSlider;
 	private ViewPreset viewPreset = ViewPreset.ISOMETRIC;
 	/** Where the sidebar has room for the next control. */
@@ -131,6 +137,15 @@ public class StructurePreviewScreen extends Screen {
 		if (hasModel) {
 			// Inside the panel border, so that the model is never drawn over its own edges
 			view.render(guiGraphics, preview, left + 1, top + 1, right - 1, bottom - 1);
+			hoveredLootMarker = -1;
+			if (ConfigHandler.CLIENT.structurePreviewLootMarkers.get() && preview.getLootMarkerCount() > 0) {
+				if (!view.isDragging() && !view.isPanning() && (!layerSlider.visible || !layerSlider.isMouseOver(mouseX, mouseY))) {
+					hoveredLootMarker = view.hoveredLootMarker(preview, mouseX, mouseY);
+				}
+				guiGraphics.enableScissor(left + 1, top + 1, right - 1, bottom - 1);
+				view.renderLootMarkers(guiGraphics, preview, hoveredLootMarker);
+				guiGraphics.disableScissor();
+			}
 			view.renderCompass(guiGraphics, font, left + COMPASS_MARGIN + COMPASS_RADIUS, top + COMPASS_MARGIN + COMPASS_RADIUS, COMPASS_RADIUS);
 			renderBuildProgress(guiGraphics, left, bottom);
 		} else {
@@ -146,6 +161,12 @@ public class StructurePreviewScreen extends Screen {
 	public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
 		super.render(guiGraphics, mouseX, mouseY, partialTicks);
 		renderButtonTooltip(guiGraphics, mouseX, mouseY);
+		if (hoveredLootMarker >= 0) {
+			final StructurePreview preview = StructurePreviewCache.get(structureKey);
+			if (preview != null) {
+				renderLootTooltip(guiGraphics, preview, hoveredLootMarker, mouseX, mouseY);
+			}
+		}
 	}
 
 	/** Keeps the controls saying what the view is doing, whichever of them it was changed through. */
@@ -156,6 +177,8 @@ public class StructurePreviewScreen extends Screen {
 			layerSlider.setRange(preview.getGridY(), view.layersShown(preview));
 		}
 		modeButton.active = hasModel;
+		lootMarkersButton.active = hasModel && preview != null && preview.getLootMarkerCount() > 0;
+		lootMarkersButton.setHighlighted(ConfigHandler.CLIENT.structurePreviewLootMarkers.get());
 		if (hasModel) {
 			modeButton.setMessage(modeButtonLabel(preview));
 			modeButton.setHighlighted(view.getRequestedMode() != null);
@@ -229,6 +252,9 @@ public class StructurePreviewScreen extends Screen {
 		if (view.getDrawnComponents() > 0) {
 			parts.add(labeled("string.explorerscompass.previewComponents", String.valueOf(view.getDrawnComponents())));
 		}
+		if (preview.getLootMarkerCount() > 0) {
+			parts.add(labeled("string.explorerscompass.previewLootMarkers", String.valueOf(preview.getLootMarkerCount())));
+		}
 		if (view.isSimplified()) {
 			// Worth saying outright: a structure shown in flat colours is not one made of one material
 			parts.add(I18n.get("string.explorerscompass.previewSimplified"));
@@ -257,6 +283,63 @@ public class StructurePreviewScreen extends Screen {
 	/** A labelled value, punctuated the way the player's own language punctuates one. */
 	private static String labeled(String labelKey, String value) {
 		return I18n.get("string.explorerscompass.labeledValue", I18n.get(labelKey), value);
+	}
+
+	private void renderLootTooltip(GuiGraphics guiGraphics, StructurePreview preview, int marker, int mouseX, int mouseY) {
+		final int table = preview.getLootMarkerTableIndex(marker);
+		final String id = preview.getLootTableId(table);
+		final List<Component> lines = new ArrayList<Component>();
+		if (id.isEmpty()) {
+			lines.add(Component.translatable("string.explorerscompass.noLootTable"));
+		} else {
+			final String key = "loot_table." + id.replace(':', '.').replace('/', '.');
+			final Component name = Component.translatableWithFallback(key, id);
+			lines.add(name);
+			if (!name.getString().equals(id)) {
+				lines.add(Component.literal(id).withStyle(ChatFormatting.DARK_GRAY));
+			}
+		}
+		final int[] items = preview.getLootTableItems(table);
+		final int cols = Math.min(8, Math.max(1, items.length));
+		final int rows = items.length == 0 ? 0 : (items.length + cols - 1) / cols;
+		int textWidth = 0;
+		for (Component line : lines) {
+			textWidth = Math.max(textWidth, font.width(line));
+		}
+		final int width = Math.max(textWidth, rows == 0 ? 0 : cols * 18) + 10;
+		final int height = 6 + lines.size() * 10 + (rows == 0 ? 0 : 4 + rows * 18);
+		int left = mouseX + 12;
+		int top = mouseY - 12;
+		if (left + width > this.width - 4) {
+			left = mouseX - 12 - width;
+		}
+		if (top + height > this.height - 4) {
+			top = this.height - 4 - height;
+		}
+		if (left < 4) {
+			left = 4;
+		}
+		if (top < 4) {
+			top = 4;
+		}
+		RenderUtils.drawRect(guiGraphics, left, top, left + width, top + height, 0xF0100010);
+		int y = top + 4;
+		for (Component line : lines) {
+			guiGraphics.drawString(font, line, left + 5, y, 0xFFFFFFFF);
+			y += 10;
+		}
+		if (rows > 0) {
+			y += 2;
+			for (int i = 0; i < items.length; i++) {
+				final Item item = Item.byId(items[i]);
+				if (item == null) {
+					continue;
+				}
+				final int slotX = left + 5 + (i % cols) * 18;
+				final int slotY = y + (i / cols) * 18;
+				guiGraphics.renderItem(new ItemStack(item), slotX, slotY);
+			}
+		}
 	}
 
 	private void renderButtonTooltip(GuiGraphics guiGraphics, int mouseX, int mouseY) {
@@ -436,6 +519,15 @@ public class StructurePreviewScreen extends Screen {
 		});
 		spinButton.setHighlighted(ConfigHandler.CLIENT.structurePreviewAutoSpin.get());
 		spinButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.autoSpin"));
+
+		lootMarkersButton = addSidebarButton(Component.translatable("string.explorerscompass.lootMarkers"), (onPress) -> {
+			final boolean shown = !ConfigHandler.CLIENT.structurePreviewLootMarkers.get();
+			ConfigHandler.CLIENT.structurePreviewLootMarkers.set(Boolean.valueOf(shown));
+			ConfigHandler.CLIENT.structurePreviewLootMarkers.save();
+			lootMarkersButton.setHighlighted(shown);
+		});
+		lootMarkersButton.setHighlighted(ConfigHandler.CLIENT.structurePreviewLootMarkers.get());
+		lootMarkersButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.lootMarkers"));
 
 		viewButton = addSidebarButton(viewButtonLabel(), (onPress) -> {
 			viewPreset = viewPreset.next();

@@ -32,6 +32,7 @@ import com.mojang.math.Axis;
 import org.joml.Matrix4f;
 import org.joml.Matrix4fStack;
 import org.joml.Vector3f;
+import org.joml.Vector4f;
 
 import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
@@ -54,9 +55,12 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.util.Mth;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.Biomes;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import com.chaosthedude.explorerscompass.util.RenderUtils;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
 
@@ -236,6 +240,14 @@ public class StructurePreviewView implements AutoCloseable {
 	private final AtomicInteger progress = new AtomicInteger();
 	private final ArrayDeque<Delivery> deliveries = new ArrayDeque<Delivery>();
 
+	/** The transform the model was last drawn with, for putting a chest marker on the screen. */
+	private Matrix4f lastModelView;
+	private Matrix4f lastProjection;
+	private int lastLeft;
+	private int lastTop;
+	private int lastRight;
+	private int lastBottom;
+
 	// Readings
 
 	/** Whether what is being drawn is coloured cubes rather than the blocks themselves. */
@@ -379,6 +391,7 @@ public class StructurePreviewView implements AutoCloseable {
 		// A structure can be nothing but a chest, so what makes a preview empty is holding neither a
 		// shell nor anything with a renderer of its own
 		if (panelWidth <= 0 || panelHeight <= 0 || (preview.getCellCount() == 0 && preview.getComponentCount() == 0)) {
+			lastModelView = null;
 			return;
 		}
 
@@ -445,6 +458,12 @@ public class StructurePreviewView implements AutoCloseable {
 		modelStack.mulPose(Axis.YP.rotationDegrees(yaw));
 		modelStack.translate(-gridX / 2.0F, -gridY / 2.0F, -gridZ / 2.0F);
 		final Matrix4f modelView = new Matrix4f(RenderSystem.getModelViewMatrix()).mul(modelStack.last().pose());
+		lastModelView = new Matrix4f(modelView);
+		lastProjection = new Matrix4f(RenderSystem.getProjectionMatrix());
+		lastLeft = left;
+		lastTop = top;
+		lastRight = right;
+		lastBottom = bottom;
 
 		if (shown.coloured != null) {
 			drawColouredCubes(shown.coloured, modelView);
@@ -468,6 +487,91 @@ public class StructurePreviewView implements AutoCloseable {
 		RenderSystem.disableBlend();
 		RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
 		guiGraphics.disableScissor();
+	}
+
+	private static final int LOOT_MARKER_HIT = 12;
+	private static final int LOOT_MARKER_BACK = 0xC0000000;
+	private static final int LOOT_MARKER_HOVER = 0xE0FFC24B;
+
+	/**
+	 * The loot marker nearest the pointer, or -1. Markers above the cut of the layer slider are left
+	 * out, since those floors are not being shown.
+	 */
+	public int hoveredLootMarker(StructurePreview preview, double mouseX, double mouseY) {
+		if (lastModelView == null || lastProjection == null || preview.getLootMarkerCount() == 0) {
+			return -1;
+		}
+		final float[] screen = new float[2];
+		final int layers = layersShown(preview);
+		int best = -1;
+		double bestDist = (double) LOOT_MARKER_HIT * LOOT_MARKER_HIT;
+		for (int marker = 0; marker < preview.getLootMarkerCount(); marker++) {
+			if (preview.getLootMarkerY(marker) >= layers) {
+				continue;
+			}
+			if (!projectLootMarker(preview, marker, screen)) {
+				continue;
+			}
+			final double dx = mouseX - screen[0];
+			final double dy = mouseY - screen[1];
+			final double dist = dx * dx + dy * dy;
+			if (dist < bestDist) {
+				bestDist = dist;
+				best = marker;
+			}
+		}
+		return best;
+	}
+
+	/** Pins every loot container onto the screen, through the walls, so a chest inside can be found. */
+	public void renderLootMarkers(GuiGraphics guiGraphics, StructurePreview preview, int hovered) {
+		if (lastModelView == null || preview.getLootMarkerCount() == 0) {
+			return;
+		}
+		final float[] screen = new float[2];
+		final int layers = layersShown(preview);
+		for (int marker = 0; marker < preview.getLootMarkerCount(); marker++) {
+			if (preview.getLootMarkerY(marker) >= layers) {
+				continue;
+			}
+			if (!projectLootMarker(preview, marker, screen)) {
+				continue;
+			}
+			final int left = Math.round(screen[0]) - 8;
+			final int top = Math.round(screen[1]) - 8;
+			RenderUtils.drawRect(guiGraphics, left - 1, top - 1, left + 17, top + 17, marker == hovered ? LOOT_MARKER_HOVER : LOOT_MARKER_BACK);
+			ItemStack stack = new ItemStack(preview.getLootMarkerState(marker).getBlock().asItem());
+			if (stack.isEmpty()) {
+				stack = new ItemStack(Items.CHEST);
+			}
+			guiGraphics.renderItem(stack, left, top);
+		}
+	}
+
+	private boolean projectLootMarker(StructurePreview preview, int marker, float[] screen) {
+		final Vector4f point = new Vector4f(preview.getLootMarkerX(marker) + 0.5F, preview.getLootMarkerY(marker) + 0.5F, preview.getLootMarkerZ(marker) + 0.5F, 1.0F);
+		lastModelView.transform(point);
+		lastProjection.transform(point);
+		if (Math.abs(point.w) < 1.0E-5F) {
+			return false;
+		}
+		final float ndcX = point.x / point.w;
+		final float ndcY = point.y / point.w;
+		final float ndcZ = point.z / point.w;
+		if (ndcZ < -1.0F || ndcZ > 1.0F) {
+			return false;
+		}
+		final Minecraft mc = Minecraft.getInstance();
+		final int guiWidth = mc.getWindow().getGuiScaledWidth();
+		final int guiHeight = mc.getWindow().getGuiScaledHeight();
+		final float x = (ndcX + 1.0F) * 0.5F * guiWidth;
+		final float y = (1.0F - ndcY) * 0.5F * guiHeight;
+		if (x < lastLeft || x >= lastRight || y < lastTop || y >= lastBottom) {
+			return false;
+		}
+		screen[0] = x;
+		screen[1] = y;
+		return true;
 	}
 
 	/**

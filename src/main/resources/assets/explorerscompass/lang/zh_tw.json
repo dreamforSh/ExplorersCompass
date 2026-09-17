@@ -108,6 +108,10 @@
     "string.explorerscompass.tooltip.renderMode": "以帶材質的真實方塊繪製結構，或以純色塊繪製。",
     "string.explorerscompass.tooltip.renderMode.cost": "大型結構的材質模型需要片刻建立；色塊模式即時顯示。",
     "string.explorerscompass.tooltip.layerSlider": "從頂部逐層剖開結構，查看內部。",
+    "string.explorerscompass.lootMarkers": "箱子",
+    "string.explorerscompass.tooltip.lootMarkers": "標註每個箱子與戰利品容器，即使隔牆也能看到。",
+    "string.explorerscompass.previewLootMarkers": "箱子",
+    "string.explorerscompass.noLootTable": "沒有戰利品表",
 
     "_comment.waypoints": "STRINGS - WAYPOINTS",
     "string.explorerscompass.waypoints": "路徑點",
@@ -295,6 +299,8 @@
     "explorerscompass.configuration.directionBarBackground.tooltip": "把方向條繪製在獨立的面板上。關閉則只保留帶陰影的標記。",
     "explorerscompass.configuration.structurePreviewAutoSpin": "預覽自動旋轉",
     "explorerscompass.configuration.structurePreviewAutoSpin.tooltip": "讓結構預覽緩慢自轉。預覽介面上的按鈕也能切換。",
+    "explorerscompass.configuration.structurePreviewLootMarkers": "預覽中標註箱子",
+    "explorerscompass.configuration.structurePreviewLootMarkers.tooltip": "在結構預覽中標註箱子與其他戰利品容器，即使隔牆也能看到。預覽畫面上的按鈕也能切換。",
     "explorerscompass.configuration.structurePreviewDetailLimit": "材質預覽上限",
     "explorerscompass.configuration.structurePreviewDetailLimit.tooltip": "格數超過此值的預覽開啟時以色塊繪製，材質模型在背景建立。預覽介面上的按鈕可隨時切換。",
 

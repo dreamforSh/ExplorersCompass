@@ -109,6 +109,10 @@
     "string.explorerscompass.tooltip.renderMode": "Draws the structure as its blocks with their textures, or as flat colours.",
     "string.explorerscompass.tooltip.renderMode.cost": "Textures take a moment to build on a large structure; colours are instant.",
     "string.explorerscompass.tooltip.layerSlider": "Cuts the structure open from the top down, to look inside.",
+    "string.explorerscompass.lootMarkers": "Chests",
+    "string.explorerscompass.tooltip.lootMarkers": "Marks every chest and loot container, even through walls.",
+    "string.explorerscompass.previewLootMarkers": "Chests",
+    "string.explorerscompass.noLootTable": "No loot table",
 
     "_comment.waypoints": "STRINGS - WAYPOINTS",
     "string.explorerscompass.waypoints": "Waypoints",
@@ -296,6 +300,8 @@
     "explorerscompass.configuration.directionBarBackground.tooltip": "Draws the strip on a panel of its own. Off leaves only the marks, which carry their own shadows.",
     "explorerscompass.configuration.structurePreviewAutoSpin": "Turn previews on their own",
     "explorerscompass.configuration.structurePreviewAutoSpin.tooltip": "Turns a structure preview slowly by itself. The button on the preview screen switches this too.",
+    "explorerscompass.configuration.structurePreviewLootMarkers": "Mark chests on previews",
+    "explorerscompass.configuration.structurePreviewLootMarkers.tooltip": "Marks chests and other loot containers on a structure preview, even through walls. The button on the preview screen switches this too.",
     "explorerscompass.configuration.structurePreviewDetailLimit": "Textured preview limit",
     "explorerscompass.configuration.structurePreviewDetailLimit.tooltip": "Previews with more cells than this open drawn in flat colours rather than textures, which then build in the background. The button on the preview screen switches either way.",
 

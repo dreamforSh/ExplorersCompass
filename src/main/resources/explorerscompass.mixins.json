@@ -8,7 +8,13 @@
   },
   "mixins": [
     "ChunkGeneratorTerrainHeightMixin",
+    "CompositeEntryBaseAccessor",
+    "LootItemAccessor",
+    "LootPoolEntriesAccessor",
+    "LootTablePoolsAccessor",
+    "NestedLootTableAccessor",
     "SinglePoolElementTemplateAccessor",
-    "StructureTemplatePalettesAccessor"
+    "StructureTemplatePalettesAccessor",
+    "TagEntryAccessor"
   ]
 }

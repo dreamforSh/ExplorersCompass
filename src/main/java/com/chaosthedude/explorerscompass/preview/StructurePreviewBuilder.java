@@ -13,10 +13,13 @@ import com.chaosthedude.explorerscompass.util.StructureUtils;
 import it.unimi.dsi.fastutil.ints.Int2BooleanOpenHashMap;
 import it.unimi.dsi.fastutil.ints.Int2IntMap;
 import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntIterator;
 import it.unimi.dsi.fastutil.longs.Long2IntMap;
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
+import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -25,10 +28,19 @@ import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.StructureManager;
+import net.minecraft.world.Container;
+import net.minecraft.world.RandomizableContainer;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.BarrelBlock;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.ChestBlock;
+import net.minecraft.world.level.block.DispenserBlock;
 import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.level.block.RenderShape;
+import net.minecraft.world.level.block.ShulkerBoxBlock;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.levelgen.RandomState;
@@ -257,7 +269,7 @@ public final class StructurePreviewBuilder {
 			buildProcedural(level, start, bounds, procedural, recordingLevel, outlined);
 		}
 
-		return new Assembly(recordingLevel.getRecorded(), outlined, recordingLevel.isFull());
+		return new Assembly(recordingLevel.getRecorded(), outlined, recordingLevel.isFull(), collectLoot(level, recordingLevel));
 	}
 
 	/**
@@ -314,7 +326,7 @@ public final class StructurePreviewBuilder {
 			}
 
 			final BlockPos pos = StructureTemplate.calculateRelativePosition(settings, info.pos()).offset(origin);
-			if (!recordingLevel.record(pos, state)) {
+			if (!recordingLevel.record(pos, state, info.nbt())) {
 				break;
 			}
 		}
@@ -386,6 +398,64 @@ public final class StructurePreviewBuilder {
 		return state.getRenderShape() == RenderShape.ENTITYBLOCK_ANIMATED && state.getBlock() instanceof EntityBlock;
 	}
 
+	/**
+	 * Whether a block is one of the containers a preview marks for loot. Hoppers and brewing stands
+	 * can hold a loot table too, but they are not what a player looking for chests is after.
+	 */
+	private static boolean isLootContainer(BlockState state) {
+		final Block block = state.getBlock();
+		return block instanceof ChestBlock || block instanceof BarrelBlock || block instanceof ShulkerBoxBlock || block instanceof DispenserBlock;
+	}
+
+	/**
+	 * Every chest, barrel, shulker box, dispenser and dropper that was taken down, with the loot
+	 * table it names and the items that table may drop. Beds and banners are left out: they are
+	 * drawn as themselves and have nothing to open.
+	 */
+	private static List<LootCapture> collectLoot(ServerLevel level, RecordingLevel recordingLevel) {
+		final LootTableItems tables = new LootTableItems(level.getServer());
+		final List<LootCapture> loot = new ArrayList<LootCapture>();
+		for (Long2ObjectMap.Entry<BlockEntity> entry : recordingLevel.getBlockEntities().long2ObjectEntrySet()) {
+			final int stateId = recordingLevel.getRecorded().get(entry.getLongKey());
+			if (stateId < 0) {
+				continue;
+			}
+			final BlockState state = Block.stateById(stateId);
+			if (!isLootContainer(state)) {
+				continue;
+			}
+			final BlockEntity entity = entry.getValue();
+			String tableId = "";
+			int[] items = new int[0];
+			if (entity instanceof RandomizableContainer container && container.getLootTable() != null) {
+				tableId = container.getLootTable().location().toString();
+				items = tables.itemsOf(container.getLootTable());
+			} else if (entity instanceof Container container) {
+				items = itemsIn(container);
+			}
+			loot.add(new LootCapture(entry.getLongKey(), stateId, tableId, items));
+		}
+		return loot;
+	}
+
+	private static int[] itemsIn(Container container) {
+		final IntArrayList ids = new IntArrayList();
+		for (int slot = 0; slot < container.getContainerSize(); slot++) {
+			final ItemStack stack = container.getItem(slot);
+			if (stack.isEmpty()) {
+				continue;
+			}
+			final int id = Item.getId(stack.getItem());
+			if (!ids.contains(id)) {
+				ids.add(id);
+			}
+			if (ids.size() >= LootTableItems.MAX_ITEMS) {
+				break;
+			}
+		}
+		return ids.toIntArray();
+	}
+
 	/** How many blocks one cell has to stand for, for a structure of this size to fit the grid. */
 	static int stepFor(int spanX, int spanY, int spanZ, int resolution) {
 		final int largestSpan = Math.max(spanX, Math.max(spanY, spanZ));
@@ -397,7 +467,11 @@ public final class StructurePreviewBuilder {
 	}
 
 	/** Everything got out of an assembled structure, ready to be thrown onto a grid of any coarseness. */
-	private record Assembly(Long2IntOpenHashMap blocks, List<StructurePiece> outlined, boolean truncated) {
+	private record Assembly(Long2IntOpenHashMap blocks, List<StructurePiece> outlined, boolean truncated, List<LootCapture> loot) {
+	}
+
+	/** One loot container, still in world coordinates, ready to be thrown onto a grid of any coarseness. */
+	private record LootCapture(long packedPos, int stateId, String tableId, int[] itemIds) {
 	}
 
 	/**
@@ -421,6 +495,8 @@ public final class StructurePreviewBuilder {
 		private final Int2IntOpenHashMap cells = new Int2IntOpenHashMap();
 		/** Where the blocks drawn by a renderer of their own stand, packed cell to block state id. */
 		private final Int2IntOpenHashMap components = new Int2IntOpenHashMap();
+		/** Loot containers, packed cell to the capture that fell in it. First one in a cell wins. */
+		private final Int2ObjectOpenHashMap<LootCapture> loot = new Int2ObjectOpenHashMap<LootCapture>();
 		/**
 		 * Which blocks hide the whole of a face laid against them, by state id, worked out once for
 		 * each rather than for each of the six neighbours of every cell.
@@ -456,6 +532,11 @@ public final class StructurePreviewBuilder {
 			// inside another does not paint over what was got out of that one
 			for (StructurePiece piece : assembly.outlined()) {
 				outline(piece.getBoundingBox());
+			}
+
+			for (LootCapture capture : assembly.loot()) {
+				final long packed = capture.packedPos();
+				putLoot(BlockPos.getX(packed), BlockPos.getY(packed), BlockPos.getZ(packed), capture);
 			}
 		}
 
@@ -498,6 +579,17 @@ public final class StructurePreviewBuilder {
 			final int cell = cellAt(blockX, blockY, blockZ);
 			if (!components.containsKey(cell)) {
 				components.put(cell, stateId);
+			}
+		}
+
+		/** Notes a loot container in whichever cell holds it, even when that cell already has a wall. */
+		private void putLoot(int blockX, int blockY, int blockZ, LootCapture capture) {
+			if (loot.size() >= MAX_COMPONENTS) {
+				return;
+			}
+			final int cell = cellAt(blockX, blockY, blockZ);
+			if (!loot.containsKey(cell)) {
+				loot.put(cell, capture);
 			}
 		}
 
@@ -618,7 +710,38 @@ public final class StructurePreviewBuilder {
 				}
 			}
 
-			return new StructurePreview(sizeX, sizeY, sizeZ, step, structureBounds.getXSpan(), structureBounds.getYSpan(), structureBounds.getZSpan(), pieces, outlinedPieces, truncated || overflowed, palette.toIntArray(), positions.toIntArray(), indices.toIntArray(), componentPositions.toIntArray(), componentStates.toIntArray(), runStarts.toIntArray(), runLengths.toIntArray(), runPalette.toIntArray());
+			final List<String> lootTableIds = new ArrayList<String>();
+			final List<int[]> lootTableItemLists = new ArrayList<int[]>();
+			final Object2IntOpenHashMap<String> namedTables = new Object2IntOpenHashMap<String>();
+			namedTables.defaultReturnValue(-1);
+			final IntArrayList lootPositions = new IntArrayList();
+			final IntArrayList lootStates = new IntArrayList();
+			final IntArrayList lootTables = new IntArrayList();
+			final int[] lootCells = loot.keySet().toIntArray();
+			Arrays.sort(lootCells);
+			for (int cell : lootCells) {
+				final LootCapture capture = loot.get(cell);
+				final int tableIndex;
+				if (!capture.tableId().isEmpty()) {
+					int existing = namedTables.getInt(capture.tableId());
+					if (existing < 0) {
+						existing = lootTableIds.size();
+						namedTables.put(capture.tableId(), existing);
+						lootTableIds.add(capture.tableId());
+						lootTableItemLists.add(capture.itemIds());
+					}
+					tableIndex = existing;
+				} else {
+					tableIndex = lootTableIds.size();
+					lootTableIds.add("");
+					lootTableItemLists.add(capture.itemIds());
+				}
+				lootPositions.add(cell);
+				lootStates.add(capture.stateId());
+				lootTables.add(tableIndex);
+			}
+
+			return new StructurePreview(sizeX, sizeY, sizeZ, step, structureBounds.getXSpan(), structureBounds.getYSpan(), structureBounds.getZSpan(), pieces, outlinedPieces, truncated || overflowed, palette.toIntArray(), positions.toIntArray(), indices.toIntArray(), componentPositions.toIntArray(), componentStates.toIntArray(), runStarts.toIntArray(), runLengths.toIntArray(), runPalette.toIntArray(), lootTableIds.toArray(new String[0]), lootTableItemLists.toArray(new int[0][]), lootPositions.toIntArray(), lootStates.toIntArray(), lootTables.toIntArray());
 		}
 
 	}

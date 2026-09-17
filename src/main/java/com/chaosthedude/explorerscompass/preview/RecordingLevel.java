@@ -5,6 +5,7 @@ import java.util.Optional;
 import java.util.function.Predicate;
 
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Holder;
@@ -12,6 +13,7 @@ import net.minecraft.core.Registry;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvent;
@@ -28,6 +30,7 @@ import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.BiomeManager;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
@@ -80,6 +83,11 @@ class RecordingLevel implements WorldGenLevel {
 	private final ServerLevel level;
 	/** Where blocks are taken down, packed position to block state id. */
 	private final Long2IntOpenHashMap recorded = new Long2IntOpenHashMap();
+	/**
+	 * The block entities that went with those blocks, so that a piece which then writes a loot table
+	 * onto a chest has somewhere to write it. Absent for anything that is not an entity block.
+	 */
+	private final Long2ObjectOpenHashMap<BlockEntity> blockEntities = new Long2ObjectOpenHashMap<BlockEntity>();
 	/** Blocks outside this are dropped, so that a piece reaching out of the structure cannot grow it. */
 	private final BoundingBox limit;
 	/** Where the structure begins; everything under it reads as ground rather than as open air. */
@@ -104,6 +112,14 @@ class RecordingLevel implements WorldGenLevel {
 
 	/** Takes a block down. Answers whether there is still room for more. */
 	boolean record(BlockPos pos, BlockState state) {
+		return record(pos, state, null);
+	}
+
+	/**
+	 * Takes a block down, and the nbt a template wrote for it, so that a chest's loot table is not
+	 * thrown away with the rest of what the template knew about the block.
+	 */
+	boolean record(BlockPos pos, BlockState state, CompoundTag nbt) {
 		if (full || !limit.isInside(pos)) {
 			return !full;
 		}
@@ -112,14 +128,45 @@ class RecordingLevel implements WorldGenLevel {
 			return false;
 		}
 		// The first block to reach a position wins, the way an earlier piece is not overwritten by a
-		// later one standing in the same space
-		recorded.putIfAbsent(pos.asLong(), Block.getId(state));
+		// later one standing in the same space. The position is copied: pieces reuse a mutable one.
+		final BlockPos stored = pos.immutable();
+		if (recorded.putIfAbsent(stored.asLong(), Block.getId(state)) == -1) {
+			rememberBlockEntity(stored, state, nbt);
+		}
 		return true;
+	}
+
+	/**
+	 * Builds the block entity a chest (or anything like it) carries, so that a later write of a loot
+	 * table has something to land on. A template's nbt is loaded into it where there is some; a piece
+	 * that places a chest and then names a loot table writes through {@link #getBlockEntity} instead.
+	 */
+	private void rememberBlockEntity(BlockPos pos, BlockState state, CompoundTag nbt) {
+		if (!(state.getBlock() instanceof EntityBlock entityBlock)) {
+			return;
+		}
+		try {
+			final BlockEntity entity = entityBlock.newBlockEntity(pos, state);
+			if (entity == null) {
+				return;
+			}
+			if (nbt != null) {
+				entity.loadWithComponents(nbt.copy(), level.registryAccess());
+			}
+			blockEntities.put(pos.asLong(), entity);
+		} catch (Throwable t) {
+			// One block entity that cannot be built costs its loot table, not the preview
+		}
 	}
 
 	/** Everything taken down so far, packed position to block state id. Shared; do not modify. */
 	Long2IntOpenHashMap getRecorded() {
 		return recorded;
+	}
+
+	/** The block entities taken down with the blocks. Shared; do not modify. */
+	Long2ObjectOpenHashMap<BlockEntity> getBlockEntities() {
+		return blockEntities;
 	}
 
 	int getRecordedCount() {
@@ -170,12 +217,13 @@ class RecordingLevel implements WorldGenLevel {
 
 	@Override
 	public BlockEntity getBlockEntity(BlockPos pos) {
-		return null;
+		return blockEntities.get(pos.asLong());
 	}
 
 	@Override
 	public <T extends BlockEntity> Optional<T> getBlockEntity(BlockPos pos, BlockEntityType<T> type) {
-		return Optional.empty();
+		final BlockEntity entity = getBlockEntity(pos);
+		return entity != null && entity.getType() == type ? Optional.of((T) entity) : Optional.empty();
 	}
 
 	@Override

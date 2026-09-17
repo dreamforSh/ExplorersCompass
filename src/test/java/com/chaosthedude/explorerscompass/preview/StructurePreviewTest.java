@@ -167,6 +167,51 @@ class StructurePreviewTest {
 	}
 
 	@Test
+	void lootMarkersTravelWithTheTablesTheyName() {
+		final String[] tableIds = { "minecraft:chests/simple_dungeon", "" };
+		final int[][] tableItems = { { 11, 22, 33 }, { 7 } };
+		final int[] markerPositions = { StructurePreview.pack(4, 2, 6), StructurePreview.pack(8, 1, 3) };
+		final int[] markerStates = { 41, 42 };
+		final int[] markerTables = { 0, 1 };
+		final StructurePreview sent = new StructurePreview(16, 8, 16, 1, 16, 8, 16, 1, 0, false,
+				new int[] { 7 }, new int[] { StructurePreview.pack(0, 0, 0) }, new int[] { 0 },
+				new int[0], new int[0], new int[0], new int[0], new int[0],
+				tableIds, tableItems, markerPositions, markerStates, markerTables);
+
+		final FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
+		sent.write(buf);
+		final StructurePreview received = StructurePreview.read(buf);
+
+		assertEquals(0, buf.readableBytes(), "the preview was not read back to the end of what it wrote");
+		assertEquals(2, received.getLootTableCount());
+		assertEquals("minecraft:chests/simple_dungeon", received.getLootTableId(0));
+		assertEquals("", received.getLootTableId(1));
+		assertEquals(11, received.getLootTableItems(0)[0]);
+		assertEquals(22, received.getLootTableItems(0)[1]);
+		assertEquals(33, received.getLootTableItems(0)[2]);
+		assertEquals(7, received.getLootTableItems(1)[0]);
+		assertEquals(2, received.getLootMarkerCount());
+		assertEquals(4, received.getLootMarkerX(0));
+		assertEquals(2, received.getLootMarkerY(0));
+		assertEquals(6, received.getLootMarkerZ(0));
+		assertEquals(8, received.getLootMarkerX(1));
+		assertEquals(0, received.getLootMarkerTableIndex(0));
+		assertEquals(1, received.getLootMarkerTableIndex(1));
+	}
+
+	@Test
+	void aMarkerNamingNoTableIsRefused() {
+		final StructurePreview sent = new StructurePreview(4, 4, 4, 1, 4, 4, 4, 1, 0, false,
+				new int[] { 7 }, new int[] { StructurePreview.pack(0, 0, 0) }, new int[] { 0 },
+				new int[0], new int[0], new int[0], new int[0], new int[0],
+				new String[] { "minecraft:chests/simple_dungeon" }, new int[][] { new int[0] },
+				new int[] { StructurePreview.pack(1, 1, 1) }, new int[] { 5 }, new int[] { 1 });
+		final FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
+		sent.write(buf);
+		assertThrows(DecoderException.class, () -> StructurePreview.read(buf));
+	}
+
+	@Test
 	void aStructureThatFitsTheGridIsShownBlockForBlock() {
 		// Nothing is worth shrinking until it is larger than the grid it has to fit on
 		assertEquals(1, StructurePreviewBuilder.stepFor(7, 5, 8, 48));

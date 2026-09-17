@@ -108,6 +108,10 @@
     "string.explorerscompass.tooltip.renderMode": "Рисует структуру либо её блоками с текстурами, либо плоскими цветами.",
     "string.explorerscompass.tooltip.renderMode.cost": "Текстуры для большой структуры строятся не сразу; цвета появляются мгновенно.",
     "string.explorerscompass.tooltip.layerSlider": "Срезает структуру сверху слой за слоем, чтобы заглянуть внутрь.",
+    "string.explorerscompass.lootMarkers": "Сундуки",
+    "string.explorerscompass.tooltip.lootMarkers": "Отмечает каждый сундук и контейнер с добычей, даже сквозь стены.",
+    "string.explorerscompass.previewLootMarkers": "Сундуки",
+    "string.explorerscompass.noLootTable": "Нет таблицы добычи",
 
     "_comment.waypoints": "STRINGS - WAYPOINTS",
     "string.explorerscompass.waypoints": "Путевые точки",
@@ -295,6 +299,8 @@
     "explorerscompass.configuration.directionBarBackground.tooltip": "Рисует полосу на собственной панели. Выкл — остаются только отметки со своими тенями.",
     "explorerscompass.configuration.structurePreviewAutoSpin": "Вращать предпросмотр",
     "explorerscompass.configuration.structurePreviewAutoSpin.tooltip": "Медленно вращает предпросмотр структуры сам по себе. Кнопка на экране предпросмотра тоже переключает это.",
+    "explorerscompass.configuration.structurePreviewLootMarkers": "Отмечать сундуки на предпросмотре",
+    "explorerscompass.configuration.structurePreviewLootMarkers.tooltip": "Отмечает сундуки и другие контейнеры с добычей на предпросмотре сооружения, даже сквозь стены. Кнопка на экране предпросмотра тоже переключает это.",
     "explorerscompass.configuration.structurePreviewDetailLimit": "Предел текстурного предпросмотра",
     "explorerscompass.configuration.structurePreviewDetailLimit.tooltip": "Предпросмотры с большим числом ячеек открываются плоскими цветами, а текстуры строятся в фоне. Кнопка на экране предпросмотра переключает в любую сторону.",
 
