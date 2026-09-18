@@ -13,11 +13,15 @@
     "LootEntryConditionsAccessor",
     "LootItemAccessor",
     "LootPoolEntriesAccessor",
+    "LootPoolSingletonFunctionsAccessor",
     "LootPoolSingletonWeightAccessor",
     "LootTablePoolsAccessor",
     "NestedLootTableAccessor",
+    "SetItemCountFunctionAccessor",
+    "SetPotionFunctionAccessor",
     "SinglePoolElementTemplateAccessor",
     "StructureTemplatePalettesAccessor",
-    "TagEntryAccessor"
+    "TagEntryAccessor",
+    "TemplateStructurePieceInvoker"
   ]
 }

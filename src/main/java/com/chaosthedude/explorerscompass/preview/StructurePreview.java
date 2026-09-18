@@ -2,6 +2,7 @@ package com.chaosthedude.explorerscompass.preview;
 
 import io.netty.handler.codec.DecoderException;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -97,14 +98,18 @@ public class StructurePreview {
 	 * An empty string is a container that had no table.
 	 */
 	private final String[] lootTableIds;
-	/** The items each table may drop, as ids into the item registry, parallel to {@link #lootTableIds}. */
-	private final int[][] lootTableItems;
-	/** How likely each item is to appear, in thousandths, parallel to {@link #lootTableItems}. */
-	private final int[][] lootTableChances;
+	/**
+	 * What each table may drop, parallel to {@link #lootTableIds}: the items, how likely each is,
+	 * how many of it come at once, whether it comes enchanted, and which potion a bottle holds.
+	 */
+	private final LootTableItems.Drops[] lootTableDrops;
 	/** Where the loot containers stand, packed the same way as the cells. */
 	private final int[] lootMarkerPositions;
-	/** What each container is, as an id into the block state registry, parallel to it. */
-	private final int[] lootMarkerStates;
+	/**
+	 * What each container is drawn as, as an id into the item registry, parallel to it. An item
+	 * rather than a block, since a container can be a minecart as well as a chest.
+	 */
+	private final int[] lootMarkerIcons;
 	/** Which entry of {@link #lootTableIds} each marker names, parallel to it. */
 	private final int[] lootMarkerTables;
 
@@ -113,10 +118,10 @@ public class StructurePreview {
 	}
 
 	StructurePreview(int gridX, int gridY, int gridZ, int step, int blockX, int blockY, int blockZ, int pieces, int outlinedPieces, boolean truncated, int[] palette, int[] positions, int[] paletteIndices, int[] componentPositions, int[] componentStates, int[] interiorRunStarts, int[] interiorRunLengths, int[] interiorRunPalette) {
-		this(gridX, gridY, gridZ, step, blockX, blockY, blockZ, pieces, outlinedPieces, truncated, palette, positions, paletteIndices, componentPositions, componentStates, interiorRunStarts, interiorRunLengths, interiorRunPalette, new String[0], new int[0][], new int[0][], new int[0], new int[0], new int[0]);
+		this(gridX, gridY, gridZ, step, blockX, blockY, blockZ, pieces, outlinedPieces, truncated, palette, positions, paletteIndices, componentPositions, componentStates, interiorRunStarts, interiorRunLengths, interiorRunPalette, new String[0], new LootTableItems.Drops[0], new int[0], new int[0], new int[0]);
 	}
 
-	StructurePreview(int gridX, int gridY, int gridZ, int step, int blockX, int blockY, int blockZ, int pieces, int outlinedPieces, boolean truncated, int[] palette, int[] positions, int[] paletteIndices, int[] componentPositions, int[] componentStates, int[] interiorRunStarts, int[] interiorRunLengths, int[] interiorRunPalette, String[] lootTableIds, int[][] lootTableItems, int[][] lootTableChances, int[] lootMarkerPositions, int[] lootMarkerStates, int[] lootMarkerTables) {
+	StructurePreview(int gridX, int gridY, int gridZ, int step, int blockX, int blockY, int blockZ, int pieces, int outlinedPieces, boolean truncated, int[] palette, int[] positions, int[] paletteIndices, int[] componentPositions, int[] componentStates, int[] interiorRunStarts, int[] interiorRunLengths, int[] interiorRunPalette, String[] lootTableIds, LootTableItems.Drops[] lootTableDrops, int[] lootMarkerPositions, int[] lootMarkerIcons, int[] lootMarkerTables) {
 		this.gridX = gridX;
 		this.gridY = gridY;
 		this.gridZ = gridZ;
@@ -136,10 +141,9 @@ public class StructurePreview {
 		this.interiorRunLengths = interiorRunLengths;
 		this.interiorRunPalette = interiorRunPalette;
 		this.lootTableIds = lootTableIds;
-		this.lootTableItems = lootTableItems;
-		this.lootTableChances = lootTableChances;
+		this.lootTableDrops = lootTableDrops;
 		this.lootMarkerPositions = lootMarkerPositions;
-		this.lootMarkerStates = lootMarkerStates;
+		this.lootMarkerIcons = lootMarkerIcons;
 		this.lootMarkerTables = lootMarkerTables;
 		int interiorCells = 0;
 		for (int length : interiorRunLengths) {
@@ -326,12 +330,36 @@ public class StructurePreview {
 
 	/** The items the given table may drop, as ids into the item registry. */
 	public int[] getLootTableItems(int index) {
-		return lootTableItems[index];
+		return lootTableDrops[index].itemIds;
 	}
 
 	/** How likely each item of the given table is to appear, in thousandths, parallel to the items. */
 	public int[] getLootTableChances(int index) {
-		return lootTableChances[index];
+		return lootTableDrops[index].permilles;
+	}
+
+	/** The fewest of each item one roll of the given table puts in the stack, parallel to the items. */
+	public int[] getLootTableMinCounts(int index) {
+		return lootTableDrops[index].minCounts;
+	}
+
+	/** The most of each item one roll of the given table puts in the stack, parallel to the items. */
+	public int[] getLootTableMaxCounts(int index) {
+		return lootTableDrops[index].maxCounts;
+	}
+
+	/** Whether each item of the given table comes enchanted, parallel to the items. */
+	public boolean isLootTableItemEnchanted(int index, int item) {
+		return (lootTableDrops[index].flags[item] & LootTableItems.FLAG_ENCHANTED) != 0;
+	}
+
+	/**
+	 * The potion the given item of the given table holds, as an id into the potion registry, or a
+	 * negative number for an item that is not a potion. A potion the receiving side does not know
+	 * draws as the plain bottle, which is what an id no longer in the registry would mean anyway.
+	 */
+	public int getLootTableItemPotion(int index, int item) {
+		return lootTableDrops[index].potions[item];
 	}
 
 	/** How many loot containers this preview marks. */
@@ -355,8 +383,12 @@ public class StructurePreview {
 		return lootMarkerPositions[index];
 	}
 
-	public BlockState getLootMarkerState(int index) {
-		return Block.stateById(lootMarkerStates[index]);
+	/**
+	 * The item the given marker is drawn as: the container itself, or the minecart it rides in. An
+	 * item the receiving side does not know resolves to air, which whoever draws it stands in for.
+	 */
+	public Item getLootMarkerIcon(int index) {
+		return Item.byId(lootMarkerIcons[index]);
 	}
 
 	/** Which loot table the given marker names, as an index into {@link #getLootTableId}. */
@@ -423,17 +455,23 @@ public class StructurePreview {
 		buf.writeVarInt(lootTableIds.length);
 		for (int i = 0; i < lootTableIds.length; i++) {
 			buf.writeUtf(lootTableIds[i], MAX_LOOT_TABLE_ID);
-			buf.writeVarInt(lootTableItems[i].length);
-			for (int item = 0; item < lootTableItems[i].length; item++) {
-				buf.writeVarInt(lootTableItems[i][item]);
-				buf.writeVarInt(lootTableChances[i][item]);
+			final LootTableItems.Drops drops = lootTableDrops[i];
+			buf.writeVarInt(drops.itemIds.length);
+			for (int item = 0; item < drops.itemIds.length; item++) {
+				buf.writeVarInt(drops.itemIds[item]);
+				buf.writeVarInt(drops.permilles[item]);
+				buf.writeVarInt(drops.minCounts[item]);
+				buf.writeVarInt(drops.maxCounts[item]);
+				buf.writeVarInt(drops.flags[item]);
+				// One up, so that no potion at all is the one-byte zero rather than a negative number
+				buf.writeVarInt(drops.potions[item] + 1);
 			}
 		}
 
 		buf.writeVarInt(lootMarkerPositions.length);
 		for (int i = 0; i < lootMarkerPositions.length; i++) {
 			buf.writeVarInt(lootMarkerPositions[i]);
-			buf.writeVarInt(lootMarkerStates[i]);
+			buf.writeVarInt(lootMarkerIcons[i]);
 			buf.writeVarInt(lootMarkerTables[i]);
 		}
 	}
@@ -517,8 +555,7 @@ public class StructurePreview {
 			throw new DecoderException("Structure preview carries " + tableCount + " loot tables");
 		}
 		final String[] lootTableIds = new String[tableCount];
-		final int[][] lootTableItems = new int[tableCount][];
-		final int[][] lootTableChances = new int[tableCount][];
+		final LootTableItems.Drops[] lootTableDrops = new LootTableItems.Drops[tableCount];
 		for (int i = 0; i < tableCount; i++) {
 			lootTableIds[i] = buf.readUtf(MAX_LOOT_TABLE_ID);
 			final int itemCount = buf.readVarInt();
@@ -527,16 +564,32 @@ public class StructurePreview {
 			}
 			final int[] items = new int[itemCount];
 			final int[] chances = new int[itemCount];
+			final int[] minCounts = new int[itemCount];
+			final int[] maxCounts = new int[itemCount];
+			final int[] flags = new int[itemCount];
+			final int[] potions = new int[itemCount];
 			for (int item = 0; item < itemCount; item++) {
 				items[item] = buf.readVarInt();
 				final int chance = buf.readVarInt();
-				if (chance < 0 || chance > 1000) {
+				if (chance < 0 || chance > LootTableItems.PERMILLE_ALWAYS) {
 					throw new DecoderException("Structure preview names a loot chance of " + chance);
 				}
 				chances[item] = chance;
+				final int min = buf.readVarInt();
+				final int max = buf.readVarInt();
+				if (min < 1 || max < min || max > LootTableItems.MAX_COUNT) {
+					throw new DecoderException("Structure preview names a loot count of " + min + " to " + max);
+				}
+				minCounts[item] = min;
+				maxCounts[item] = max;
+				flags[item] = buf.readVarInt();
+				final int potion = buf.readVarInt() - 1;
+				if (potion < LootTableItems.NO_POTION) {
+					throw new DecoderException("Structure preview names potion " + potion);
+				}
+				potions[item] = potion;
 			}
-			lootTableItems[i] = items;
-			lootTableChances[i] = chances;
+			lootTableDrops[i] = new LootTableItems.Drops(items, chances, minCounts, maxCounts, flags, potions);
 		}
 
 		final int markerCount = buf.readVarInt();
@@ -544,11 +597,11 @@ public class StructurePreview {
 			throw new DecoderException("Structure preview carries " + markerCount + " loot markers");
 		}
 		final int[] lootMarkerPositions = new int[markerCount];
-		final int[] lootMarkerStates = new int[markerCount];
+		final int[] lootMarkerIcons = new int[markerCount];
 		final int[] lootMarkerTables = new int[markerCount];
 		for (int i = 0; i < markerCount; i++) {
 			lootMarkerPositions[i] = buf.readVarInt();
-			lootMarkerStates[i] = buf.readVarInt();
+			lootMarkerIcons[i] = buf.readVarInt();
 			final int tableIndex = buf.readVarInt();
 			if (tableIndex < 0 || tableIndex >= tableCount) {
 				throw new DecoderException("Structure preview names loot table " + tableIndex + " of " + tableCount);
@@ -556,7 +609,7 @@ public class StructurePreview {
 			lootMarkerTables[i] = tableIndex;
 		}
 
-		return new StructurePreview(gridX, gridY, gridZ, step, blockX, blockY, blockZ, pieces, outlinedPieces, truncated, palette, positions, paletteIndices, componentPositions, componentStates, interiorRunStarts, interiorRunLengths, interiorRunPalette, lootTableIds, lootTableItems, lootTableChances, lootMarkerPositions, lootMarkerStates, lootMarkerTables);
+		return new StructurePreview(gridX, gridY, gridZ, step, blockX, blockY, blockZ, pieces, outlinedPieces, truncated, palette, positions, paletteIndices, componentPositions, componentStates, interiorRunStarts, interiorRunLengths, interiorRunPalette, lootTableIds, lootTableDrops, lootMarkerPositions, lootMarkerIcons, lootMarkerTables);
 	}
 
 }

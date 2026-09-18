@@ -10,6 +10,8 @@ import org.junit.jupiter.api.Test;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.DecoderException;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
 
 /**
  * Holds a preview to what it says about itself, on both sides of the wire.
@@ -169,15 +171,20 @@ class StructurePreviewTest {
 	@Test
 	void lootMarkersTravelWithTheTablesTheyName() {
 		final String[] tableIds = { "minecraft:chests/simple_dungeon", "" };
-		final int[][] tableItems = { { 11, 22, 33 }, { 7 } };
-		final int[][] tableChances = { { 200, 50, 10 }, { 1000 } };
+		// Three drops of the first table: a plain one, a stack that comes enchanted, and a potion
+		final LootTableItems.Drops dungeon = new LootTableItems.Drops(
+				new int[] { 11, 22, 33 }, new int[] { 200, 50, 10 },
+				new int[] { 1, 2, 1 }, new int[] { 4, 2, 1 },
+				new int[] { 0, LootTableItems.FLAG_ENCHANTED, 0 }, new int[] { LootTableItems.NO_POTION, LootTableItems.NO_POTION, 5 });
+		final LootTableItems.Drops placed = LootTableItems.Drops.certain(new int[] { 7 });
 		final int[] markerPositions = { StructurePreview.pack(4, 2, 6), StructurePreview.pack(8, 1, 3) };
-		final int[] markerStates = { 41, 42 };
+		// Drawn as items rather than blocks, since a mineshaft's chests ride in minecarts
+		final int[] markerIcons = { Item.getId(Items.CHEST), Item.getId(Items.CHEST_MINECART) };
 		final int[] markerTables = { 0, 1 };
 		final StructurePreview sent = new StructurePreview(16, 8, 16, 1, 16, 8, 16, 1, 0, false,
 				new int[] { 7 }, new int[] { StructurePreview.pack(0, 0, 0) }, new int[] { 0 },
 				new int[0], new int[0], new int[0], new int[0], new int[0],
-				tableIds, tableItems, tableChances, markerPositions, markerStates, markerTables);
+				tableIds, new LootTableItems.Drops[] { dungeon, placed }, markerPositions, markerIcons, markerTables);
 
 		final FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
 		sent.write(buf);
@@ -195,6 +202,16 @@ class StructurePreviewTest {
 		assertEquals(50, received.getLootTableChances(0)[1]);
 		assertEquals(10, received.getLootTableChances(0)[2]);
 		assertEquals(1000, received.getLootTableChances(1)[0]);
+		assertEquals(1, received.getLootTableMinCounts(0)[0]);
+		assertEquals(4, received.getLootTableMaxCounts(0)[0]);
+		assertEquals(2, received.getLootTableMinCounts(0)[1]);
+		assertEquals(2, received.getLootTableMaxCounts(0)[1]);
+		assertFalse(received.isLootTableItemEnchanted(0, 0));
+		assertTrue(received.isLootTableItemEnchanted(0, 1));
+		assertEquals(LootTableItems.NO_POTION, received.getLootTableItemPotion(0, 0));
+		assertEquals(5, received.getLootTableItemPotion(0, 2));
+		assertEquals(1, received.getLootTableMinCounts(1)[0]);
+		assertEquals(LootTableItems.NO_POTION, received.getLootTableItemPotion(1, 0));
 		assertEquals(2, received.getLootMarkerCount());
 		assertEquals(4, received.getLootMarkerX(0));
 		assertEquals(2, received.getLootMarkerY(0));
@@ -202,6 +219,8 @@ class StructurePreviewTest {
 		assertEquals(8, received.getLootMarkerX(1));
 		assertEquals(0, received.getLootMarkerTableIndex(0));
 		assertEquals(1, received.getLootMarkerTableIndex(1));
+		assertEquals(Items.CHEST, received.getLootMarkerIcon(0));
+		assertEquals(Items.CHEST_MINECART, received.getLootMarkerIcon(1));
 	}
 
 	@Test
@@ -209,8 +228,22 @@ class StructurePreviewTest {
 		final StructurePreview sent = new StructurePreview(4, 4, 4, 1, 4, 4, 4, 1, 0, false,
 				new int[] { 7 }, new int[] { StructurePreview.pack(0, 0, 0) }, new int[] { 0 },
 				new int[0], new int[0], new int[0], new int[0], new int[0],
-				new String[] { "minecraft:chests/simple_dungeon" }, new int[][] { new int[0] }, new int[][] { new int[0] },
+				new String[] { "minecraft:chests/simple_dungeon" }, new LootTableItems.Drops[] { LootTableItems.Drops.EMPTY },
 				new int[] { StructurePreview.pack(1, 1, 1) }, new int[] { 5 }, new int[] { 1 });
+		final FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
+		sent.write(buf);
+		assertThrows(DecoderException.class, () -> StructurePreview.read(buf));
+	}
+
+	@Test
+	void aDropCountedAsNoneIsRefused() {
+		// A stack of none is not an item that appears, so a count that says so is a malformed packet
+		final LootTableItems.Drops drops = new LootTableItems.Drops(new int[] { 11 }, new int[] { 500 }, new int[] { 0 }, new int[] { 1 }, new int[] { 0 }, new int[] { LootTableItems.NO_POTION });
+		final StructurePreview sent = new StructurePreview(4, 4, 4, 1, 4, 4, 4, 1, 0, false,
+				new int[] { 7 }, new int[] { StructurePreview.pack(0, 0, 0) }, new int[] { 0 },
+				new int[0], new int[0], new int[0], new int[0], new int[0],
+				new String[] { "minecraft:chests/simple_dungeon" }, new LootTableItems.Drops[] { drops },
+				new int[] { StructurePreview.pack(1, 1, 1) }, new int[] { 5 }, new int[] { 0 });
 		final FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
 		sent.write(buf);
 		assertThrows(DecoderException.class, () -> StructurePreview.read(buf));

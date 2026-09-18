@@ -2,6 +2,7 @@ package com.chaosthedude.explorerscompass.gui;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,6 +35,7 @@ import org.joml.Matrix4fStack;
 import org.joml.Vector3f;
 import org.joml.Vector4f;
 
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -55,9 +57,12 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.util.Mth;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.Biomes;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.EntityBlock;
+import net.minecraft.world.level.block.ShulkerBoxBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import com.chaosthedude.explorerscompass.util.RenderUtils;
@@ -220,6 +225,8 @@ public class StructurePreviewView implements AutoCloseable {
 	private int visibleLayers = Integer.MAX_VALUE;
 	private boolean dragging;
 	private boolean panning;
+	/** Whether something on the screen is being read off the model, which turning it would spoil. */
+	private boolean holdingStill;
 	private long lastFrameAt;
 	/** What the model is drawn as, or null to let how large it is decide. */
 	private PreviewMeshBuilder.Mode requestedMode;
@@ -336,6 +343,14 @@ public class StructurePreviewView implements AutoCloseable {
 
 	public boolean isPanning() {
 		return panning;
+	}
+
+	/**
+	 * Keeps the model from turning on its own while something pinned to it is being looked at: a
+	 * badge that drifted away under the pointer would take its tooltip with it.
+	 */
+	public void setHoldingStill(boolean holdingStill) {
+		this.holdingStill = holdingStill;
 	}
 
 	/** Turns the model with the pointer. Looking past straight up or down would flip it over. */
@@ -489,65 +504,301 @@ public class StructurePreviewView implements AutoCloseable {
 		guiGraphics.disableScissor();
 	}
 
-	private static final int LOOT_MARKER_HIT = 12;
-	private static final int LOOT_MARKER_BACK = 0xC0000000;
-	private static final int LOOT_MARKER_HOVER = 0xE0FFC24B;
+	// Loot badges
+
+	/** Badges whose anchors fall within this many pixels of each other are drawn as one. */
+	private static final int BADGE_CLUSTER_RADIUS = 11;
+	/** How far the pointer may be from a badge's anchor and still be taken as pointing at it. */
+	private static final int BADGE_ANCHOR_HIT = 7;
+	/** The box an icon sits in, and how far its bottom edge floats above the block it stands for. */
+	private static final int BADGE_SIZE = 18;
+	private static final int BADGE_LIFT = 5;
+	private static final int BADGE_FILL_TOP = 0x1C2028;
+	private static final int BADGE_FILL_BOTTOM = 0x0C0E12;
+	private static final int BADGE_FILL_HOVER_TOP = 0x3A3222;
+	private static final int BADGE_FILL_HOVER_BOTTOM = 0x1E1A10;
+	private static final int BADGE_BORDER = 0x70FFFFFF;
+	private static final int BADGE_BORDER_MUTED = 0x38FFFFFF;
+	private static final int BADGE_BORDER_HOVER = 0xFFFFC24B;
+	private static final int BADGE_GLOW_HOVER = 0x50FFC24B;
+	private static final int BADGE_STEM = 0x90FFFFFF;
+	private static final int BADGE_STEM_HOVER = 0xFFFFC24B;
+	private static final int BADGE_ICON_MUTE = 0x80000000;
+	private static final int BADGE_COUNT_BACKGROUND = 0xFFFFC24B;
+	private static final int BADGE_COUNT_TEXT = 0x1A1408;
+	/** How far in front of the interface an item is drawn, and a little more, so that what is laid over one shows. */
+	private static final float OVER_ITEMS = 200.0F;
 
 	/**
-	 * The loot marker nearest the pointer, or -1. Markers above the cut of the layer slider are left
-	 * out, since those floors are not being shown.
+	 * One badge on the screen: the loot containers whose anchors fell together at one spot, and
+	 * where. A badge stands for one container most of the time and for a handful where a room is
+	 * lined with them, which is what keeps a trial chamber from being a heap of icons.
 	 */
-	public int hoveredLootMarker(StructurePreview preview, double mouseX, double mouseY) {
-		if (lastModelView == null || lastProjection == null || preview.getLootMarkerCount() == 0) {
-			return -1;
+	public static final class LootBadge {
+
+		/** Where the block itself lands on the screen, which the badge floats above. */
+		private final float anchorX;
+		private final float anchorY;
+		/** How far into the screen the block is, from -1 nearest to 1 farthest. */
+		private final float depth;
+		/** The markers gathered here, nearest first. */
+		private final IntArrayList markers = new IntArrayList();
+		/** The marker drawn as the badge's icon: whichever of them is most worth seeing. */
+		private int shown;
+		private int shownRank;
+		private boolean hasLoot;
+
+		private LootBadge(float anchorX, float anchorY, float depth) {
+			this.anchorX = anchorX;
+			this.anchorY = anchorY;
+			this.depth = depth;
 		}
-		final float[] screen = new float[2];
-		final int layers = layersShown(preview);
-		int best = -1;
-		double bestDist = (double) LOOT_MARKER_HIT * LOOT_MARKER_HIT;
-		for (int marker = 0; marker < preview.getLootMarkerCount(); marker++) {
-			if (preview.getLootMarkerY(marker) >= layers) {
-				continue;
-			}
-			if (!projectLootMarker(preview, marker, screen)) {
-				continue;
-			}
-			final double dx = mouseX - screen[0];
-			final double dy = mouseY - screen[1];
-			final double dist = dx * dx + dy * dy;
-			if (dist < bestDist) {
-				bestDist = dist;
-				best = marker;
+
+		private void add(StructurePreview preview, int marker) {
+			markers.add(marker);
+			final boolean named = !preview.getLootTableId(preview.getLootMarkerTableIndex(marker)).isEmpty();
+			final boolean holdsSomething = named || preview.getLootTableItems(preview.getLootMarkerTableIndex(marker)).length > 0;
+			hasLoot |= holdsSomething;
+			// A chest stands for a room better than the pot beside it does, and anything that holds
+			// loot better than anything that does not
+			final int rank = (holdsSomething ? 2 : 0) + (isChestLike(preview.getLootMarkerIcon(marker)) ? 1 : 0);
+			if (markers.size() == 1 || rank > shownRank) {
+				shown = marker;
+				shownRank = rank;
 			}
 		}
-		return best;
+
+		private static boolean isChestLike(Item item) {
+			if (item == Items.CHEST || item == Items.TRAPPED_CHEST || item == Items.BARREL || item == Items.CHEST_MINECART || item == Items.VAULT) {
+				return true;
+			}
+			return item instanceof BlockItem blockItem && blockItem.getBlock() instanceof ShulkerBoxBlock;
+		}
+
+		/** Names this badge across frames: the marker it is drawn as never changes while the view stands still. */
+		public int getId() {
+			return markers.getInt(0);
+		}
+
+		/** The markers gathered here, nearest first. Shared; do not modify. */
+		public IntArrayList getMarkers() {
+			return markers;
+		}
+
+		public int getCount() {
+			return markers.size();
+		}
+
+		/** The marker whose icon the badge is drawn with. */
+		public int getShownMarker() {
+			return shown;
+		}
+
+		/** Whether any container here names a loot table or holds anything. */
+		public boolean hasLoot() {
+			return hasLoot;
+		}
+
+		/** Whether any container here names the given table, by its index into the preview's tables. */
+		public boolean namesTable(StructurePreview preview, int table) {
+			for (int i = 0; i < markers.size(); i++) {
+				if (preview.getLootMarkerTableIndex(markers.getInt(i)) == table) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		public int getAnchorX() {
+			return Math.round(anchorX);
+		}
+
+		public int getAnchorY() {
+			return Math.round(anchorY);
+		}
+
+		public int getBoxLeft() {
+			return getAnchorX() - BADGE_SIZE / 2;
+		}
+
+		public int getBoxTop() {
+			return getAnchorY() - BADGE_LIFT - BADGE_SIZE;
+		}
+
+		public int getBoxRight() {
+			return getBoxLeft() + BADGE_SIZE;
+		}
+
+		public int getBoxBottom() {
+			return getBoxTop() + BADGE_SIZE;
+		}
+
+		/** Whether the pointer is on the box, or close enough to the block under it. */
+		public boolean isPointedAt(double mouseX, double mouseY) {
+			if (mouseX >= getBoxLeft() - 1 && mouseX < getBoxRight() + 1 && mouseY >= getBoxTop() - 1 && mouseY < getBoxBottom() + 1) {
+				return true;
+			}
+			final double dx = mouseX - anchorX;
+			final double dy = mouseY - anchorY;
+			return dx * dx + dy * dy <= BADGE_ANCHOR_HIT * BADGE_ANCHOR_HIT;
+		}
+
 	}
 
-	/** Pins every loot container onto the screen, through the walls, so a chest inside can be found. */
-	public void renderLootMarkers(GuiGraphics guiGraphics, StructurePreview preview, int hovered) {
-		if (lastModelView == null || preview.getLootMarkerCount() == 0) {
+	/** The badges laid out for the frame being drawn, farthest first, which is the order they are drawn in. */
+	private final List<LootBadge> badges = new ArrayList<LootBadge>();
+
+	/**
+	 * Works out where every loot container lands on the screen and gathers the ones that land
+	 * together, for the frame being drawn. Containers above the cut of the layer slider are left
+	 * out, since those floors are not being shown. Called once the model has been drawn, since it
+	 * reads the transform the model went down with.
+	 */
+	public void layoutLootBadges(StructurePreview preview) {
+		badges.clear();
+		if (lastModelView == null || lastProjection == null || preview.getLootMarkerCount() == 0) {
 			return;
 		}
-		final float[] screen = new float[2];
 		final int layers = layersShown(preview);
+		final float[] screen = new float[3];
+		final List<float[]> projected = new ArrayList<float[]>();
 		for (int marker = 0; marker < preview.getLootMarkerCount(); marker++) {
-			if (preview.getLootMarkerY(marker) >= layers) {
+			if (preview.getLootMarkerY(marker) >= layers || !projectLootMarker(preview, marker, screen)) {
 				continue;
 			}
-			if (!projectLootMarker(preview, marker, screen)) {
-				continue;
+			projected.add(new float[] { screen[0], screen[1], screen[2], marker });
+		}
+		// Nearest first, so that the badge a spot gets is anchored on the container nearest the viewer
+		projected.sort(Comparator.comparingDouble((point) -> point[2]));
+
+		for (float[] point : projected) {
+			LootBadge home = null;
+			for (LootBadge badge : badges) {
+				final float dx = point[0] - badge.anchorX;
+				final float dy = point[1] - badge.anchorY;
+				if (dx * dx + dy * dy <= BADGE_CLUSTER_RADIUS * BADGE_CLUSTER_RADIUS) {
+					home = badge;
+					break;
+				}
 			}
-			final int left = Math.round(screen[0]) - 8;
-			final int top = Math.round(screen[1]) - 8;
-			RenderUtils.drawRect(guiGraphics, left - 1, top - 1, left + 17, top + 17, marker == hovered ? LOOT_MARKER_HOVER : LOOT_MARKER_BACK);
-			ItemStack stack = new ItemStack(preview.getLootMarkerState(marker).getBlock().asItem());
+			if (home == null) {
+				home = new LootBadge(point[0], point[1], point[2]);
+				badges.add(home);
+			}
+			home.add(preview, (int) point[3]);
+		}
+		// Drawn farthest first, so that a badge nearer the viewer stands over one behind it
+		badges.sort(Comparator.comparingDouble((badge) -> -badge.depth));
+	}
+
+	/** The badges laid out for this frame. Shared; do not modify. */
+	public List<LootBadge> getLootBadges() {
+		return badges;
+	}
+
+	/** Drops the badges, for a frame that is not showing any. */
+	public void clearLootBadges() {
+		badges.clear();
+	}
+
+	/** The badge the pointer is on, nearest to the viewer where several overlap, or null. */
+	public LootBadge hoveredLootBadge(double mouseX, double mouseY) {
+		for (int i = badges.size() - 1; i >= 0; i--) {
+			if (badges.get(i).isPointedAt(mouseX, mouseY)) {
+				return badges.get(i);
+			}
+		}
+		return null;
+	}
+
+	/** The badge drawn as the given marker, if it is still on the screen. */
+	public LootBadge lootBadgeById(int id) {
+		for (LootBadge badge : badges) {
+			if (badge.getId() == id) {
+				return badge;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Pins every loot container onto the screen, through the walls, so a chest inside can be found.
+	 * Each is a small box floating just above its block on a stem, with the container's icon in it
+	 * and a count where several stand together; one that holds nothing is drawn dimmer, and the one
+	 * being pointed at is picked out in the accent, as is every one naming the table that is being
+	 * pointed at in the overview, so that a table can be read against where its containers stand.
+	 *
+	 * @param highlightedTable the table whose containers are to be picked out, or a negative number for none
+	 */
+	public void renderLootBadges(GuiGraphics guiGraphics, StructurePreview preview, LootBadge hovered, int highlightedTable) {
+		if (badges.isEmpty()) {
+			return;
+		}
+		final Font font = Minecraft.getInstance().font;
+		float nearest = 1.0F;
+		float farthest = -1.0F;
+		for (LootBadge badge : badges) {
+			nearest = Math.min(nearest, badge.depth);
+			farthest = Math.max(farthest, badge.depth);
+		}
+		final float depthSpan = Math.max(1.0E-4F, farthest - nearest);
+
+		for (LootBadge badge : badges) {
+			final boolean lit = badge == hovered || (highlightedTable >= 0 && badge.namesTable(preview, highlightedTable));
+			// A little fainter the deeper into the model it stands, which is the one cue there is for
+			// depth in something drawn through every wall
+			final float behind = lit ? 0.0F : (badge.depth - nearest) / depthSpan;
+			final int fillAlpha = Math.round(Mth.lerp(behind, 0xE8, 0xA8));
+			final int lineAlpha = Math.round(Mth.lerp(behind, 1.0F, 0.6F) * 255.0F);
+			final int left = badge.getBoxLeft();
+			final int top = badge.getBoxTop();
+			final int right = badge.getBoxRight();
+			final int bottom = badge.getBoxBottom();
+			final int anchorX = badge.getAnchorX();
+			final int anchorY = badge.getAnchorY();
+
+			// The stem down to the block, and a dot on the block itself
+			RenderUtils.drawRect(guiGraphics, anchorX, bottom, anchorX + 1, anchorY - 1, lit ? BADGE_STEM_HOVER : withAlpha(BADGE_STEM, lineAlpha * 0x90 / 0xFF));
+			RenderUtils.drawRect(guiGraphics, anchorX - 1, anchorY - 1, anchorX + 2, anchorY + 2, lit ? BADGE_STEM_HOVER : withAlpha(BADGE_STEM, lineAlpha));
+
+			if (lit) {
+				RenderUtils.drawOutline(guiGraphics, left - 1, top - 1, right + 1, bottom + 1, BADGE_GLOW_HOVER);
+			}
+			RenderUtils.drawVerticalGradient(guiGraphics, left, top, right, bottom, withAlpha(lit ? BADGE_FILL_HOVER_TOP : BADGE_FILL_TOP, fillAlpha), withAlpha(lit ? BADGE_FILL_HOVER_BOTTOM : BADGE_FILL_BOTTOM, fillAlpha));
+			final int border = lit ? BADGE_BORDER_HOVER : badge.hasLoot() ? BADGE_BORDER : BADGE_BORDER_MUTED;
+			RenderUtils.drawInnerOutline(guiGraphics, left, top, right, bottom, lit ? border : withAlpha(border, (border >>> 24) * lineAlpha / 0xFF));
+
+			ItemStack stack = new ItemStack(preview.getLootMarkerIcon(badge.getShownMarker()));
 			if (stack.isEmpty()) {
 				stack = new ItemStack(Items.CHEST);
 			}
-			guiGraphics.renderItem(stack, left, top);
+			guiGraphics.renderItem(stack, left + 1, top + 1);
+
+			// Anything laid over the icon has to be lifted above it: an item is drawn some way in
+			// front of the interface, and a plain fill would land behind it
+			guiGraphics.pose().pushPose();
+			guiGraphics.pose().translate(0.0F, 0.0F, OVER_ITEMS);
+			if (!badge.hasLoot()) {
+				// Dimmed rather than left out: an empty chest is still a chest, and worth knowing about
+				RenderUtils.drawRect(guiGraphics, left + 1, top + 1, right - 1, bottom - 1, BADGE_ICON_MUTE);
+			}
+			if (badge.getCount() > 1) {
+				final String count = String.valueOf(badge.getCount());
+				final int chipWidth = font.width(count) + 3;
+				final int chipLeft = right - chipWidth + 2;
+				final int chipTop = top - 3;
+				RenderUtils.drawRect(guiGraphics, chipLeft, chipTop, chipLeft + chipWidth, chipTop + 9, BADGE_COUNT_BACKGROUND);
+				guiGraphics.drawString(font, count, chipLeft + 2, chipTop + 1, BADGE_COUNT_TEXT, false);
+			}
+			guiGraphics.pose().popPose();
 		}
 	}
 
+	private static int withAlpha(int colour, int alpha) {
+		return (Mth.clamp(alpha, 0, 255) << 24) | (colour & 0xFFFFFF);
+	}
+
+	/** Where the middle of the given container lands on the screen, and how deep, or false when it is off the panel. */
 	private boolean projectLootMarker(StructurePreview preview, int marker, float[] screen) {
 		final Vector4f point = new Vector4f(preview.getLootMarkerX(marker) + 0.5F, preview.getLootMarkerY(marker) + 0.5F, preview.getLootMarkerZ(marker) + 0.5F, 1.0F);
 		lastModelView.transform(point);
@@ -571,6 +822,7 @@ public class StructurePreviewView implements AutoCloseable {
 		}
 		screen[0] = x;
 		screen[1] = y;
+		screen[2] = ndcZ;
 		return true;
 	}
 
@@ -1087,7 +1339,7 @@ public class StructurePreviewView implements AutoCloseable {
 		final long now = Util.getMillis();
 		final long sinceLastFrame = now - lastFrameAt;
 		lastFrameAt = now;
-		if (dragging || panning || !ConfigHandler.CLIENT.structurePreviewAutoSpin.get() || sinceLastFrame <= 0L || sinceLastFrame > MAX_FRAME_MILLIS) {
+		if (dragging || panning || holdingStill || !ConfigHandler.CLIENT.structurePreviewAutoSpin.get() || sinceLastFrame <= 0L || sinceLastFrame > MAX_FRAME_MILLIS) {
 			return;
 		}
 		yaw += SPIN_DEGREES_PER_SECOND * sinceLastFrame / 1000.0F;

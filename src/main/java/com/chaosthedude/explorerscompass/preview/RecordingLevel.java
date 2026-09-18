@@ -1,5 +1,6 @@
 package com.chaosthedude.explorerscompass.preview;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Predicate;
@@ -22,6 +23,7 @@ import net.minecraft.util.RandomSource;
 import net.minecraft.world.DifficultyInstance;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.vehicle.ContainerEntity;
 import net.minecraft.world.flag.FeatureFlagSet;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.ColorResolver;
@@ -70,6 +72,18 @@ import net.minecraft.world.ticks.LevelTickAccess;
  * structure built against whatever happens to stand at the world origin is a picture of that spot
  * rather than of the structure.
  *
+ * <p>A structure that generates underground is answered differently: everything inside its bounds
+ * that has not been taken down reads as stone, since that is what surrounds it in the world. The
+ * older underground pieces lean on this. A stronghold only carves its rooms out of blocks that are
+ * already there, and a mineshaft only furnishes a corridor it can tell is below ground, so handing
+ * either of them open air answers with a stronghold that is all doors and no walls and a mineshaft
+ * with none of its chests.
+ *
+ * <p>Within a piece the last block to reach a position is the one that stands there, as it is in
+ * the world, but only where what stood there before was air: a piece carves a room and then puts a
+ * chest down in it, and the chest has to replace the air it carved first. A block placed where an
+ * earlier piece already put one is dropped, so that a later piece cannot build over an earlier one.
+ *
  * <p>The one thing that does reach the real level is {@link #getLevel}, which has to answer with a
  * server level because its type says so. Structure pieces are handed this interface and build
  * through it; a piece that went around it to write through the level it names would be writing into
@@ -88,10 +102,18 @@ class RecordingLevel implements WorldGenLevel {
 	 * onto a chest has somewhere to write it. Absent for anything that is not an entity block.
 	 */
 	private final Long2ObjectOpenHashMap<BlockEntity> blockEntities = new Long2ObjectOpenHashMap<BlockEntity>();
+	/**
+	 * The containers that are entities rather than blocks — the chest minecarts a mineshaft parks
+	 * in its corridors — which a piece adds to the world instead of placing. Nothing else that a
+	 * piece spawns is kept.
+	 */
+	private final List<ContainerEntity> containerEntities = new ArrayList<ContainerEntity>();
 	/** Blocks outside this are dropped, so that a piece reaching out of the structure cannot grow it. */
 	private final BoundingBox limit;
 	/** Where the structure begins; everything under it reads as ground rather than as open air. */
 	private final int groundY;
+	/** Whether the structure generates underground, so that everything inside its bounds reads as ground too. */
+	private final boolean buried;
 	private final int maxBlocks;
 	private final RandomSource random;
 	private final BiomeManager biomeManager;
@@ -99,9 +121,14 @@ class RecordingLevel implements WorldGenLevel {
 	private boolean full;
 
 	RecordingLevel(ServerLevel level, BoundingBox limit, int maxBlocks, long seed) {
+		this(level, limit, maxBlocks, seed, false);
+	}
+
+	RecordingLevel(ServerLevel level, BoundingBox limit, int maxBlocks, long seed, boolean buried) {
 		this.level = level;
 		this.limit = limit;
 		this.maxBlocks = maxBlocks;
+		this.buried = buried;
 		groundY = limit.minY();
 		random = RandomSource.create(seed);
 		// Routed back through this level, so that asking which biome is somewhere is answered from the
@@ -123,16 +150,28 @@ class RecordingLevel implements WorldGenLevel {
 		if (full || !limit.isInside(pos)) {
 			return !full;
 		}
+		final long key = pos.asLong();
+		final int existing = recorded.get(key);
+		if (existing >= 0) {
+			// The first block to reach a position wins, the way an earlier piece is not overwritten by a
+			// later one standing in the same space — unless what stands there is air, which is nothing
+			// to win with. A piece carves its room before it furnishes it, and the chest it then puts
+			// down has to replace the air it carved. Replacing grows nothing, so the budget is not asked.
+			if (!state.isAir() && Block.stateById(existing).isAir()) {
+				final BlockPos stored = pos.immutable();
+				recorded.put(key, Block.getId(state));
+				rememberBlockEntity(stored, state, nbt);
+			}
+			return true;
+		}
 		if (recorded.size() >= maxBlocks) {
 			full = true;
 			return false;
 		}
-		// The first block to reach a position wins, the way an earlier piece is not overwritten by a
-		// later one standing in the same space. The position is copied: pieces reuse a mutable one.
+		// The position is copied: pieces reuse a mutable one
 		final BlockPos stored = pos.immutable();
-		if (recorded.putIfAbsent(stored.asLong(), Block.getId(state)) == -1) {
-			rememberBlockEntity(stored, state, nbt);
-		}
+		recorded.put(key, Block.getId(state));
+		rememberBlockEntity(stored, state, nbt);
 		return true;
 	}
 
@@ -169,6 +208,11 @@ class RecordingLevel implements WorldGenLevel {
 		return blockEntities;
 	}
 
+	/** The containers that were added as entities rather than placed as blocks. Shared; do not modify. */
+	List<ContainerEntity> getContainerEntities() {
+		return containerEntities;
+	}
+
 	int getRecordedCount() {
 		return recorded.size();
 	}
@@ -198,6 +242,20 @@ class RecordingLevel implements WorldGenLevel {
 		return true;
 	}
 
+	/**
+	 * Keeps the containers a piece adds to the world as entities, and drops everything else it
+	 * spawns. Answers that the entity was added, which is what a piece expects of a world; nothing
+	 * kept here is ever ticked or placed anywhere.
+	 */
+	@Override
+	public boolean addFreshEntity(Entity entity) {
+		if (entity instanceof ContainerEntity container && limit.isInside(entity.blockPosition()) && containerEntities.size() < maxBlocks) {
+			containerEntities.add(container);
+			return true;
+		}
+		return false;
+	}
+
 	// Reads are answered out of what was taken down, out of air above the structure, and out of
 	// ground below it, so that a piece meant to be dug into the ground still has something to dig into
 
@@ -207,7 +265,24 @@ class RecordingLevel implements WorldGenLevel {
 		if (stateId >= 0) {
 			return Block.stateById(stateId);
 		}
-		return pos.getY() < groundY ? GROUND : Blocks.AIR.defaultBlockState();
+		return isGroundAt(pos.getY()) ? GROUND : Blocks.AIR.defaultBlockState();
+	}
+
+	/**
+	 * Whether a position nothing has been taken down at reads as ground: everything under the
+	 * structure does, and everything inside it too when the structure generates underground.
+	 */
+	private boolean isGroundAt(int y) {
+		return y < groundY || (buried && y <= limit.maxY());
+	}
+
+	/**
+	 * Where the surface stands. Level with the bottom of a structure that stands on the ground, which
+	 * is the ground it was placed against, and level with the top of one that is buried, so that a
+	 * piece asking whether it is below ground is answered that it is.
+	 */
+	private int surfaceY() {
+		return buried ? limit.maxY() : groundY;
 	}
 
 	@Override
@@ -238,13 +313,13 @@ class RecordingLevel implements WorldGenLevel {
 
 	@Override
 	public int getHeight(Heightmap.Types type, int x, int z) {
-		// Flat ground at the height the structure begins at, which is the ground it was placed against
-		return groundY;
+		// Flat ground everywhere, at whichever height the structure meets the surface
+		return surfaceY();
 	}
 
 	@Override
 	public BlockPos getHeightmapPos(Heightmap.Types type, BlockPos pos) {
-		return new BlockPos(pos.getX(), groundY, pos.getZ());
+		return new BlockPos(pos.getX(), surfaceY(), pos.getZ());
 	}
 
 	/**

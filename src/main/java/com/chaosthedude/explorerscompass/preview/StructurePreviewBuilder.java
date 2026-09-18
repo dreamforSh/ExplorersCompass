@@ -8,6 +8,7 @@ import com.chaosthedude.explorerscompass.ExplorersCompass;
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.mixin.SinglePoolElementTemplateAccessor;
 import com.chaosthedude.explorerscompass.mixin.StructureTemplatePalettesAccessor;
+import com.chaosthedude.explorerscompass.mixin.TemplateStructurePieceInvoker;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
 
 import it.unimi.dsi.fastutil.ints.Int2BooleanOpenHashMap;
@@ -21,6 +22,10 @@ import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
@@ -30,8 +35,12 @@ import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.StructureManager;
 import net.minecraft.world.Container;
 import net.minecraft.world.RandomizableContainer;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.vehicle.ContainerEntity;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.alchemy.PotionContents;
 import net.minecraft.world.level.block.BarrelBlock;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -41,8 +50,11 @@ import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.ShulkerBoxBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.vault.VaultBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.StructureMode;
 import net.minecraft.world.level.chunk.ChunkGenerator;
+import net.minecraft.world.level.levelgen.GenerationStep;
 import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.structure.BoundingBox;
 import net.minecraft.world.level.levelgen.structure.PoolElementStructurePiece;
@@ -50,10 +62,12 @@ import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.levelgen.structure.StructurePiece;
 import net.minecraft.world.level.levelgen.structure.StructureStart;
 import net.minecraft.world.level.levelgen.structure.TemplateStructurePiece;
+import net.minecraft.world.level.levelgen.structure.TerrainAdjustment;
 import net.minecraft.world.level.levelgen.structure.pools.SinglePoolElement;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager;
+import net.minecraft.world.level.storage.loot.LootTable;
 
 /**
  * Works out what a structure looks like, without any of it having to exist in the world.
@@ -139,7 +153,7 @@ public final class StructurePreviewBuilder {
 		}
 
 		try {
-			final StructurePreview preview = draw(level, start);
+			final StructurePreview preview = draw(level, start, isBuried(structure));
 			// Said outright rather than left to be noticed on the screen. Every structure the game
 			// itself adds fits inside the budget several times over, so anything that does not is
 			// either a structure from a mod or a budget that has been turned down, and either way it
@@ -201,6 +215,25 @@ public final class StructurePreviewBuilder {
 		return best;
 	}
 
+	/**
+	 * Whether a structure generates underground, where everything around it is rock rather than air.
+	 * Read off the step it generates in and the way it is fitted to the terrain, both of which every
+	 * structure declares: the strongholds, mineshafts, trail ruins and trial chambers all say so one
+	 * way or the other, and a mod's structure that does is treated the same way.
+	 *
+	 * <p>The underground decoration step is not taken as saying so. The nether fortress generates in
+	 * it, and a fortress stands in open air: its pillars are built by reaching down until they meet
+	 * something, and would reach nowhere through rock.
+	 */
+	private static boolean isBuried(Structure structure) {
+		final GenerationStep.Decoration step = structure.step();
+		if (step == GenerationStep.Decoration.UNDERGROUND_STRUCTURES || step == GenerationStep.Decoration.STRONGHOLDS) {
+			return true;
+		}
+		final TerrainAdjustment adjustment = structure.terrainAdaptation();
+		return adjustment == TerrainAdjustment.BURY || adjustment == TerrainAdjustment.ENCAPSULATE;
+	}
+
 	/** Whether an assembly stands on ground level enough that looking for a better one is wasted work. */
 	private static boolean isFlatEnough(BoundingBox bounds) {
 		final int reach = Math.max(bounds.getXSpan(), bounds.getZSpan());
@@ -230,10 +263,10 @@ public final class StructurePreviewBuilder {
 	 * cell budget. The blocks are got out of the pieces once and thrown onto each grid in turn, since
 	 * getting them is what the whole of this costs.
 	 */
-	private static StructurePreview draw(ServerLevel level, StructureStart start) {
+	private static StructurePreview draw(ServerLevel level, StructureStart start, boolean buried) {
 		final BoundingBox bounds = start.getBoundingBox();
 		final List<StructurePiece> pieces = start.getPieces();
-		final Assembly assembly = collect(level, start, bounds);
+		final Assembly assembly = collect(level, start, bounds, buried);
 		final int resolution = Mth.clamp(ConfigHandler.GENERAL.structurePreviewResolution.get(), 8, StructurePreview.MAX_GRID);
 		final int maxCells = ConfigHandler.GENERAL.structurePreviewMaxBlocks.get();
 
@@ -253,23 +286,37 @@ public final class StructurePreviewBuilder {
 	}
 
 	/** Every block of every piece, and the pieces nothing at all could be got out of. */
-	private static Assembly collect(ServerLevel level, StructureStart start, BoundingBox bounds) {
+	private static Assembly collect(ServerLevel level, StructureStart start, BoundingBox bounds, boolean buried) {
 		final StructureTemplateManager templateManager = level.getServer().getStructureManager();
-		final RecordingLevel recordingLevel = new RecordingLevel(level, bounds, MAX_SOURCE_BLOCKS, level.getSeed());
+		final RecordingLevel recordingLevel = new RecordingLevel(level, bounds, MAX_SOURCE_BLOCKS, level.getSeed(), buried);
+		final BoundingBox buildableSpace = buildableSpace(level, bounds);
 		final List<StructurePiece> procedural = new ArrayList<StructurePiece>();
 		final List<StructurePiece> outlined = new ArrayList<StructurePiece>();
 
 		for (StructurePiece piece : start.getPieces()) {
-			if (!collectTemplate(templateManager, piece, recordingLevel)) {
+			if (!collectTemplate(level, templateManager, piece, recordingLevel, buildableSpace)) {
 				procedural.add(piece);
 			}
 		}
 
 		if (!procedural.isEmpty()) {
-			buildProcedural(level, start, bounds, procedural, recordingLevel, outlined);
+			buildProcedural(level, start, buildableSpace, procedural, recordingLevel, outlined);
 		}
 
 		return new Assembly(recordingLevel.getRecorded(), outlined, recordingLevel.isFull(), collectLoot(level, recordingLevel));
+	}
+
+	/**
+	 * The space a piece may build in, given the same shape world generation gives it: the whole
+	 * structure across, and the whole world tall. What world generation hands a piece is the chunk
+	 * being generated, which is a column reaching from the bottom of the world to the top, and some
+	 * of the older pieces measure themselves against that. The scattered temples ask how high the
+	 * ground is by probing a fixed height inside it and give up on building anything at all when that
+	 * probe falls outside — so a piece handed its own bounding box, which is only as tall as the
+	 * building, would answer for a swamp hut or a jungle temple with nothing whatsoever.
+	 */
+	private static BoundingBox buildableSpace(ServerLevel level, BoundingBox bounds) {
+		return new BoundingBox(bounds.minX(), level.getMinBuildHeight(), bounds.minZ(), bounds.maxX(), level.getMaxBuildHeight(), bounds.maxZ());
 	}
 
 	/**
@@ -283,8 +330,11 @@ public final class StructurePreviewBuilder {
 	 * <p>What is not run is the processors a placement would put the blocks through on their way into
 	 * the world, which are what turn a village into a zombie village or weather a piece against the
 	 * ground it landed on. Those describe one instance of a structure; a preview is of the structure.
+	 *
+	 * <p>What is run is the piece's data markers, which are part of what the template says rather
+	 * than of how one placement of it turned out: see {@link #handleDataMarkers}.
 	 */
-	private static boolean collectTemplate(StructureTemplateManager templateManager, StructurePiece piece, RecordingLevel recordingLevel) {
+	private static boolean collectTemplate(ServerLevel level, StructureTemplateManager templateManager, StructurePiece piece, RecordingLevel recordingLevel, BoundingBox buildableSpace) {
 		final StructureTemplate template;
 		final StructurePlaceSettings settings;
 		final BlockPos origin;
@@ -312,7 +362,8 @@ public final class StructurePreviewBuilder {
 
 		// Which palette a placement uses is drawn at random when it is placed, so a preview reads the
 		// first: it shows what the structure is rather than what one instance of it turned out as
-		for (StructureTemplate.StructureBlockInfo info : palettes.get(0).blocks()) {
+		final StructureTemplate.Palette palette = palettes.get(0);
+		for (StructureTemplate.StructureBlockInfo info : palette.blocks()) {
 			// What a template records about a block is a record now, so its parts are read through their
 			// accessors rather than off fields
 			final BlockState state = info.state().mirror(settings.getMirror()).rotate(settings.getRotation());
@@ -327,32 +378,66 @@ public final class StructurePreviewBuilder {
 
 			final BlockPos pos = StructureTemplate.calculateRelativePosition(settings, info.pos()).offset(origin);
 			if (!recordingLevel.record(pos, state, info.nbt())) {
-				break;
+				return true;
 			}
 		}
+
+		if (piece instanceof TemplateStructurePiece templatePiece) {
+			handleDataMarkers(level, templatePiece, palette, settings, origin, recordingLevel, buildableSpace);
+		}
 		return true;
+	}
+
+	/**
+	 * Runs the data markers of a template piece against the recording level, after its blocks have
+	 * been taken down, the way placing the template would run them after placing it.
+	 *
+	 * <p>A data marker is a structure block the template's author left in it with a note for the
+	 * piece, and the pieces that carry them use them for their loot: a shipwreck, an igloo, an end
+	 * city and a woodland mansion each name the loot table of the chest under the marker through it,
+	 * and an ocean ruin places its chest where the marker stands. Reading the template block by block
+	 * gets the chest without the loot, or no chest at all, unless these are run too.
+	 *
+	 * <p>The markers are read off the same palette the blocks were, so that they and the blocks
+	 * describe the same variant of the template. Some markers spawn a mob instead; those build the
+	 * mob and hand it to the recording level, which drops it, so each marker is guarded on its own.
+	 */
+	private static void handleDataMarkers(ServerLevel level, TemplateStructurePiece piece, StructureTemplate.Palette palette, StructurePlaceSettings settings, BlockPos origin, RecordingLevel recordingLevel, BoundingBox buildableSpace) {
+		final List<StructureTemplate.StructureBlockInfo> markers = palette.blocks(Blocks.STRUCTURE_BLOCK);
+		if (markers.isEmpty()) {
+			return;
+		}
+		// Seeded off the piece, so that a preview of the same structure comes out the same way every time
+		final RandomSource random = RandomSource.create(level.getSeed() ^ origin.asLong());
+		for (StructureTemplate.StructureBlockInfo marker : markers) {
+			final CompoundTag nbt = marker.nbt();
+			// Compared as text rather than parsed: a mode the game does not know would throw
+			if (nbt == null || !StructureMode.DATA.name().equalsIgnoreCase(nbt.getString("mode"))) {
+				continue;
+			}
+			final BlockPos pos = StructureTemplate.calculateRelativePosition(settings, marker.pos()).offset(origin);
+			try {
+				((TemplateStructurePieceInvoker) piece).explorerscompass$handleDataMarker(nbt.getString("metadata"), pos, recordingLevel, random, buildableSpace);
+			} catch (Throwable t) {
+				ExplorersCompass.LOGGER.debug("Preview: a data marker of " + piece.getClass().getName() + " could not be handled and was skipped", t);
+			}
+		}
 	}
 
 	/**
 	 * Lets each of the pieces that has no template build itself into the recording level, and notes
 	 * the ones that laid no blocks at all, which are left to be outlined.
 	 *
-	 * <p>The space a piece may build in has to be given the same shape world generation gives it: the
-	 * whole structure across, and the whole world tall. What world generation hands a piece is the
-	 * chunk being generated, which is a column reaching from the bottom of the world to the top, and
-	 * some of the older pieces measure themselves against that. The scattered temples ask how high the
-	 * ground is by probing a fixed height inside it and give up on building anything at all when that
-	 * probe falls outside — so a piece handed its own bounding box, which is only as tall as the
-	 * building, would answer for a swamp hut or a jungle temple with nothing whatsoever.
+	 * <p>The space a piece may build in is the one {@link #buildableSpace} describes, for the reasons
+	 * given there.
 	 *
 	 * <p>All of the pieces are run in one go rather than a chunk at a time. Running one is running
 	 * that structure's own code, so each is guarded on its own: a piece that throws, or that lays no
 	 * blocks anyway, costs its own detail and nothing else.
 	 */
-	private static void buildProcedural(ServerLevel level, StructureStart start, BoundingBox bounds, List<StructurePiece> pieces, RecordingLevel recordingLevel, List<StructurePiece> outlined) {
+	private static void buildProcedural(ServerLevel level, StructureStart start, BoundingBox buildableSpace, List<StructurePiece> pieces, RecordingLevel recordingLevel, List<StructurePiece> outlined) {
 		final ChunkGenerator generator = level.getChunkSource().getGenerator();
 		final StructureManager structureManager = level.structureManager();
-		final BoundingBox buildableSpace = new BoundingBox(bounds.minX(), level.getMinBuildHeight(), bounds.minZ(), bounds.maxX(), level.getMaxBuildHeight(), bounds.maxZ());
 		// Where world generation says a structure stands: the middle of its first piece, at that
 		// piece's base. Some pieces measure themselves against it.
 		final BoundingBox firstBox = start.getPieces().get(0).getBoundingBox();
@@ -399,66 +484,145 @@ public final class StructurePreviewBuilder {
 	}
 
 	/**
-	 * Whether a block is one of the containers a preview marks for loot. Hoppers and brewing stands
-	 * can hold a loot table too, but they are not what a player looking for chests is after.
+	 * Whether a block is one of the containers a preview marks whether or not it names a loot table:
+	 * the chests, barrels, shulker boxes, dispensers and droppers, which are what a player looking
+	 * for chests is after even when one of them turns out to be empty. Anything else that can hold a
+	 * loot table — a hopper, a decorated pot, a container from a mod — is marked only when it does,
+	 * since a trial chamber is lined with pots and a village with hoppers that hold nothing.
 	 */
-	private static boolean isLootContainer(BlockState state) {
+	private static boolean isAlwaysMarked(BlockState state) {
 		final Block block = state.getBlock();
 		return block instanceof ChestBlock || block instanceof BarrelBlock || block instanceof ShulkerBoxBlock || block instanceof DispenserBlock;
 	}
 
 	/**
-	 * Every chest, barrel, shulker box, dispenser and dropper that was taken down, with the loot
-	 * table it names and the items that table may drop. Beds and banners are left out: they are
-	 * drawn as themselves and have nothing to open.
+	 * Every container that was taken down and is worth marking, with the loot table it names and the
+	 * items that table may drop: the chests and barrels, whatever else holds a loot table, the vaults
+	 * of a trial chamber, and the chest minecarts a mineshaft parks in its corridors. Beds and
+	 * banners are left out: they are drawn as themselves and have nothing to open.
 	 */
 	private static List<LootCapture> collectLoot(ServerLevel level, RecordingLevel recordingLevel) {
-		final LootTableItems tables = new LootTableItems(level.getServer());
+		final LootTableItems tables = LootTableItems.of(level.getServer());
 		final List<LootCapture> loot = new ArrayList<LootCapture>();
 		for (Long2ObjectMap.Entry<BlockEntity> entry : recordingLevel.getBlockEntities().long2ObjectEntrySet()) {
 			final int stateId = recordingLevel.getRecorded().get(entry.getLongKey());
 			if (stateId < 0) {
 				continue;
 			}
-			final BlockState state = Block.stateById(stateId);
-			if (!isLootContainer(state)) {
-				continue;
+			final LootCapture capture = captureBlock(entry.getLongKey(), Block.stateById(stateId), entry.getValue(), tables);
+			if (capture != null) {
+				loot.add(capture);
 			}
-			final BlockEntity entity = entry.getValue();
-			String tableId = "";
-			LootTableItems.Drops drops = LootTableItems.Drops.EMPTY;
-			if (entity instanceof RandomizableContainer container && container.getLootTable() != null) {
-				tableId = container.getLootTable().location().toString();
-				drops = tables.itemsOf(container.getLootTable());
-			} else if (entity instanceof Container container) {
-				drops = itemsIn(container);
+		}
+		for (ContainerEntity container : recordingLevel.getContainerEntities()) {
+			final LootCapture capture = captureEntity(container, tables);
+			if (capture != null) {
+				loot.add(capture);
 			}
-			loot.add(new LootCapture(entry.getLongKey(), stateId, tableId, drops.itemIds, drops.permilles));
 		}
 		return loot;
 	}
 
+	/** What one block entity is worth marking with, or null when it is not worth marking at all. */
+	private static LootCapture captureBlock(long packedPos, BlockState state, BlockEntity entity, LootTableItems tables) {
+		final Item icon = state.getBlock().asItem();
+		if (entity instanceof VaultBlockEntity vault) {
+			// A vault's table is part of how it is set up rather than of what it holds, and every vault
+			// has one: the ordinary reward or the ominous one
+			final ResourceKey<LootTable> table = vault.getConfig().lootTable();
+			return table == null ? null : captureTable(packedPos, icon, table, tables);
+		}
+		if (entity instanceof RandomizableContainer container) {
+			if (container.getLootTable() != null) {
+				return captureTable(packedPos, icon, container.getLootTable(), tables);
+			}
+			if (isAlwaysMarked(state)) {
+				return new LootCapture(packedPos, Item.getId(icon), "", itemsIn(container));
+			}
+			return null;
+		}
+		if (entity instanceof Container container && isAlwaysMarked(state)) {
+			return new LootCapture(packedPos, Item.getId(icon), "", itemsIn(container));
+		}
+		return null;
+	}
+
+	/**
+	 * What one container that is an entity is worth marking with. Drawn as the item that picks it
+	 * up, which is a chest minecart for the one kind of these a vanilla structure has.
+	 */
+	private static LootCapture captureEntity(ContainerEntity container, LootTableItems tables) {
+		if (!(container instanceof Entity entity)) {
+			return null;
+		}
+		final ItemStack pick = entity.getPickResult();
+		final Item icon = pick != null && !pick.isEmpty() ? pick.getItem() : Items.CHEST_MINECART;
+		final long packedPos = entity.blockPosition().asLong();
+		if (container.getLootTable() != null) {
+			return captureTable(packedPos, icon, container.getLootTable(), tables);
+		}
+		final LootTableItems.Drops held = itemsIn(container);
+		return held.itemIds.length == 0 ? null : new LootCapture(packedPos, Item.getId(icon), "", held);
+	}
+
+	private static LootCapture captureTable(long packedPos, Item icon, ResourceKey<LootTable> table, LootTableItems tables) {
+		return new LootCapture(packedPos, Item.getId(icon), table.location().toString(), tables.itemsOf(table));
+	}
+
+	/**
+	 * What a container was placed holding, said the way a table's drops are: each distinct item
+	 * once, certain, with the fewest and the most a stack of it holds, enchanted where a stack is,
+	 * and a bottle as the potion in it.
+	 */
 	private static LootTableItems.Drops itemsIn(Container container) {
 		final IntArrayList ids = new IntArrayList();
+		final IntArrayList minCounts = new IntArrayList();
+		final IntArrayList maxCounts = new IntArrayList();
+		final IntArrayList flags = new IntArrayList();
+		final IntArrayList potions = new IntArrayList();
 		for (int slot = 0; slot < container.getContainerSize(); slot++) {
 			final ItemStack stack = container.getItem(slot);
 			if (stack.isEmpty()) {
 				continue;
 			}
 			final int id = Item.getId(stack.getItem());
-			if (!ids.contains(id)) {
-				ids.add(id);
+			final int count = Mth.clamp(stack.getCount(), 1, LootTableItems.MAX_COUNT);
+			final int flag = stack.isEnchanted() ? LootTableItems.FLAG_ENCHANTED : 0;
+			final int potion = potionOf(stack);
+			int index = -1;
+			for (int i = 0; i < ids.size(); i++) {
+				if (ids.getInt(i) == id && potions.getInt(i) == potion) {
+					index = i;
+					break;
+				}
+			}
+			if (index >= 0) {
+				minCounts.set(index, Math.min(minCounts.getInt(index), count));
+				maxCounts.set(index, Math.max(maxCounts.getInt(index), count));
+				flags.set(index, flags.getInt(index) | flag);
+				continue;
 			}
 			if (ids.size() >= LootTableItems.MAX_ITEMS) {
 				break;
 			}
+			ids.add(id);
+			minCounts.add(count);
+			maxCounts.add(count);
+			flags.add(flag);
+			potions.add(potion);
 		}
-		final int[] itemIds = ids.toIntArray();
-		final int[] permilles = new int[itemIds.length];
-		for (int i = 0; i < permilles.length; i++) {
-			permilles[i] = LootTableItems.PERMILLE_ALWAYS;
+		final int[] permilles = new int[ids.size()];
+		Arrays.fill(permilles, LootTableItems.PERMILLE_ALWAYS);
+		return new LootTableItems.Drops(ids.toIntArray(), permilles, minCounts.toIntArray(), maxCounts.toIntArray(), flags.toIntArray(), potions.toIntArray());
+	}
+
+	/** The potion a stack holds, as an id into the potion registry, or {@link LootTableItems#NO_POTION} for anything that is not a bottle of one. */
+	private static int potionOf(ItemStack stack) {
+		final PotionContents contents = stack.get(DataComponents.POTION_CONTENTS);
+		if (contents == null || contents.potion().isEmpty()) {
+			return LootTableItems.NO_POTION;
 		}
-		return new LootTableItems.Drops(itemIds, permilles);
+		return BuiltInRegistries.POTION.getId(contents.potion().get().value());
 	}
 
 	/** How many blocks one cell has to stand for, for a structure of this size to fit the grid. */
@@ -475,8 +639,12 @@ public final class StructurePreviewBuilder {
 	private record Assembly(Long2IntOpenHashMap blocks, List<StructurePiece> outlined, boolean truncated, List<LootCapture> loot) {
 	}
 
-	/** One loot container, still in world coordinates, ready to be thrown onto a grid of any coarseness. */
-	private record LootCapture(long packedPos, int stateId, String tableId, int[] itemIds, int[] permilles) {
+	/**
+	 * One loot container, still in world coordinates, ready to be thrown onto a grid of any
+	 * coarseness. Drawn as the given item, which is the block itself for a container that is a block
+	 * and the minecart for one that rides in one.
+	 */
+	private record LootCapture(long packedPos, int iconItemId, String tableId, LootTableItems.Drops drops) {
 	}
 
 	/**
@@ -715,13 +883,17 @@ public final class StructurePreviewBuilder {
 				}
 			}
 
+			// Each named table travels once however many containers name it, and so does the one
+			// entry standing for every container that names no table and holds nothing; a container
+			// that names no table but was placed holding something is its own entry, since what it
+			// holds is its own
 			final List<String> lootTableIds = new ArrayList<String>();
-			final List<int[]> lootTableItemLists = new ArrayList<int[]>();
-			final List<int[]> lootTableChanceLists = new ArrayList<int[]>();
+			final List<LootTableItems.Drops> lootTableDrops = new ArrayList<LootTableItems.Drops>();
 			final Object2IntOpenHashMap<String> namedTables = new Object2IntOpenHashMap<String>();
 			namedTables.defaultReturnValue(-1);
+			int emptyTable = -1;
 			final IntArrayList lootPositions = new IntArrayList();
-			final IntArrayList lootStates = new IntArrayList();
+			final IntArrayList lootIcons = new IntArrayList();
 			final IntArrayList lootTables = new IntArrayList();
 			final int[] lootCells = loot.keySet().toIntArray();
 			Arrays.sort(lootCells);
@@ -734,22 +906,27 @@ public final class StructurePreviewBuilder {
 						existing = lootTableIds.size();
 						namedTables.put(capture.tableId(), existing);
 						lootTableIds.add(capture.tableId());
-						lootTableItemLists.add(capture.itemIds());
-						lootTableChanceLists.add(capture.permilles());
+						lootTableDrops.add(capture.drops());
 					}
 					tableIndex = existing;
+				} else if (capture.drops().itemIds.length == 0) {
+					if (emptyTable < 0) {
+						emptyTable = lootTableIds.size();
+						lootTableIds.add("");
+						lootTableDrops.add(LootTableItems.Drops.EMPTY);
+					}
+					tableIndex = emptyTable;
 				} else {
 					tableIndex = lootTableIds.size();
 					lootTableIds.add("");
-					lootTableItemLists.add(capture.itemIds());
-					lootTableChanceLists.add(capture.permilles());
+					lootTableDrops.add(capture.drops());
 				}
 				lootPositions.add(cell);
-				lootStates.add(capture.stateId());
+				lootIcons.add(capture.iconItemId());
 				lootTables.add(tableIndex);
 			}
 
-			return new StructurePreview(sizeX, sizeY, sizeZ, step, structureBounds.getXSpan(), structureBounds.getYSpan(), structureBounds.getZSpan(), pieces, outlinedPieces, truncated || overflowed, palette.toIntArray(), positions.toIntArray(), indices.toIntArray(), componentPositions.toIntArray(), componentStates.toIntArray(), runStarts.toIntArray(), runLengths.toIntArray(), runPalette.toIntArray(), lootTableIds.toArray(new String[0]), lootTableItemLists.toArray(new int[0][]), lootTableChanceLists.toArray(new int[0][]), lootPositions.toIntArray(), lootStates.toIntArray(), lootTables.toIntArray());
+			return new StructurePreview(sizeX, sizeY, sizeZ, step, structureBounds.getXSpan(), structureBounds.getYSpan(), structureBounds.getZSpan(), pieces, outlinedPieces, truncated || overflowed, palette.toIntArray(), positions.toIntArray(), indices.toIntArray(), componentPositions.toIntArray(), componentStates.toIntArray(), runStarts.toIntArray(), runLengths.toIntArray(), runPalette.toIntArray(), lootTableIds.toArray(new String[0]), lootTableDrops.toArray(new LootTableItems.Drops[0]), lootPositions.toIntArray(), lootIcons.toIntArray(), lootTables.toIntArray());
 		}
 
 	}

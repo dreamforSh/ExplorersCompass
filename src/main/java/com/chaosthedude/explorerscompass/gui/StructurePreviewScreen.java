@@ -13,15 +13,13 @@ import com.chaosthedude.explorerscompass.preview.StructurePreview;
 import com.chaosthedude.explorerscompass.util.RenderUtils;
 import com.chaosthedude.explorerscompass.util.SearchTarget;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
-import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemStack;
+import net.minecraft.util.Mth;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
@@ -52,6 +50,13 @@ public class StructurePreviewScreen extends Screen {
 	private static final int COMPASS_MARGIN = 14;
 	/** How far a press of an arrow key turns the model. */
 	private static final float KEY_TURN_DEGREES = 15.0F;
+	/**
+	 * How much of the panel the loot overview takes when it is open: enough for a row of items and
+	 * a name beside an icon, and never so much that the model has nowhere left to stand.
+	 */
+	private static final float DRAWER_FRACTION = 0.45F;
+	private static final int DRAWER_MIN_WIDTH = 150;
+	private static final int DRAWER_MAX_WIDTH = 270;
 
 	/** The angles the model can be looked at from at the press of a button. */
 	private enum ViewPreset {
@@ -86,9 +91,21 @@ public class StructurePreviewScreen extends Screen {
 	private TransparentButton viewButton;
 	private TransparentButton modeButton;
 	private TransparentButton lootMarkersButton;
+	private TransparentButton lootOverviewButton;
 	private TransparentButton backButton;
-	/** The loot marker under the pointer, or -1. */
-	private int hoveredLootMarker = -1;
+	/** The card that opens beside a loot badge being pointed at. */
+	private final LootCard lootCard = new LootCard();
+	/** The drawer along the right of the panel that lists every table the structure names. */
+	private final LootOverview lootOverview = new LootOverview();
+	/** Where the model's part of the panel ends this frame: the panel's right edge, or the drawer's left edge while it is open. */
+	private int modelRight;
+	/**
+	 * Which badge the card is open for, by the id a badge keeps from frame to frame, or
+	 * {@link #NO_BADGE}. Kept as an id rather than as the badge, since the badges are laid out afresh
+	 * every frame.
+	 */
+	private int hoveredBadgeId = NO_BADGE;
+	private static final int NO_BADGE = Integer.MIN_VALUE;
 	private LayerSlider layerSlider;
 	private ViewPreset viewPreset = ViewPreset.ISOMETRIC;
 	/** Where the sidebar has room for the next control. */
@@ -103,6 +120,7 @@ public class StructurePreviewScreen extends Screen {
 	@Override
 	protected void init() {
 		StructurePreviewCache.request(structureKey);
+		modelRight = panelRight();
 		setupWidgets();
 	}
 
@@ -134,23 +152,29 @@ public class StructurePreviewScreen extends Screen {
 
 		final StructurePreview preview = StructurePreviewCache.get(structureKey);
 		final boolean hasModel = preview != null && (preview.getCellCount() > 0 || preview.getComponentCount() > 0);
+		final boolean hasLoot = hasModel && preview.getLootMarkerCount() > 0;
+		if (!hasLoot) {
+			// A drawer with nothing to list is closed, so that it is not standing empty when the next preview arrives
+			lootOverview.setOpen(false);
+		}
+		// The model gives up the right of the panel to the drawer while it is open, rather than being
+		// drawn under it, so that whatever it shows can still be turned and read
+		modelRight = lootOverview.isOpen() ? right - drawerWidth(right - left) : right;
 		if (hasModel) {
 			// Inside the panel border, so that the model is never drawn over its own edges
-			view.render(guiGraphics, preview, left + 1, top + 1, right - 1, bottom - 1);
-			hoveredLootMarker = -1;
-			if (ConfigHandler.CLIENT.structurePreviewLootMarkers.get() && preview.getLootMarkerCount() > 0) {
-				if (!view.isDragging() && !view.isPanning() && (!layerSlider.visible || !layerSlider.isMouseOver(mouseX, mouseY))) {
-					hoveredLootMarker = view.hoveredLootMarker(preview, mouseX, mouseY);
-				}
-				guiGraphics.enableScissor(left + 1, top + 1, right - 1, bottom - 1);
-				view.renderLootMarkers(guiGraphics, preview, hoveredLootMarker);
-				guiGraphics.disableScissor();
-			}
+			view.render(guiGraphics, preview, left + 1, top + 1, modelRight - 1, bottom - 1);
+			renderLootBadges(guiGraphics, preview, mouseX, mouseY, left, top, modelRight, bottom);
 			view.renderCompass(guiGraphics, font, left + COMPASS_MARGIN + COMPASS_RADIUS, top + COMPASS_MARGIN + COMPASS_RADIUS, COMPASS_RADIUS);
 			renderBuildProgress(guiGraphics, left, bottom);
+			if (lootOverview.isOpen()) {
+				lootOverview.layout(preview, modelRight, top, right, bottom);
+				lootOverview.render(guiGraphics, mouseX, mouseY);
+			}
 		} else {
 			// A preview that arrived holding nothing has as little to draw as one that never arrived
 			drawWaitingMessage(guiGraphics, left, top, right, bottom);
+			hoveredBadgeId = NO_BADGE;
+			view.setHoldingStill(false);
 		}
 
 		syncControls(preview, hasModel);
@@ -161,12 +185,64 @@ public class StructurePreviewScreen extends Screen {
 	public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
 		super.render(guiGraphics, mouseX, mouseY, partialTicks);
 		renderButtonTooltip(guiGraphics, mouseX, mouseY);
-		if (hoveredLootMarker >= 0) {
+		if (hoveredBadgeId != NO_BADGE) {
 			final StructurePreview preview = StructurePreviewCache.get(structureKey);
-			if (preview != null) {
-				renderLootTooltip(guiGraphics, preview, hoveredLootMarker, mouseX, mouseY);
+			final StructurePreviewView.LootBadge badge = view.lootBadgeById(hoveredBadgeId);
+			if (preview != null && badge != null) {
+				// Kept clear of the drawer while it is open: the two say different things about the same containers
+				lootCard.layout(preview, badge, lootOverview.isOpen() ? modelRight : width, height);
+				lootCard.render(guiGraphics, mouseX, mouseY);
 			}
 		}
+	}
+
+	/** How wide the loot overview stands when it is open, for a panel of the given width. */
+	private static int drawerWidth(int panelWidth) {
+		return Mth.clamp(Math.round(panelWidth * DRAWER_FRACTION), Math.min(DRAWER_MIN_WIDTH, panelWidth / 2), DRAWER_MAX_WIDTH);
+	}
+
+	/**
+	 * Lays the loot badges out for this frame, works out which of them the pointer is on, and
+	 * draws them. The one under the pointer stays chosen while the pointer moves from it onto the
+	 * card that opened beside it, and the model is held still meanwhile, so that the card can be
+	 * read into.
+	 */
+	private void renderLootBadges(GuiGraphics guiGraphics, StructurePreview preview, int mouseX, int mouseY, int left, int top, int right, int bottom) {
+		if (!ConfigHandler.CLIENT.structurePreviewLootMarkers.get() || preview.getLootMarkerCount() == 0) {
+			view.clearLootBadges();
+			hoveredBadgeId = NO_BADGE;
+			view.setHoldingStill(false);
+			return;
+		}
+		view.layoutLootBadges(preview);
+
+		StructurePreviewView.LootBadge hovered = null;
+		final boolean pointerFree = !view.isDragging() && !view.isPanning() && (!layerSlider.visible || !layerSlider.isMouseOver(mouseX, mouseY)) && !lootOverview.isMouseOver(mouseX, mouseY);
+		if (pointerFree) {
+			final StructurePreviewView.LootBadge kept = hoveredBadgeId == NO_BADGE ? null : view.lootBadgeById(hoveredBadgeId);
+			if (kept != null && lootCard.isFor(kept) && lootCard.isKeepingOpen(mouseX, mouseY)) {
+				hovered = kept;
+			} else {
+				hovered = view.hoveredLootBadge(mouseX, mouseY);
+			}
+		}
+		hoveredBadgeId = hovered == null ? NO_BADGE : hovered.getId();
+		// Held still for the card, and for the drawer too: a badge lit up from a heading in the
+		// drawer would wander off with the model otherwise
+		view.setHoldingStill(hovered != null || lootOverview.getHoveredTable() >= 0);
+
+		guiGraphics.enableScissor(left + 1, top + 1, right - 1, bottom - 1);
+		view.renderLootBadges(guiGraphics, preview, hovered, lootOverview.isOpen() ? lootOverview.getHoveredTable() : -1);
+		guiGraphics.disableScissor();
+	}
+
+	/** Whether the pointer is on the loot card, or on the badge it is open for. */
+	private boolean isOverLootCard(double mouseX, double mouseY) {
+		if (hoveredBadgeId == NO_BADGE) {
+			return false;
+		}
+		final StructurePreviewView.LootBadge badge = view.lootBadgeById(hoveredBadgeId);
+		return badge != null && (badge.isPointedAt(mouseX, mouseY) || (lootCard.isFor(badge) && lootCard.isMouseOver(mouseX, mouseY)));
 	}
 
 	/** Keeps the controls saying what the view is doing, whichever of them it was changed through. */
@@ -175,10 +251,15 @@ public class StructurePreviewScreen extends Screen {
 		layerSlider.active = layerSlider.visible;
 		if (layerSlider.visible) {
 			layerSlider.setRange(preview.getGridY(), view.layersShown(preview));
+			// Against the right edge of whatever the model has left, which moves when the drawer opens
+			layerSlider.setX(modelRight - SLIDER_INSET - SLIDER_WIDTH);
 		}
 		modeButton.active = hasModel;
-		lootMarkersButton.active = hasModel && preview != null && preview.getLootMarkerCount() > 0;
+		final boolean hasLoot = hasModel && preview.getLootMarkerCount() > 0;
+		lootMarkersButton.active = hasLoot;
 		lootMarkersButton.setHighlighted(ConfigHandler.CLIENT.structurePreviewLootMarkers.get());
+		lootOverviewButton.active = hasLoot;
+		lootOverviewButton.setHighlighted(lootOverview.isOpen());
 		if (hasModel) {
 			modeButton.setMessage(modeButtonLabel(preview));
 			modeButton.setHighlighted(view.getRequestedMode() != null);
@@ -285,89 +366,6 @@ public class StructurePreviewScreen extends Screen {
 		return I18n.get("string.explorerscompass.labeledValue", I18n.get(labelKey), value);
 	}
 
-	private void renderLootTooltip(GuiGraphics guiGraphics, StructurePreview preview, int marker, int mouseX, int mouseY) {
-		final int table = preview.getLootMarkerTableIndex(marker);
-		final String id = preview.getLootTableId(table);
-		final List<Component> lines = new ArrayList<Component>();
-		if (id.isEmpty()) {
-			lines.add(Component.translatable("string.explorerscompass.noLootTable"));
-		} else {
-			final String key = "loot_table." + id.replace(':', '.').replace('/', '.');
-			final Component name = Component.translatableWithFallback(key, id);
-			lines.add(name);
-			if (!name.getString().equals(id)) {
-				lines.add(Component.literal(id).withStyle(ChatFormatting.DARK_GRAY));
-			}
-		}
-		final int[] items = preview.getLootTableItems(table);
-		final int[] chances = preview.getLootTableChances(table);
-		final int cols = Math.min(8, Math.max(1, items.length));
-		final int rows = items.length == 0 ? 0 : (items.length + cols - 1) / cols;
-		int textWidth = 0;
-		for (Component line : lines) {
-			textWidth = Math.max(textWidth, font.width(line));
-		}
-		final int width = Math.max(textWidth, rows == 0 ? 0 : cols * 18) + 10;
-		final int height = 6 + lines.size() * 10 + (rows == 0 ? 0 : 4 + rows * 18);
-		int left = mouseX + 12;
-		int top = mouseY - 12;
-		if (left + width > this.width - 4) {
-			left = mouseX - 12 - width;
-		}
-		if (top + height > this.height - 4) {
-			top = this.height - 4 - height;
-		}
-		if (left < 4) {
-			left = 4;
-		}
-		if (top < 4) {
-			top = 4;
-		}
-		RenderUtils.drawRect(guiGraphics, left, top, left + width, top + height, 0xF0100010);
-		int y = top + 4;
-		for (Component line : lines) {
-			guiGraphics.drawString(font, line, left + 5, y, 0xFFFFFFFF);
-			y += 10;
-		}
-		if (rows > 0) {
-			y += 2;
-			for (int i = 0; i < items.length; i++) {
-				final Item item = Item.byId(items[i]);
-				if (item == null) {
-					continue;
-				}
-				final int slotX = left + 5 + (i % cols) * 18;
-				final int slotY = y + (i / cols) * 18;
-				guiGraphics.renderItem(new ItemStack(item), slotX, slotY);
-				if (i < chances.length) {
-					drawLootChance(guiGraphics, chances[i], slotX, slotY);
-				}
-			}
-		}
-	}
-
-	private void drawLootChance(GuiGraphics guiGraphics, int permille, int slotX, int slotY) {
-		final String text = formatLootChance(permille);
-		guiGraphics.pose().pushPose();
-		guiGraphics.pose().translate(slotX + 17, slotY + 17, 200.0F);
-		guiGraphics.pose().scale(0.5F, 0.5F, 1.0F);
-		guiGraphics.drawString(font, text, -font.width(text), -font.lineHeight, 0xFFFFC24B, true);
-		guiGraphics.pose().popPose();
-	}
-
-	private static String formatLootChance(int permille) {
-		if (permille >= 1000) {
-			return "100%";
-		}
-		if (permille <= 0) {
-			return "0%";
-		}
-		if (permille % 10 == 0) {
-			return (permille / 10) + "%";
-		}
-		return (permille / 10) + "." + (permille % 10) + "%";
-	}
-
 	private void renderButtonTooltip(GuiGraphics guiGraphics, int mouseX, int mouseY) {
 		for (Object widget : renderables) {
 			if (widget instanceof TransparentButton button && button.visible && button.isPointedAt() && !button.getTooltipLines().isEmpty()) {
@@ -400,15 +398,28 @@ public class StructurePreviewScreen extends Screen {
 		return height - INFO_BAR_HEIGHT - 6;
 	}
 
-	/** Whether a point is inside the panel the model is drawn in, which is what the pointer turns. */
+	/** Whether a point is inside the part of the panel the model is drawn in, which is what the pointer turns. */
 	private boolean isOverView(double mouseX, double mouseY) {
-		return mouseX >= panelLeft() && mouseX < panelRight() && mouseY >= panelTop() && mouseY < panelBottom();
+		return mouseX >= panelLeft() && mouseX < modelRight && mouseY >= panelTop() && mouseY < panelBottom();
 	}
 
 	@Override
 	public boolean mouseClicked(double mouseX, double mouseY, int button) {
 		// The controls standing inside the panel take the click before the panel itself does
 		if (super.mouseClicked(mouseX, mouseY, button)) {
+			return true;
+		}
+		if (lootOverview.mouseClicked(mouseX, mouseY, button)) {
+			return true;
+		}
+		// A click on a badge or its card opens the overview at that container's table, which is
+		// where the whole of what it holds is; it is not the start of turning the model
+		if (button == 0 && isOverLootCard(mouseX, mouseY)) {
+			final StructurePreview preview = StructurePreviewCache.get(structureKey);
+			final StructurePreviewView.LootBadge badge = view.lootBadgeById(hoveredBadgeId);
+			if (preview != null && badge != null) {
+				lootOverview.openAt(preview.getLootMarkerTableIndex(badge.getShownMarker()));
+			}
 			return true;
 		}
 		if (isOverView(mouseX, mouseY)) {
@@ -450,6 +461,9 @@ public class StructurePreviewScreen extends Screen {
 		if (layerSlider.visible && layerSlider.mouseScrolled(mouseX, mouseY, scrollX, scrollY)) {
 			return true;
 		}
+		if (lootOverview.mouseScrolled(mouseX, mouseY, scrollY)) {
+			return true;
+		}
 		if (!isOverView(mouseX, mouseY)) {
 			return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
 		}
@@ -467,6 +481,13 @@ public class StructurePreviewScreen extends Screen {
 	public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
 		final StructurePreview preview = StructurePreviewCache.get(structureKey);
 		switch (keyCode) {
+			case GLFW.GLFW_KEY_ESCAPE:
+				// The drawer goes first, and the screen after it, the way a dialog over a screen would
+				if (lootOverview.isOpen()) {
+					lootOverview.setOpen(false);
+					return true;
+				}
+				return super.keyPressed(keyCode, scanCode, modifiers);
 			case GLFW.GLFW_KEY_R:
 			case GLFW.GLFW_KEY_HOME:
 				view.reset();
@@ -554,6 +575,12 @@ public class StructurePreviewScreen extends Screen {
 		});
 		lootMarkersButton.setHighlighted(ConfigHandler.CLIENT.structurePreviewLootMarkers.get());
 		lootMarkersButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.lootMarkers"));
+
+		lootOverviewButton = addSidebarButton(Component.translatable("string.explorerscompass.lootOverview"), (onPress) -> {
+			lootOverview.setOpen(!lootOverview.isOpen());
+		});
+		lootOverviewButton.active = false;
+		lootOverviewButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.lootOverview"));
 
 		viewButton = addSidebarButton(viewButtonLabel(), (onPress) -> {
 			viewPreset = viewPreset.next();

@@ -48,6 +48,15 @@ alone are what the upstream mod covers; biomes are its sister mod,
   with a version in flat colours standing in until it lands, so that a mansion or a stronghold never
   holds the game up. A button switches between the textured and the coloured drawing, a compass in
   the corner says which way north lies, and a grid under the model says how large it is.
+- See what a structure is worth going to. Every chest, barrel, vault and chest minecart the structure
+  places is marked on the model, through its walls, and pointing at a marker opens a card of what
+  that container's loot table may hold: each item with the chance it appears at all, how many come at
+  once, drawn enchanted where it comes enchanted and as the potion it is where it is one. A loot
+  overview lists every table in the structure side by side with the model, with the containers naming
+  a table lit up on the model as its heading is pointed at; clicking a marker opens the overview at
+  that container's table. The chances are worked out from the table rather than rolled, so they say
+  what an unopened chest would typically do, and the tables the game itself ships are named in every
+  language the compass is translated into.
 
 **After a search**
 
@@ -126,7 +135,10 @@ Things worth knowing about:
   are assembled off the server thread and the most recently viewed ones are kept assembled, so a
   preview costs nothing to open again while it stays in use. `structurePreviewDetailLimit`, client
   side, is the size past which a preview opens drawn as coloured blocks rather than textured ones;
-  the button on the preview screen switches between the two either way.
+  the button on the preview screen switches between the two either way. `structurePreviewLootMarkers`,
+  also client side, is whether the containers are marked on the model to begin with; the button on
+  the preview screen switches that too. Loot tables from mods and data packs are named from their
+  ids unless a language file names them under `loot_table.<namespace>.<path with slashes as dots>`.
 - `showDirectionBar`, `showDirectionBarWhileCarried`, `directionBarWidth`, `directionBarSpan` — the
   horizon strip. Pair a wide strip with a large span to have the whole horizon on screen at once. The
   strip can stay up while the compass is in the inventory rather than in hand.
