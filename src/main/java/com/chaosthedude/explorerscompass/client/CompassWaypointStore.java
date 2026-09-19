@@ -125,7 +125,21 @@ public final class CompassWaypointStore {
 
 	/** Takes every waypoint of the given world out, and answers with what was taken. */
 	public List<CompassWaypoint> removeWorld(String worldKey) {
-		final List<CompassWaypoint> removed = inWorld(worldKey);
+		return removeWorld(worldKey, false);
+	}
+
+	/**
+	 * Takes every waypoint of the given world out, or every one the compass itself found, and answers
+	 * with what was taken. The ones taken in from the minimap are the player's own, made there rather
+	 * than found by the compass, so clearing what the compass found can leave them standing.
+	 */
+	public List<CompassWaypoint> removeWorld(String worldKey, boolean keepFromXaero) {
+		final List<CompassWaypoint> removed = new ArrayList<CompassWaypoint>();
+		for (CompassWaypoint waypoint : inWorld(worldKey)) {
+			if (!keepFromXaero || !waypoint.isFromXaero()) {
+				removed.add(waypoint);
+			}
+		}
 		if (!removed.isEmpty()) {
 			waypoints.removeAll(removed);
 			revision++;
@@ -143,6 +157,47 @@ public final class CompassWaypointStore {
 	public void setXaeroWorld(CompassWaypoint waypoint, String xaeroWorld) {
 		waypoint.setXaeroWorld(xaeroWorld);
 		revision++;
+	}
+
+	/** Gives a waypoint the name and colour its copy in the minimap has been given. */
+	public void rename(CompassWaypoint waypoint, String name, int colorIndex) {
+		final int color = Math.floorMod(colorIndex, CompassWaypoint.COLOR_COUNT);
+		if (waypoint.getName().equals(name) && waypoint.getColorIndex() == color) {
+			return;
+		}
+		waypoint.setName(name);
+		waypoint.setColorIndex(color);
+		revision++;
+	}
+
+	/**
+	 * Puts a waypoint where its copy was moved to in the minimap. Refused where another waypoint of
+	 * the same world and dimension already stands on that column: nothing stands twice on one.
+	 *
+	 * @return whether the waypoint was moved
+	 */
+	public boolean move(CompassWaypoint waypoint, int x, int y, int z) {
+		final CompassWaypoint occupant = find(waypoint.getWorldKey(), waypoint.getDimension(), x, z);
+		if (occupant != null && occupant != waypoint) {
+			return false;
+		}
+		if (waypoint.getX() == x && waypoint.getY() == y && waypoint.getZ() == z) {
+			return true;
+		}
+		waypoint.moveTo(x, y, z);
+		revision++;
+		return true;
+	}
+
+	/** How many waypoints the given world holds, for holding it to the most it may. */
+	public int countInWorld(String worldKey) {
+		int count = 0;
+		for (CompassWaypoint waypoint : waypoints) {
+			if (waypoint.isInWorld(worldKey)) {
+				count++;
+			}
+		}
+		return count;
 	}
 
 	public JsonObject toJson() {

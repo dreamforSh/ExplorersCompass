@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 
 import com.chaosthedude.explorerscompass.ExplorersCompass;
@@ -50,6 +51,8 @@ public final class CompassWaypoints {
 	/** The key of the level last asked about, since it is asked for on every tick and never changes for one level. */
 	private static ClientLevel keyedLevel;
 	private static String keyedWorldKey;
+	/** The world last said to be holding as many waypoints as it may, so that it is said once. */
+	private static String warnedFullWorld;
 
 	private CompassWaypoints() {
 	}
@@ -152,14 +155,18 @@ public final class CompassWaypoints {
 		save();
 	}
 
-	/** Forgets every waypoint of the world the player is in, and answers with what was forgotten. */
+	/**
+	 * Forgets every waypoint the compass found in the world the player is in, and answers with what
+	 * was forgotten. The waypoints taken in from the minimap stay: they are the player's own, made
+	 * there, and clearing what the compass found is no reason to take them out of the minimap.
+	 */
 	public static List<CompassWaypoint> clearCurrentWorld() {
 		ensureLoaded();
 		final String worldKey = currentWorldKey();
 		if (worldKey == null) {
 			return List.of();
 		}
-		final List<CompassWaypoint> removed = store.removeWorld(worldKey);
+		final List<CompassWaypoint> removed = store.removeWorld(worldKey, true);
 		if (!removed.isEmpty()) {
 			for (CompassWaypoint waypoint : removed) {
 				removeMirrorOrDefer(waypoint);
@@ -193,18 +200,21 @@ public final class CompassWaypoints {
 	}
 
 	/**
-	 * Keeps the records and the minimap's copies in step, as far as the world the minimap has open:
-	 * a copy the player deleted in the minimap takes its record with it, and a copy whose record was
-	 * removed while its world was not open is taken out now. Cheap enough to run every few seconds,
-	 * which is how often it is.
+	 * Keeps the records and the minimap's copies in step, as far as the world the minimap has open.
+	 * The minimap is where the player edits waypoints, so its word is taken: a copy deleted there
+	 * takes its record with it, a copy moved there takes its record along, a copy renamed or
+	 * recoloured there renames or recolours its record, and a waypoint the player made there becomes
+	 * a record of its own where the player has asked for that. A copy whose record was removed while
+	 * its world was not open is taken out now. Cheap enough to run every few seconds, which is how
+	 * often it is.
 	 */
 	public static void reconcileWithXaero() {
 		reconcileWithXaero(false);
 	}
 
 	/**
-	 * As above, and where asked, also draws every copy the way the player currently asks — done at the
-	 * player's own asking, from the waypoints screen, rather than on the clock.
+	 * As above, and where asked, also draws every copy the compass made the way the player currently
+	 * asks — done at the player's own asking, from the waypoints screen, rather than on the clock.
 	 */
 	public static void reconcileWithXaero(boolean applyDisplay) {
 		ensureLoaded();
@@ -212,27 +222,99 @@ public final class CompassWaypoints {
 			return;
 		}
 		final String xaeroWorld = XaeroMinimapIntegration.currentWorldId();
-		if (xaeroWorld == null) {
+		final String worldKey = currentWorldKey();
+		final Minecraft mc = Minecraft.getInstance();
+		if (xaeroWorld == null || worldKey == null || mc.level == null) {
 			return;
 		}
+		final ResourceLocation dimension = mc.level.dimension().location();
 
 		boolean changed = false;
+		// Removals first, so that a copy on its way out is not read back in as a waypoint the player made
 		for (CompassWaypointStore.PendingRemoval pending : store.getPendingRemovals()) {
 			if (xaeroWorld.equals(pending.xaeroWorld()) && XaeroMinimapIntegration.removeMirror(pending.xaeroWorld(), pending.x(), pending.z())) {
 				store.removePendingRemoval(pending);
 				changed = true;
 			}
 		}
-		for (CompassWaypoint orphan : XaeroMinimapIntegration.reconcile(inCurrentDimension(), applyDisplay)) {
+
+		final WaypointReconciliation.Result result = XaeroMinimapIntegration.reconcile(store.in(worldKey, dimension), applyDisplay);
+		if (result != null) {
+			changed |= apply(result, worldKey, dimension, xaeroWorld);
+		}
+		if (changed) {
+			save();
+		}
+	}
+
+	/** Does to the records what the reconciliation found wanted doing, and answers whether any of them changed. */
+	private static boolean apply(WaypointReconciliation.Result result, String worldKey, ResourceLocation dimension, String xaeroWorld) {
+		boolean changed = false;
+		for (CompassWaypoint orphan : result.orphaned()) {
 			// Deleted in the minimap, which is as much a deletion as one made here
 			if (store.remove(orphan)) {
 				ExplorersCompass.LOGGER.info("Forgot the waypoint for " + orphan.getName() + " at " + orphan.getX() + ", " + orphan.getZ() + ": its copy was deleted in Xaero's Minimap");
 				changed = true;
 			}
 		}
-		if (changed) {
-			save();
+		for (Map.Entry<CompassWaypoint, WaypointReconciliation.MapWaypoint> entry : result.moved().entrySet()) {
+			final CompassWaypoint record = entry.getKey();
+			final WaypointReconciliation.MapWaypoint to = entry.getValue();
+			final int from = record.getX();
+			final int fromZ = record.getZ();
+			if (store.move(record, to.x(), heightOf(to), to.z())) {
+				store.rename(record, to.name(), to.colorIndex());
+				ExplorersCompass.LOGGER.info("Moved the waypoint for " + record.getName() + " from " + from + ", " + fromZ + " to " + to.x() + ", " + to.z() + " after its copy in Xaero's Minimap");
+			} else if (store.remove(record)) {
+				// Another record already stands where the copy went, so this one has nowhere to go
+				ExplorersCompass.LOGGER.info("Forgot the waypoint for " + record.getName() + " at " + from + ", " + fromZ + ": its copy in Xaero's Minimap was moved onto another waypoint");
+			}
+			changed = true;
 		}
+		for (CompassWaypoint record : result.adopted().keySet()) {
+			store.setXaeroWorld(record, xaeroWorld);
+			changed = true;
+		}
+		for (Map.Entry<CompassWaypoint, WaypointReconciliation.MapWaypoint> entry : result.changed().entrySet()) {
+			final int before = store.getRevision();
+			store.rename(entry.getKey(), entry.getValue().name(), entry.getValue().colorIndex());
+			changed |= store.getRevision() != before;
+		}
+
+		if (ConfigHandler.CLIENT.importXaeroWaypoints.get() && !result.unrecorded().isEmpty()) {
+			// Held to the most a world may keep by not taking in what would run past it, rather than
+			// by taking it in and forgetting the oldest: what was forgotten would only be read back
+			// in next time, and round again
+			final int max = ConfigHandler.CLIENT.maxWaypointsPerWorld.get();
+			int room = max <= 0 ? Integer.MAX_VALUE : max - store.countInWorld(worldKey);
+			int taken = 0;
+			for (WaypointReconciliation.MapWaypoint copy : result.unrecorded()) {
+				if (room <= 0) {
+					if (!worldKey.equals(warnedFullWorld)) {
+						// Once per world rather than every few seconds, since the state it says is a lasting one
+						warnedFullWorld = worldKey;
+						ExplorersCompass.LOGGER.info("Not taking in every waypoint of Xaero's Minimap: this world already keeps as many as maxWaypointsPerWorld allows");
+					}
+					break;
+				}
+				// The minimap's own waypoints are not dated, so one is taken to be from when it was taken in
+				final CompassWaypoint imported = CompassWaypoint.fromXaero(worldKey, dimension, xaeroWorld, copy.x(), heightOf(copy), copy.z(), copy.name(), System.currentTimeMillis(), copy.colorIndex());
+				if (store.add(imported, 0) == imported) {
+					room--;
+					taken++;
+					changed = true;
+				}
+			}
+			if (taken > 0) {
+				ExplorersCompass.LOGGER.info("Took in " + taken + " waypoint(s) made in Xaero's Minimap");
+			}
+		}
+		return changed;
+	}
+
+	/** The height a copy stands at, where the minimap has one for it. */
+	private static int heightOf(WaypointReconciliation.MapWaypoint copy) {
+		return copy.yIncluded() ? copy.y() : ExplorersCompassItem.UNKNOWN_Y;
 	}
 
 	public static void setShownOnHud(CompassWaypoint waypoint, boolean shown) {

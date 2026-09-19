@@ -51,6 +51,8 @@ public class WaypointListEntry extends ObjectSelectionList.Entry<WaypointListEnt
 	private String cachedBadge;
 	private String cachedName;
 	private String cachedCoordinates;
+	/** The note after the coordinates saying the waypoint was made in the minimap, where it was. */
+	private String cachedSource = "";
 	/** Whether the minimap still has its copy, asked once: asking walks the minimap's waypoints. */
 	private XaeroMinimapIntegration.MirrorState mirrorState;
 
@@ -103,6 +105,11 @@ public class WaypointListEntry extends ObjectSelectionList.Entry<WaypointListEnt
 		guiGraphics.drawString(mc.font, cachedName, left + MARK_WIDTH + 4, par2 + 2, onHud ? GuiTheme.TEXT_PRIMARY : GuiTheme.TEXT_SECONDARY, false);
 
 		guiGraphics.drawString(mc.font, cachedCoordinates, left, par2 + 14, GuiTheme.TEXT_MUTED, false);
+		if (waypoint.isFromXaero()) {
+			// Said on the row: a waypoint the player made in the minimap is not one the compass found,
+			// and which of the two it is decides what forgetting it here does to the minimap
+			guiGraphics.drawString(mc.font, cachedSource, left + mc.font.width(cachedCoordinates) + 4, par2 + 14, GuiTheme.TEXT_DISABLED, false);
+		}
 
 		RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
 	}
@@ -169,11 +176,12 @@ public class WaypointListEntry extends ObjectSelectionList.Entry<WaypointListEnt
 		}
 		switch (mirrorState) {
 			case PRESENT:
-				return "string.explorerscompass.xaero.mirrored";
+				// The minimap's waypoint is the original of one the player made there, and a copy of one the compass found
+				return waypoint.isFromXaero() ? "string.explorerscompass.xaero.imported" : "string.explorerscompass.xaero.mirrored";
 			case MISSING:
 				return "string.explorerscompass.xaero.missing";
 			default:
-				return "string.explorerscompass.xaero.otherWorld";
+				return waypoint.isFromXaero() ? "string.explorerscompass.xaero.importedOtherWorld" : "string.explorerscompass.xaero.otherWorld";
 		}
 	}
 
@@ -234,7 +242,14 @@ public class WaypointListEntry extends ObjectSelectionList.Entry<WaypointListEnt
 		final int chipsWidth = mc.font.width(cachedBadge) + 8 + 4 + mc.font.width(HUD_CHIP) + 8;
 		final int badgeLeft = left + rowWidth - 2 - chipsWidth;
 		cachedName = RenderUtils.trimToWidth(waypoint.getName(), badgeLeft - left - MARK_WIDTH - 4 - 6);
-		cachedCoordinates = RenderUtils.trimToWidth(coordinateLine, rowWidth - 6);
+		if (waypoint.isFromXaero()) {
+			// The note takes what room it needs and the coordinates take the rest, so that on a narrow
+			// row it is the coordinates that shorten and the note that stays legible
+			cachedSource = I18n.get("string.explorerscompass.xaero.sourceNote");
+			cachedCoordinates = RenderUtils.trimToWidth(coordinateLine, rowWidth - 6 - mc.font.width(cachedSource) - 4);
+		} else {
+			cachedCoordinates = RenderUtils.trimToWidth(coordinateLine, rowWidth - 6);
+		}
 	}
 
 }

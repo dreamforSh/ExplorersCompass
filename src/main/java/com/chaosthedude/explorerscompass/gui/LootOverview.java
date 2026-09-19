@@ -360,6 +360,16 @@ final class LootOverview {
 		}
 	}
 
+	/**
+	 * The tooltip for the slot being pointed at, if any. Drawn apart from the drawer itself so that
+	 * the screen can put it in front of everything.
+	 */
+	void renderTooltip(GuiGraphics guiGraphics, int mouseX, int mouseY) {
+		if (open && hoveredSlot != null) {
+			LootSlots.renderTooltip(guiGraphics, Minecraft.getInstance().font, hoveredSlot.stack(), hoveredSlot.permille(), hoveredSlot.minCount(), hoveredSlot.maxCount(), mouseX, mouseY);
+		}
+	}
+
 	/** How tall the given section is, from its top to the top of the next or the end of the list. */
 	private int sectionHeight(int index) {
 		final int next = index + 1 < sections.size() ? sections.get(index + 1).top - SECTION_GAP : contentHeight;

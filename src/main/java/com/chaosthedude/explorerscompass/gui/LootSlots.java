@@ -1,19 +1,25 @@
 package com.chaosthedude.explorerscompass.gui;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import com.chaosthedude.explorerscompass.preview.StructurePreview;
 import com.chaosthedude.explorerscompass.util.LootTableNames;
 import com.chaosthedude.explorerscompass.util.RenderUtils;
 
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.TextColor;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.item.alchemy.Potion;
 import net.minecraft.world.item.alchemy.PotionContents;
 import net.neoforged.api.distmarker.Dist;
@@ -120,6 +126,39 @@ final class LootSlots {
 			guiGraphics.drawString(font, count, x, y, GuiTheme.TEXT_SECONDARY, false);
 		}
 		guiGraphics.drawString(font, RenderUtils.trimToWidth(stack.getHoverName().getString(), x - 6 - left), left, y, GuiTheme.TEXT_PRIMARY, false);
+	}
+
+	/**
+	 * The tooltip for a slot being pointed at, drawn beside the pointer the way the game draws one
+	 * for an item in a chest: everything the game itself says about the stack — a potion's effects,
+	 * a piece of armour's protection, the item's own lore, its id with advanced tooltips on — and
+	 * under it what the table says: how many come at once, how likely, and that it comes enchanted.
+	 *
+	 * <p>Drawn from wherever the screen draws its topmost layer, since the game puts a tooltip a set
+	 * way in front of whatever it is called over, and the slots have items standing in front of them.
+	 */
+	static void renderTooltip(GuiGraphics guiGraphics, Font font, ItemStack stack, int permille, int minCount, int maxCount, int mouseX, int mouseY) {
+		if (stack.isEmpty()) {
+			return;
+		}
+		final Minecraft mc = Minecraft.getInstance();
+		final TooltipFlag flag = mc.options.advancedItemTooltips ? TooltipFlag.ADVANCED : TooltipFlag.NORMAL;
+		final List<Component> lines = new ArrayList<Component>(stack.getTooltipLines(Item.TooltipContext.of(mc.level), mc.player, flag));
+		lines.add(Component.empty());
+		final String count = formatCount(minCount, maxCount);
+		if (!count.isEmpty()) {
+			lines.add(labeled("string.explorerscompass.lootQuantity", count, GuiTheme.TEXT_SECONDARY));
+		}
+		lines.add(labeled("string.explorerscompass.lootChance", formatChance(permille), chanceColour(permille) & 0xFFFFFF));
+		if (Boolean.TRUE.equals(stack.get(DataComponents.ENCHANTMENT_GLINT_OVERRIDE))) {
+			lines.add(Component.translatable("string.explorerscompass.lootTooltipEnchanted").withStyle((style) -> style.withColor(TextColor.fromRgb(GuiTheme.ACCENT))));
+		}
+		guiGraphics.renderTooltip(font, lines, stack.getTooltipImage(), mouseX, mouseY);
+	}
+
+	/** A labelled value, punctuated the way the player's own language punctuates one, in the given colour. */
+	private static Component labeled(String labelKey, String value, int color) {
+		return Component.literal(I18n.get("string.explorerscompass.labeledValue", I18n.get(labelKey), value)).withStyle((style) -> style.withColor(TextColor.fromRgb(color)));
 	}
 
 	static int chanceColour(int permille) {

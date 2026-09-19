@@ -135,4 +135,74 @@ class CompassWaypointStoreTest {
 		assertEquals(0xFFAA00, waypoint.getColor(), "index 6 is gold in the game's list of text colours");
 	}
 
+	@Test
+	void aWaypointTakenInFromTheMinimapComesBackAsOne() {
+		final CompassWaypointStore store = new CompassWaypointStore();
+		store.add(CompassWaypoint.fromXaero(WORLD, OVERWORLD, "Singleplayer_New World/dim%0", 40, 70, 50, "Home", 1700000000000L, 2), 0);
+
+		final CompassWaypointStore read = new CompassWaypointStore();
+		read.readFrom(JsonParser.parseString(store.toJson().toString()));
+
+		final CompassWaypoint home = read.find(WORLD, OVERWORLD, 40, 50);
+		assertNotNull(home);
+		assertTrue(home.isFromXaero(), "where it came from was not kept");
+		assertEquals("Singleplayer_New World/dim%0", home.getXaeroWorld(), "it is already mirrored: the minimap's waypoint is the original");
+		assertNull(home.getTargetKey(), "a waypoint the player made names no structure");
+		assertEquals(2, home.getColorIndex());
+		// And one the compass found is not said to have come from there
+		assertFalse(new CompassWaypoint(WORLD, OVERWORLD, 0, 0, 0, "X", SearchTarget.STRUCTURE, VILLAGE, 0L, 6).isFromXaero());
+	}
+
+	@Test
+	void clearingWhatTheCompassFoundLeavesThePlayersOwnMinimapWaypointsStanding() {
+		final CompassWaypointStore store = new CompassWaypointStore();
+		store.add(new CompassWaypoint(WORLD, OVERWORLD, 1, 64, 1, "Village", SearchTarget.STRUCTURE, VILLAGE, 1L, 6), 0);
+		store.add(CompassWaypoint.fromXaero(WORLD, OVERWORLD, "Singleplayer_New World/dim%0", 2, 64, 2, "Home", 2L, 2), 0);
+
+		final List<CompassWaypoint> removed = store.removeWorld(WORLD, true);
+
+		assertEquals(1, removed.size());
+		assertEquals("Village", removed.get(0).getName());
+		assertEquals(1, store.countInWorld(WORLD));
+		assertNotNull(store.find(WORLD, OVERWORLD, 2, 2), "the waypoint the player made in the minimap went too");
+		// And asked to take everything, it does
+		assertEquals(1, store.removeWorld(WORLD).size());
+		assertEquals(0, store.countInWorld(WORLD));
+	}
+
+	@Test
+	void renamingTakesTheNameAndColourAndCountsAsAChangeOnlyWhenItIsOne() {
+		final CompassWaypointStore store = new CompassWaypointStore();
+		final CompassWaypoint waypoint = store.add(new CompassWaypoint(WORLD, OVERWORLD, 1, 64, 1, "Village", SearchTarget.STRUCTURE, VILLAGE, 1L, 6), 0);
+
+		final int before = store.getRevision();
+		store.rename(waypoint, "Village", 6);
+		assertEquals(before, store.getRevision(), "nothing changed, yet the list said it had");
+
+		store.rename(waypoint, "My Village", 22);
+		assertEquals("My Village", waypoint.getName());
+		assertEquals(6, waypoint.getColorIndex(), "22 wraps to 6");
+		assertTrue(store.getRevision() > before);
+	}
+
+	@Test
+	void movingPutsTheWaypointOnTheNewColumnUnlessAnotherStandsThere() {
+		final CompassWaypointStore store = new CompassWaypointStore();
+		final CompassWaypoint moving = store.add(new CompassWaypoint(WORLD, OVERWORLD, 1, 64, 1, "Village", SearchTarget.STRUCTURE, VILLAGE, 1L, 6), 0);
+		final CompassWaypoint standing = store.add(new CompassWaypoint(WORLD, OVERWORLD, 9, 64, 9, "Temple", SearchTarget.STRUCTURE, VILLAGE, 2L, 6), 0);
+
+		assertTrue(store.move(moving, 5, 70, 5));
+		assertNull(store.find(WORLD, OVERWORLD, 1, 1), "it still stands where it was");
+		assertSame(moving, store.find(WORLD, OVERWORLD, 5, 5));
+		assertEquals(70, moving.getY());
+
+		assertFalse(store.move(moving, 9, 64, 9), "moved onto another waypoint's column");
+		assertSame(standing, store.find(WORLD, OVERWORLD, 9, 9));
+		assertSame(moving, store.find(WORLD, OVERWORLD, 5, 5), "refused, so it stays where it was");
+
+		// Moving onto its own column is nothing to do, and not a refusal
+		assertTrue(store.move(moving, 5, 70, 5));
+		assertEquals(2, store.countInWorld(WORLD));
+	}
+
 }

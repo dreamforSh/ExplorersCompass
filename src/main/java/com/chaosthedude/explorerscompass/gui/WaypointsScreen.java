@@ -255,7 +255,12 @@ public class WaypointsScreen extends Screen {
 
 		pointAtButton.active = hasSelection;
 		removeButton.active = hasSelection;
-		clearButton.active = !waypoints.isEmpty();
+		// Clearing leaves the waypoints made in the minimap standing, so with only those there is nothing to clear
+		boolean anyFound = false;
+		for (CompassWaypoint waypoint : waypoints) {
+			anyFound |= !waypoint.isFromXaero();
+		}
+		clearButton.active = anyFound;
 		hudButton.active = hasSelection;
 		hudButton.setMessage(Component.translatable(hasSelection && selected.getWaypoint().isShownOnHud() ? "string.explorerscompass.hideFromHud" : "string.explorerscompass.showOnHud"));
 		// The teleport changes dimension when the waypoint is not in this one, so it is available for

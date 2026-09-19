@@ -18,8 +18,11 @@ import net.neoforged.api.distmarker.OnlyIn;
  *
  * <p>These are the mod's own waypoints. Where Xaero's Minimap is installed each is mirrored into it
  * as well, and {@link #getXaeroWorld} records which of the minimap's worlds it went into, so that
- * the mirror can be found again to be removed or hidden. Nothing here depends on the minimap
- * being there: without it the waypoints are still recorded and still marked on the HUD.
+ * the mirror can be found again to be removed or hidden. The minimap is also where the player edits
+ * waypoints, so what its copy says — the name, the colour, and where it stands — is read back into
+ * the record whenever the two differ, and a waypoint the player made in the minimap is taken in as
+ * one of these too, marked {@link #isFromXaero() as coming from there}. Nothing here depends on the
+ * minimap being there: without it the waypoints are still recorded and still marked on the HUD.
  *
  * <p>Which world a waypoint belongs to is a key of this mod's own making — see
  * {@link CompassWaypoints#currentWorldKey} — since the same server or save has to answer to the same
@@ -33,17 +36,19 @@ public final class CompassWaypoint {
 
 	private final String worldKey;
 	private final ResourceLocation dimension;
-	private final int x;
-	private final int y;
-	private final int z;
-	private final String name;
+	private int x;
+	private int y;
+	private int z;
+	private String name;
 	private final SearchTarget searchTarget;
 	private final ResourceLocation targetKey;
 	private final long createdAt;
 	/** An index into the minimap's list of colours, which is the game's list of text colours. */
-	private final int colorIndex;
+	private int colorIndex;
 	private boolean shownOnHud;
 	private String xaeroWorld;
+	/** Whether this was made in the minimap by the player rather than located by the compass. */
+	private boolean fromXaero;
 
 	public CompassWaypoint(String worldKey, ResourceLocation dimension, int x, int y, int z, String name, SearchTarget searchTarget, ResourceLocation targetKey, long createdAt, int colorIndex) {
 		this.worldKey = worldKey;
@@ -57,6 +62,17 @@ public final class CompassWaypoint {
 		this.createdAt = createdAt;
 		this.colorIndex = Math.floorMod(colorIndex, COLOR_COUNT);
 		shownOnHud = true;
+	}
+
+	/**
+	 * A waypoint the player made in the minimap, taken in as one of the compass's own. It names no
+	 * structure or biome, and is already mirrored, since the minimap's waypoint is the original.
+	 */
+	public static CompassWaypoint fromXaero(String worldKey, ResourceLocation dimension, String xaeroWorld, int x, int y, int z, String name, long createdAt, int colorIndex) {
+		final CompassWaypoint waypoint = new CompassWaypoint(worldKey, dimension, x, y, z, name, SearchTarget.STRUCTURE, null, createdAt, colorIndex);
+		waypoint.xaeroWorld = xaeroWorld;
+		waypoint.fromXaero = true;
+		return waypoint;
 	}
 
 	public String getWorldKey() {
@@ -80,9 +96,29 @@ public final class CompassWaypoint {
 		return z;
 	}
 
-	/** What the waypoint is called, which is the name of the structure or the biome it marks. */
+	/** What the waypoint is called: the name of the structure or the biome it marks, or whatever the player has since called it in the minimap. */
 	public String getName() {
 		return name;
+	}
+
+	void setName(String name) {
+		this.name = name;
+	}
+
+	void setColorIndex(int colorIndex) {
+		this.colorIndex = Math.floorMod(colorIndex, COLOR_COUNT);
+	}
+
+	/** Puts the waypoint where its copy was moved to in the minimap. */
+	void moveTo(int x, int y, int z) {
+		this.x = x;
+		this.y = y;
+		this.z = z;
+	}
+
+	/** Whether this was made in the minimap by the player rather than located by the compass. */
+	public boolean isFromXaero() {
+		return fromXaero;
 	}
 
 	public SearchTarget getSearchTarget() {
@@ -160,6 +196,9 @@ public final class CompassWaypoint {
 		if (xaeroWorld != null) {
 			json.addProperty("xaeroWorld", xaeroWorld);
 		}
+		if (fromXaero) {
+			json.addProperty("fromXaero", true);
+		}
 		return json;
 	}
 
@@ -179,6 +218,7 @@ public final class CompassWaypoint {
 		final CompassWaypoint waypoint = new CompassWaypoint(worldKey, dimension, integer(json, "x", 0), integer(json, "y", ExplorersCompassItem.UNKNOWN_Y), integer(json, "z", 0), name, searchTarget(string(json, "searchTarget", "")), location(json, "targetKey"), json.has("createdAt") && json.get("createdAt").isJsonPrimitive() ? json.get("createdAt").getAsLong() : 0L, integer(json, "color", 6));
 		waypoint.shownOnHud = !json.has("shownOnHud") || !json.get("shownOnHud").isJsonPrimitive() || json.get("shownOnHud").getAsBoolean();
 		waypoint.xaeroWorld = string(json, "xaeroWorld");
+		waypoint.fromXaero = json.has("fromXaero") && json.get("fromXaero").isJsonPrimitive() && json.get("fromXaero").getAsBoolean();
 		return waypoint;
 	}
 

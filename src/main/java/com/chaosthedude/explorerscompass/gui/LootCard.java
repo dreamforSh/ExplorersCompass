@@ -366,6 +366,16 @@ final class LootCard {
 	}
 
 	/**
+	 * The tooltip for the slot being pointed at, if any. Drawn apart from the card itself so that the
+	 * screen can put it in front of everything, the card included.
+	 */
+	void renderTooltip(GuiGraphics guiGraphics, int mouseX, int mouseY) {
+		if (hoveredSlot != null) {
+			LootSlots.renderTooltip(guiGraphics, Minecraft.getInstance().font, hoveredSlot.stack(), hoveredSlot.permille(), hoveredSlot.minCount(), hoveredSlot.maxCount(), mouseX, mouseY);
+		}
+	}
+
+	/**
 	 * Whether a section says how many containers name its table. Only where the card is shared
 	 * between tables: with one table the heading above the card already says how many there are.
 	 */

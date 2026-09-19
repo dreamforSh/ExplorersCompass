@@ -82,8 +82,12 @@ alone are what the upstream mod covers; biomes are its sister mod,
   when that mod is installed. By default the copies are kept to the minimap's world map alone — the
   strip already marks them in the world, so the minimap's floating labels would be one marker too
   many — and this can be switched to the minimap's usual drawing, or to hidden, from the waypoints
-  screen. Removing a waypoint here removes its copy there; deleting the copy there removes the
-  waypoint here.
+  screen. The minimap is where waypoints get edited, so what happens to a copy there happens to the
+  waypoint here: renaming or recolouring it renames or recolours the waypoint, dragging it somewhere
+  else moves the waypoint along, and deleting it forgets the waypoint. Waypoints made in the minimap
+  itself are taken in as waypoints of the compass too — marked on the strip, listed, and pointable
+  at — while the minimap's death markers and temporary waypoints are left to it. Removing a waypoint
+  here removes it from the minimap either way.
 - Structures a mod places by a placement type of its own — the landmarks of
   [Twilight Forest](https://www.curseforge.com/minecraft/mc-mods/the-twilight-forest), for one — are
   searched for by asking that mod's chunk generator for the nearest, the same way `/locate` asks it,
@@ -147,8 +151,10 @@ Things worth knowing about:
   shape it marks them with (a bookmark hanging from the top of the strip, a pin, a flag or a
   diamond), how many of the nearest it marks at once, and how many a world keeps before the oldest
   are forgotten. `createXaeroWaypoints`, `xaeroWaypointColor` and `xaeroWaypointDisplay` are about
-  the copies in Xaero's Minimap: whether they are made, what colour they and the marks on the strip
-  take, and whether the minimap draws them everywhere, on its world map alone, or not at all.
+  the copies in Xaero's Minimap: whether they are made and kept in step, what colour they and the
+  marks on the strip take, and whether the minimap draws them everywhere, on its world map alone, or
+  not at all. `importXaeroWaypoints` is whether the waypoints made in the minimap itself are taken in
+  as waypoints of the compass; a world never takes in more than `maxWaypointsPerWorld` lets it keep.
 - `showOverlayWhileCarried` — keeps the information panel up while the compass is in the inventory
   rather than in hand, the way the strip already can, and it reports on a carried compass exactly as
   it does on a held one. Off by default, so the panel appears only while a compass is held.

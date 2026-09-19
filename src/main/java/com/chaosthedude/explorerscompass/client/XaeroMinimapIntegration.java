@@ -42,9 +42,11 @@ import net.neoforged.fml.ModList;
  * <p>The record the compass works from is its own — see {@link CompassWaypoints} — and what goes
  * into the minimap is a copy of it. Each copy is made with whatever visibility the player asked for,
  * which by default keeps it off the minimap's own drawing of the world, since the direction strip
- * marks the same place already; a copy the player deletes in the minimap takes the record with it,
- * and a record removed here takes its copy out of the minimap, as soon as the minimap has the world
- * it went into open.
+ * marks the same place already. The minimap is then where the player edits waypoints, so the copies
+ * are read back every so often and held against the records — see {@link WaypointReconciliation}
+ * for what is done about each way they can differ — and a waypoint the player made in the minimap
+ * can be taken in as a record of its own. The minimap's death markers and its temporary waypoints
+ * are never taken as copies of anything: they are the minimap's own business.
  */
 @OnlyIn(Dist.CLIENT)
 public class XaeroMinimapIntegration {
@@ -52,6 +54,8 @@ public class XaeroMinimapIntegration {
 	private static final String MOD_ID = "xaerominimap";
 	private static final String SESSION_CLASS = "xaero.common.XaeroMinimapSession";
 	private static final String WAYPOINT_CLASS = "xaero.common.minimap.waypoints.Waypoint";
+	/** What the minimap calls an ordinary waypoint, as against a death marker or an old one. */
+	private static final int ORDINARY_WAYPOINT_TYPE = 0;
 
 	/** Whether the minimap still holds the copy of a waypoint. */
 	public enum MirrorState {
@@ -67,7 +71,13 @@ public class XaeroMinimapIntegration {
 	private static Method getCurrentContainerAndWorldID;
 	private static Constructor<?> waypointConstructor;
 	private static Method waypointGetX;
+	private static Method waypointGetY;
 	private static Method waypointGetZ;
+	private static Method waypointGetName;
+	private static Method waypointGetColor;
+	private static Method waypointGetType;
+	private static Method waypointIsTemporary;
+	private static Method waypointIsYIncluded;
 	private static Method waypointGetVisibilityType;
 	private static Method waypointSetVisibilityType;
 	private static Method waypointIsDisabled;
@@ -226,49 +236,86 @@ public class XaeroMinimapIntegration {
 	}
 
 	/**
-	 * Looks over the copies in the world the minimap has open, and answers with the records whose
-	 * copies are gone: a copy the player deleted in the minimap takes its record with it. Asked to,
-	 * it also draws every copy still there the way the player currently asks; that is only ever done
-	 * at the player's own asking, so that a copy they have changed in the minimap is not changed back
-	 * behind them every few seconds.
+	 * Reads every ordinary waypoint out of the world the minimap has open and holds the given records
+	 * against them, answering with everything found out of step — see {@link WaypointReconciliation}
+	 * — or with nothing at all while the minimap has no world open. Asked to, it also draws the copy
+	 * of every record the compass itself made the way the player currently asks; that is only ever
+	 * done at the player's own asking, so that a copy they have changed in the minimap is not changed
+	 * back behind them every few seconds, and never to a waypoint the player made in the minimap,
+	 * whose drawing is theirs.
+	 *
+	 * @param records the records of the dimension the minimap has open, mirrored into it or not
 	 */
-	public static List<CompassWaypoint> reconcile(List<CompassWaypoint> waypoints, boolean applyDisplay) {
-		final List<CompassWaypoint> orphaned = new ArrayList<CompassWaypoint>();
+	public static WaypointReconciliation.Result reconcile(List<CompassWaypoint> records, boolean applyDisplay) {
 		if (!isActive()) {
-			return orphaned;
+			return null;
 		}
 		try {
 			resolve();
 			final Object manager = manager();
 			final Object world = manager == null ? null : currentWorld(manager);
 			if (world == null) {
-				return orphaned;
+				return null;
 			}
 			final String worldId = (String) getCurrentContainerAndWorldID.invoke(manager);
 			if (worldId == null) {
-				return orphaned;
+				return null;
 			}
 
-			final XaeroWaypointDisplay display = ConfigHandler.CLIENT.xaeroWaypointDisplay.get();
-			boolean changed = false;
-			for (CompassWaypoint waypoint : waypoints) {
-				if (!worldId.equals(waypoint.getXaeroWorld())) {
-					continue;
-				}
-				final Object copy = findCopy(manager, world, waypoint);
-				if (copy == null) {
-					orphaned.add(waypoint);
-				} else if (applyDisplay && applyDisplay(copy, display)) {
-					changed = true;
+			final List<WaypointReconciliation.MapWaypoint> copies = new ArrayList<WaypointReconciliation.MapWaypoint>();
+			for (Object set : setsOf(manager, world)) {
+				for (Object candidate : waypointsOf(set)) {
+					if (isOrdinary(candidate)) {
+						copies.add(read(candidate));
+					}
 				}
 			}
-			if (changed) {
-				save(manager, world);
+
+			final WaypointReconciliation.Result result = WaypointReconciliation.reconcile(records, worldId, copies);
+			if (applyDisplay) {
+				final XaeroWaypointDisplay display = ConfigHandler.CLIENT.xaeroWaypointDisplay.get();
+				boolean changed = false;
+				for (CompassWaypoint record : records) {
+					// The compass's own copies, still where it put them: not one the player made,
+					// not one that has moved or gone, and not one only now being taken as a copy
+					if (record.isFromXaero() || !worldId.equals(record.getXaeroWorld()) || result.orphaned().contains(record) || result.moved().containsKey(record) || result.adopted().containsKey(record)) {
+						continue;
+					}
+					final Object copy = findCopy(manager, world, record);
+					if (copy != null && applyDisplay(copy, display)) {
+						changed = true;
+					}
+				}
+				if (changed) {
+					save(manager, world);
+				}
 			}
+			return result;
 		} catch (Throwable t) {
 			giveUp(t);
+			return null;
 		}
-		return orphaned;
+	}
+
+	/** One of the minimap's waypoints, as far as a record has any use for it. */
+	private static WaypointReconciliation.MapWaypoint read(Object waypoint) throws ReflectiveOperationException {
+		final String name = (String) waypointGetName.invoke(waypoint);
+		return new WaypointReconciliation.MapWaypoint(
+				(int) waypointGetX.invoke(waypoint),
+				(int) waypointGetY.invoke(waypoint),
+				(int) waypointGetZ.invoke(waypoint),
+				name == null ? "" : name,
+				(int) waypointGetColor.invoke(waypoint),
+				(boolean) waypointIsYIncluded.invoke(waypoint));
+	}
+
+	/**
+	 * Whether one of the minimap's waypoints is the ordinary kind, which is the only kind the compass
+	 * has anything to do with: not a death marker, which the minimap places and takes away by itself,
+	 * and not a temporary one, which is gone when the game is.
+	 */
+	private static boolean isOrdinary(Object waypoint) throws ReflectiveOperationException {
+		return (int) waypointGetType.invoke(waypoint) == ORDINARY_WAYPOINT_TYPE && !(boolean) waypointIsTemporary.invoke(waypoint);
 	}
 
 	// The minimap, through whichever door it answers to
@@ -344,9 +391,10 @@ public class XaeroMinimapIntegration {
 		return null;
 	}
 
+	/** The ordinary waypoint standing on the given column of the given set, or null. A death marker there is not a copy of anything. */
 	private static Object findIn(Object set, int x, int z) throws ReflectiveOperationException {
 		for (Object candidate : waypointsOf(set)) {
-			if ((int) waypointGetX.invoke(candidate) == x && (int) waypointGetZ.invoke(candidate) == z) {
+			if ((int) waypointGetX.invoke(candidate) == x && (int) waypointGetZ.invoke(candidate) == z && isOrdinary(candidate)) {
 				return candidate;
 			}
 		}
@@ -406,7 +454,13 @@ public class XaeroMinimapIntegration {
 
 		waypointConstructor = waypointClass.getConstructor(int.class, int.class, int.class, String.class, String.class, int.class);
 		waypointGetX = waypointClass.getMethod("getX");
+		waypointGetY = waypointClass.getMethod("getY");
 		waypointGetZ = waypointClass.getMethod("getZ");
+		waypointGetName = waypointClass.getMethod("getName");
+		waypointGetColor = waypointClass.getMethod("getColor");
+		waypointGetType = waypointClass.getMethod("getWaypointType");
+		waypointIsTemporary = waypointClass.getMethod("isTemporary");
+		waypointIsYIncluded = waypointClass.getMethod("isYIncluded");
 		waypointGetVisibilityType = waypointClass.getMethod("getVisibilityType");
 		waypointSetVisibilityType = waypointClass.getMethod("setVisibilityType", int.class);
 		waypointIsDisabled = waypointClass.getMethod("isDisabled");

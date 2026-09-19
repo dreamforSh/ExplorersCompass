@@ -57,6 +57,8 @@ public class StructurePreviewScreen extends Screen {
 	private static final float DRAWER_FRACTION = 0.45F;
 	private static final int DRAWER_MIN_WIDTH = 150;
 	private static final int DRAWER_MAX_WIDTH = 270;
+	/** How far in front of the loot card and the items on it the tooltip of one of those items is drawn. */
+	private static final float LOOT_TOOLTIP_LIFT = 400.0F;
 
 	/** The angles the model can be looked at from at the press of a button. */
 	private enum ViewPreset {
@@ -194,6 +196,14 @@ public class StructurePreviewScreen extends Screen {
 				lootCard.render(guiGraphics, mouseX, mouseY);
 			}
 		}
+		// The tooltip of an item being pointed at, over everything: the card stands at the height the
+		// game draws its tooltips at, and the items on it a little in front of that, so a tooltip drawn
+		// where the game would draw one would stand behind them
+		guiGraphics.pose().pushPose();
+		guiGraphics.pose().translate(0.0F, 0.0F, LOOT_TOOLTIP_LIFT);
+		lootCard.renderTooltip(guiGraphics, mouseX, mouseY);
+		lootOverview.renderTooltip(guiGraphics, mouseX, mouseY);
+		guiGraphics.pose().popPose();
 	}
 
 	/** How wide the loot overview stands when it is open, for a panel of the given width. */

@@ -49,7 +49,7 @@ public class ConfigHandler {
 				new Group("hud", List.of(CLIENT.displayWithChatOpen, CLIENT.showOverlayWhileCarried, CLIENT.overlaySide, CLIENT.overlayLineOffset, CLIENT.overlayBackground, CLIENT.tooltipDetail)),
 				new Group("directionBar", List.of(CLIENT.showDirectionBar, CLIENT.showDirectionBarWhileCarried, CLIENT.directionBarY, CLIENT.directionBarWidth, CLIENT.directionBarSpan, CLIENT.directionBarBackground)),
 				new Group("waypoints", List.of(CLIENT.directionBarWaypoints, CLIENT.directionBarWaypointStyle, CLIENT.directionBarWaypointLimit, CLIENT.xaeroWaypointColor, CLIENT.maxWaypointsPerWorld)),
-				new Group("xaero", List.of(CLIENT.createXaeroWaypoints, CLIENT.xaeroWaypointDisplay)),
+				new Group("xaero", List.of(CLIENT.createXaeroWaypoints, CLIENT.importXaeroWaypoints, CLIENT.xaeroWaypointDisplay)),
 				new Group("screens", List.of(CLIENT.guiHeaderBackground, CLIENT.guiSidebarBackground, CLIENT.guiStatusBarBackground, CLIENT.translateStructureNames, CLIENT.translateBiomeNames)),
 				new Group("preview", List.of(CLIENT.structurePreviewAutoSpin, CLIENT.structurePreviewLootMarkers, CLIENT.structurePreviewDetailLimit)));
 	}
@@ -167,6 +167,7 @@ public class ConfigHandler {
 		public final ModConfigSpec.BooleanValue translateStructureNames;
 		public final ModConfigSpec.BooleanValue translateBiomeNames;
 		public final ModConfigSpec.BooleanValue createXaeroWaypoints;
+		public final ModConfigSpec.BooleanValue importXaeroWaypoints;
 		public final ModConfigSpec.IntValue xaeroWaypointColor;
 		public final ModConfigSpec.EnumValue<XaeroWaypointDisplay> xaeroWaypointDisplay;
 		public final ModConfigSpec.IntValue maxWaypointsPerWorld;
@@ -206,8 +207,11 @@ public class ConfigHandler {
 			desc = "Attempts to translate biome names before fixing the unlocalized names. Unlike structures, almost every biome is named by the game itself or by the mod that adds it, so there is rarely anything left to fix up.";
 			translateBiomeNames = builder.comment(desc).define("translateBiomeNames", true);
 
-			desc = "Mirrors each waypoint the compass records into Xaero's Minimap as well. Has no effect when that mod is not installed. The compass keeps a waypoint of its own for every place it locates either way, marked on the direction strip and listed on the waypoints screen; this is about whether the minimap gets a copy.";
+			desc = "Mirrors each waypoint the compass records into Xaero's Minimap as well. Has no effect when that mod is not installed. The compass keeps a waypoint of its own for every place it locates either way, marked on the direction strip and listed on the waypoints screen; this is about whether the minimap gets a copy. It is also what keeps the two in step the other way: a copy renamed, recoloured, moved or deleted in the minimap does the same to the compass's waypoint.";
 			createXaeroWaypoints = builder.comment(desc).define("createXaeroWaypoints", true);
+
+			desc = "Takes the waypoints the player makes in Xaero's Minimap in as waypoints of the compass too, so that they are marked on the direction strip, listed on the waypoints screen, and can be pointed at and travelled to. The minimap's death markers and its temporary waypoints are left alone. Needs the setting above. A world never takes in more than maxWaypointsPerWorld allows it to keep.";
+			importXaeroWaypoints = builder.comment(desc).define("importXaeroWaypoints", true);
 
 			// The first entry in that list is black, which a waypoint marker is not readable in, so the
 			// gold this mod picks things out in elsewhere is used instead
