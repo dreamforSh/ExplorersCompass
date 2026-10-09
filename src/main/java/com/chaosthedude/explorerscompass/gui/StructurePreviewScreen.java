@@ -1,6 +1,7 @@
 package com.chaosthedude.explorerscompass.gui;
 
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.List;
 
 import org.lwjgl.glfw.GLFW;
@@ -59,6 +60,8 @@ public class StructurePreviewScreen extends Screen {
 	private static final int DRAWER_MAX_WIDTH = 270;
 	/** How far in front of the loot card and the items on it the tooltip of one of those items is drawn. */
 	private static final float LOOT_TOOLTIP_LIFT = 400.0F;
+	/** No tables, for a frame where neither the card nor the drawer is pointing at anything. Never modified. */
+	private static final BitSet EMPTY_TABLES = new BitSet();
 
 	/** The angles the model can be looked at from at the press of a button. */
 	private enum ViewPreset {
@@ -191,8 +194,9 @@ public class StructurePreviewScreen extends Screen {
 			final StructurePreview preview = StructurePreviewCache.get(structureKey);
 			final StructurePreviewView.LootBadge badge = view.lootBadgeById(hoveredBadgeId);
 			if (preview != null && badge != null) {
-				// Kept clear of the drawer while it is open: the two say different things about the same containers
-				lootCard.layout(preview, badge, lootOverview.isOpen() ? modelRight : width, height);
+				// Kept short of the slider and of the drawer, which says something different about the
+				// same containers; the pointer on either is taken to have left the badge
+				lootCard.layout(preview, badge, 0, layerSlider.visible ? layerSlider.getX() : modelRight, height);
 				lootCard.render(guiGraphics, mouseX, mouseY);
 			}
 		}
@@ -237,12 +241,17 @@ public class StructurePreviewScreen extends Screen {
 			}
 		}
 		hoveredBadgeId = hovered == null ? NO_BADGE : hovered.getId();
-		// Held still for the card, and for the drawer too: a badge lit up from a heading in the
-		// drawer would wander off with the model otherwise
-		view.setHoldingStill(hovered != null || lootOverview.getHoveredTable() >= 0);
+		// The drawer is asked first, since the pointer is on it whenever it has anything lit; the card
+		// is drawn after the badges, so what it lights up shows a frame late, which is too short to see
+		final BitSet drawerLit = lootOverview.isOpen() ? lootOverview.getHighlightedTables() : EMPTY_TABLES;
+		final BitSet cardLit = hovered != null && lootCard.isFor(hovered) ? lootCard.getHighlightedTables() : EMPTY_TABLES;
+		final BitSet lit = !drawerLit.isEmpty() ? drawerLit : cardLit;
+		// Held still for the card, and for the drawer too: a badge lit up from the drawer would
+		// wander off with the model otherwise
+		view.setHoldingStill(hovered != null || !drawerLit.isEmpty());
 
 		guiGraphics.enableScissor(left + 1, top + 1, right - 1, bottom - 1);
-		view.renderLootBadges(guiGraphics, preview, hovered, lootOverview.isOpen() ? lootOverview.getHoveredTable() : -1);
+		view.renderLootBadges(guiGraphics, preview, hovered, lit.isEmpty() ? null : lit);
 		guiGraphics.disableScissor();
 	}
 
@@ -377,6 +386,10 @@ public class StructurePreviewScreen extends Screen {
 	}
 
 	private void renderButtonTooltip(GuiGraphics guiGraphics, int mouseX, int mouseY) {
+		// The card stands in front of everything, so whatever it covers is not what is being pointed at
+		if (isOverLootCard(mouseX, mouseY)) {
+			return;
+		}
 		for (Object widget : renderables) {
 			if (widget instanceof TransparentButton button && button.visible && button.isPointedAt() && !button.getTooltipLines().isEmpty()) {
 				guiGraphics.renderComponentTooltip(font, button.getTooltipLines(), mouseX, mouseY);
@@ -415,21 +428,27 @@ public class StructurePreviewScreen extends Screen {
 
 	@Override
 	public boolean mouseClicked(double mouseX, double mouseY, int button) {
+		// A click on one of the card's tabs picks that table. Anywhere else on a badge or its card
+		// opens the overview at the table the card is showing, which is where the whole of what it
+		// holds is; it is not the start of turning the model. Asked before the controls, since the
+		// card is drawn in front of them
+		if (button == 0 && isOverLootCard(mouseX, mouseY)) {
+			if (lootCard.mouseClicked(mouseX, mouseY, button)) {
+				return true;
+			}
+			final StructurePreview preview = StructurePreviewCache.get(structureKey);
+			final StructurePreviewView.LootBadge badge = view.lootBadgeById(hoveredBadgeId);
+			if (preview != null && badge != null) {
+				final int selected = lootCard.isFor(badge) ? lootCard.getSelectedTable() : -1;
+				lootOverview.openAt(selected >= 0 ? selected : preview.getLootMarkerTableIndex(badge.getShownMarker()));
+			}
+			return true;
+		}
 		// The controls standing inside the panel take the click before the panel itself does
 		if (super.mouseClicked(mouseX, mouseY, button)) {
 			return true;
 		}
 		if (lootOverview.mouseClicked(mouseX, mouseY, button)) {
-			return true;
-		}
-		// A click on a badge or its card opens the overview at that container's table, which is
-		// where the whole of what it holds is; it is not the start of turning the model
-		if (button == 0 && isOverLootCard(mouseX, mouseY)) {
-			final StructurePreview preview = StructurePreviewCache.get(structureKey);
-			final StructurePreviewView.LootBadge badge = view.lootBadgeById(hoveredBadgeId);
-			if (preview != null && badge != null) {
-				lootOverview.openAt(preview.getLootMarkerTableIndex(badge.getShownMarker()));
-			}
 			return true;
 		}
 		if (isOverView(mouseX, mouseY)) {
@@ -468,6 +487,11 @@ public class StructurePreviewScreen extends Screen {
 	/** Scrolling is reported along both axes now; only the vertical one turns or cuts the model. */
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+		// Over a badge whose card has tabs the wheel steps through its tables; over one with a
+		// single table it zooms, the way it does anywhere else on the model
+		if (isOverLootCard(mouseX, mouseY) && lootCard.mouseScrolled(scrollY)) {
+			return true;
+		}
 		if (layerSlider.visible && layerSlider.mouseScrolled(mouseX, mouseY, scrollX, scrollY)) {
 			return true;
 		}

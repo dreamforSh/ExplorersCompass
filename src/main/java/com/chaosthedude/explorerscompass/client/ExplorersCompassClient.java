@@ -2,6 +2,7 @@ package com.chaosthedude.explorerscompass.client;
 
 import com.chaosthedude.explorerscompass.ExplorersCompass;
 import com.chaosthedude.explorerscompass.gui.ConfigScreen;
+import com.chaosthedude.explorerscompass.gui.LootTooltip;
 import com.chaosthedude.explorerscompass.items.ExplorersCompassItem;
 import com.chaosthedude.explorerscompass.util.CompassState;
 
@@ -23,6 +24,7 @@ import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.neoforge.client.event.RegisterClientReloadListenersEvent;
+import net.neoforged.neoforge.client.event.RegisterClientTooltipComponentFactoriesEvent;
 import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 import net.neoforged.neoforge.common.NeoForge;
 
@@ -39,6 +41,7 @@ public class ExplorersCompassClient {
 	public ExplorersCompassClient(IEventBus modEventBus, ModContainer modContainer) {
 		modEventBus.addListener(this::clientSetup);
 		modEventBus.addListener(this::registerClientReloadListeners);
+		modEventBus.addListener(this::registerTooltipComponents);
 		// The mod list's configure button opens the same settings screen the compass screen's gear does
 		modContainer.registerExtensionPoint(IConfigScreenFactory.class, (container, parent) -> new ConfigScreen(parent));
 	}
@@ -128,6 +131,14 @@ public class ExplorersCompassClient {
 		event.registerReloadListener((ResourceManagerReloadListener) (resourceManager) -> {
 			ExplorersCompass.clientSearchDataRevision++;
 		});
+	}
+
+	/**
+	 * The game draws a tooltip component only through a factory registered for its type, and
+	 * refuses one it has none for, so the rows the loot tooltip draws under an item need theirs.
+	 */
+	private void registerTooltipComponents(RegisterClientTooltipComponentFactoriesEvent event) {
+		event.register(LootTooltip.Data.class, LootTooltip.Client::new);
 	}
 
 }

@@ -1,6 +1,8 @@
 package com.chaosthedude.explorerscompass.gui;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.BitSet;
 import java.util.List;
 
 import com.chaosthedude.explorerscompass.preview.StructurePreview;
@@ -8,6 +10,7 @@ import com.chaosthedude.explorerscompass.util.RenderUtils;
 
 import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -24,38 +27,48 @@ import net.neoforged.api.distmarker.OnlyIn;
  * The card that opens beside a loot badge, saying what the container holds.
  *
  * <p>Laid out beside the badge rather than under the pointer, and left standing while the pointer
- * is on it, so that it can be read into: each item is a slot, and pointing at one names it along
- * the bottom of the card, with how many come at once and how likely. The screen holds the model
- * still meanwhile.
+ * is on it, so that it can be read into: each item is a tile, likeliest first and without a break,
+ * with how many come at once in its corner and how likely under it, and pointing at one brings up
+ * the item's tooltip, with everything the loot says about it, and lights every badge on the model
+ * that can give it. The screen holds the model still meanwhile.
  *
- * <p>One card can stand for several containers, where a badge does. Each loot table among them
- * gets a section of its own, headed by the container's icon and the table's name and saying how
- * many of the containers name it, with the items in a grid under it. A card shared between several
- * tables shows the first rows of each and says how many items it left out, so that a room lined
- * with pots does not open into a card taller than the screen; the whole of every table is in the
- * overview, which a click on the badge opens.
+ * <p>One card can stand for several containers, where a badge does. Where they name more than one
+ * loot table, each table gets a tab along the top, showing the container's icon and how many of
+ * the containers name it, and the card shows one table at a time: the one the badge is drawn as,
+ * until another tab is clicked or scrolled to. The card is as tall as the tallest of its tables, so
+ * that it does not jump under the pointer from one tab to the next.
  *
- * <p>The slots themselves are drawn by {@link LootSlots}, the same way the overview draws them.
+ * <p>A table too long for the screen shows what fits, keeping the last row for its rarest items,
+ * which are the ones worth finding, and says along the bottom how many it left out; the whole of
+ * every table is in the overview, which a click on the badge or the card opens.
+ *
+ * <p>The tiles are laid out and drawn by {@link LootGrid}, the same way the overview draws them,
+ * and what is worked out about each item comes from {@link LootStats}.
  */
 @OnlyIn(Dist.CLIENT)
 final class LootCard {
 
 	private static final int PADDING = 6;
-	private static final int SLOT = LootSlots.SLOT;
-	private static final int COLUMNS = 9;
-	private static final int LINE = 10;
 	private static final int ICON = 16;
-	/** The heading of a section: an icon tall, and a pixel under it. */
+	/** The heading of a table: an icon tall, and a pixel under it. */
 	private static final int TITLE_ROW = ICON + 1;
+	private static final int LINE = 10;
 	/** Room between the last row of items and the line along the bottom. */
 	private static final int FOOTER_GAP = 4;
-	/** How many sections a card shows before it only counts the rest. */
-	private static final int MAX_SECTIONS = 4;
-	/** How many rows of items a section may take when it shares the card with others. */
-	private static final int SHARED_SECTION_ROWS = 2;
+	/** The line along the bottom that says how many items were left out, with the room above it. */
+	private static final int FOOTER = FOOTER_GAP + LINE;
+	private static final int TAB_W = 22;
+	private static final int TAB_H = 20;
+	private static final int TAB_GAP = 2;
+	/** The row of tabs, and a little room under it before the heading. */
+	private static final int TAB_ROW = TAB_H + 3;
+	/** How many tiles a row may hold, which is as many as a chest's row of slots. */
+	private static final int MAX_COLUMNS = 9;
 	/** How wide a card may grow to fit a long name before the name is shortened instead, and how narrow one with nothing but a line of text may be. */
 	private static final int MAX_TEXT_WIDTH = 240;
 	private static final int MIN_TEXT_WIDTH = 60;
+	/** How few rows of items a card keeps however short the screen, so that a long table still shows more than its first few. */
+	private static final int MIN_ROWS = 2;
 	private static final int GAP_FROM_BADGE = 8;
 	private static final int SCREEN_MARGIN = 4;
 	/** Drawn over the model and the controls both, at the height the game draws its own tooltips. */
@@ -65,38 +78,73 @@ final class LootCard {
 	private static final int BACKGROUND_BOTTOM = 0xF40A0C10;
 	private static final int BORDER = 0x60FFFFFF;
 	private static final int SEPARATOR = 0x28FFFFFF;
-	private static final int MORE_CHIP_BACKGROUND = 0xC0000000;
+	private static final int TAB_IDLE = 0x18FFFFFF;
+	private static final int TAB_HOVER = GuiTheme.CHIP_BACKGROUND;
+	private static final int TAB_SELECTED = GuiTheme.CHIP_ACCENT_BACKGROUND;
+	/** The count on a tab is drawn the way the count on a badge is, so that the two read as the same number. */
+	private static final int TAB_COUNT_BG = 0xFFFFC24B;
+	private static final int TAB_COUNT_TEXT = 0x1A1408;
 
-	/** One item slot laid out on the card, so that the pointer can be matched to it. */
-	private record Slot(int x, int y, ItemStack stack, int permille, int minCount, int maxCount) {
-	}
+	/** Lit for nothing, handed out where no tile is pointed at. Never changed. */
+	private static final BitSet NO_TABLES = new BitSet();
 
 	/** One loot table's worth of the card. */
 	private static final class Section {
 
-		final int tableIndex;
-		final Item icon;
+		final int table;
+		final ItemStack icon;
+		/** How many of the badge's containers name the table. */
 		int containers;
 		Component title;
+		/** The table's id, said under its name with advanced tooltips on, or empty where it is not said. */
 		String id = "";
-		int[] items = new int[0];
-		int[] chances = new int[0];
-		int[] minCounts = new int[0];
-		int[] maxCounts = new int[0];
-		int rowsShown;
-		int hiddenItems;
 		/** What is said in place of a grid when there is no grid to show. */
 		Component note;
+		/** The table's items, likeliest first, and their chances in the same order. */
+		final List<LootGrid.Entry> entries = new ArrayList<LootGrid.Entry>();
+		int[] permilles = new int[0];
+		/** Where the tiles fall, or null where the table gives nothing to show. */
+		LootGrid.Layout grid;
+		/** How far below the top of the card the grid begins. */
+		int gridTop;
 
-		Section(int tableIndex, Item icon) {
-			this.tableIndex = tableIndex;
+		Section(int table, ItemStack icon) {
+			this.table = table;
 			this.icon = icon;
+		}
+
+		/** How tall the section stands under the tabs, the line along the bottom included where it has one. */
+		int height() {
+			int height = TITLE_ROW;
+			if (!id.isEmpty()) {
+				height += LINE;
+			}
+			if (note != null) {
+				height += LINE;
+			}
+			if (grid != null) {
+				height += 2 + grid.height();
+				if (grid.hidden() > 0) {
+					height += FOOTER;
+				}
+			}
+			return height;
 		}
 
 	}
 
+	/**
+	 * One tab along the top, with its left edge relative to the card's. The section is the index of
+	 * the table it stands for, or -1 for the tab that counts the tables there was no room for, in
+	 * which case it carries how many that is.
+	 */
+	private record Tab(int x, int section, int hidden) {
+	}
+
 	private final List<Section> sections = new ArrayList<Section>();
-	private final List<Slot> slots = new ArrayList<Slot>();
+	private final List<Tab> tabs = new ArrayList<Tab>();
+	private StructurePreview preview;
+	private LootStats stats;
 	private int badgeId = Integer.MIN_VALUE;
 	private int badgeLeft;
 	private int badgeTop;
@@ -106,11 +154,24 @@ final class LootCard {
 	private int top;
 	private int width;
 	private int height;
-	private Component header;
-	private boolean hasFooter;
-	/** Whether any section left items out, so that the footer can say where the rest are. */
-	private boolean hasHiddenItems;
-	private Slot hoveredSlot;
+
+	/** The table shown, by its index in the preview, or -1 before the card has been laid out. */
+	private int selectedTable = -1;
+	/** The section of the table shown, as an index into {@link #sections}. */
+	private int selectedSection;
+
+	/** What the layout was last worked out for, so that it is only worked out again when one of them changes. */
+	private final IntArrayList builtMarkers = new IntArrayList();
+	private int builtSelectedTable = -1;
+	private int builtAreaLeft = -1;
+	private int builtAreaRight = -1;
+	private int builtScreenHeight = -1;
+	private boolean builtAdvanced;
+
+	private LootGrid.Tile hoveredTile;
+	private Tab hoveredTab;
+	/** Whether the card was drawn since its tooltip last was, so that a card no longer open leaves no tooltip and no lit badge behind. */
+	private boolean rendered;
 
 	/** Whether the card has been laid out for the given badge, so that its rectangle can be trusted. */
 	boolean isFor(StructurePreviewView.LootBadge badge) {
@@ -137,83 +198,140 @@ final class LootCard {
 		return mouseX >= bandLeft && mouseX < bandRight && mouseY >= badgeTop - 2 && mouseY < badgeBottom + 2;
 	}
 
-	/** Lays the card out for the given badge, beside it, and inside the screen. */
-	void layout(StructurePreview preview, StructurePreviewView.LootBadge badge, int screenWidth, int screenHeight) {
-		final Font font = Minecraft.getInstance().font;
+	/**
+	 * Lays the card out for the given badge, beside it, inside the given span across the screen and
+	 * inside the screen's height. Called every frame the card is open; what is on the card is only
+	 * worked out again when the badge, the preview, the table shown, the room it has or whether
+	 * advanced tooltips are on changes, and otherwise the card is only moved to stay beside its badge.
+	 *
+	 * <p>The span stops short of the slider at the edge of the model, and of the drawer where it is
+	 * open, rather than running to the edge of the screen: the pointer on either is taken to have
+	 * left the badge, so the part of a card standing over them would close the card when reached
+	 * for. The sidebar on the other side is no such trouble, since the screen hands a click on the
+	 * card to the card before its controls, and a card kept off it would end up over its own badge.
+	 */
+	void layout(StructurePreview preview, StructurePreviewView.LootBadge badge, int areaLeft, int areaRight, int screenHeight) {
+		final boolean advanced = Minecraft.getInstance().options.advancedItemTooltips;
+		final boolean otherBadge = badge.getId() != badgeId || preview != this.preview;
+		if (otherBadge) {
+			// A badge opens on the table it is drawn as, which is the container most worth seeing
+			selectedTable = preview.getLootMarkerTableIndex(badge.getShownMarker());
+		}
 		badgeId = badge.getId();
+		this.preview = preview;
 		badgeLeft = badge.getBoxLeft();
 		badgeTop = badge.getBoxTop();
 		badgeRight = badge.getBoxRight();
 		badgeBottom = badge.getBoxBottom();
-		sections.clear();
-		slots.clear();
-		hoveredSlot = null;
+		// The markers as well as the badge's id, since a badge gathers whichever containers stand
+		// near the one it is named for, and those change as the model turns
+		if (otherBadge || !badge.getMarkers().equals(builtMarkers) || selectedTable != builtSelectedTable || areaLeft != builtAreaLeft || areaRight != builtAreaRight || screenHeight != builtScreenHeight || advanced != builtAdvanced) {
+			rebuild(preview, badge, areaRight - areaLeft, screenHeight, advanced);
+			builtAreaLeft = areaLeft;
+			builtAreaRight = areaRight;
+		}
 
+		// Beside the badge, on whichever side has room, and never out of the span it was given
+		int cardLeft = badgeRight + GAP_FROM_BADGE;
+		if (cardLeft + width > areaRight - SCREEN_MARGIN) {
+			cardLeft = badgeLeft - GAP_FROM_BADGE - width;
+		}
+		left = Mth.clamp(cardLeft, areaLeft + SCREEN_MARGIN, Math.max(areaLeft + SCREEN_MARGIN, areaRight - SCREEN_MARGIN - width));
+		top = Mth.clamp((badgeTop + badgeBottom) / 2 - height / 2, SCREEN_MARGIN, Math.max(SCREEN_MARGIN, screenHeight - SCREEN_MARGIN - height));
+	}
+
+	/** Works out what is on the card and how big it is, against a top left corner of nought, for a span of the given width. */
+	private void rebuild(StructurePreview preview, StructurePreviewView.LootBadge badge, int areaWidth, int screenHeight, boolean advanced) {
+		final Font font = Minecraft.getInstance().font;
+		sections.clear();
+		tabs.clear();
+		hoveredTile = null;
+		hoveredTab = null;
+		stats = LootStats.of(preview);
 		gatherSections(preview, badge);
-		final boolean shared = sections.size() > 1;
-		header = badge.getCount() > 1 ? Component.translatable("string.explorerscompass.lootContainers", String.valueOf(badge.getCount())) : null;
+		for (Section section : sections) {
+			describe(preview, section, advanced);
+		}
+		selectedSection = sectionOf(selectedTable);
+		if (selectedSection < 0) {
+			// The table shown is no longer among the badge's, which the containers gathered under it changing can do
+			selectedTable = preview.getLootMarkerTableIndex(badge.getShownMarker());
+			selectedSection = Math.max(0, sectionOf(selectedTable));
+		}
+		final boolean tabbed = sections.size() > 1;
+
+		// As many columns as the span has room for, up to a chest's row, and no more than the longest table needs
+		int mostItems = 0;
+		for (Section section : sections) {
+			mostItems = Math.max(mostItems, section.entries.size());
+		}
+		final int columnsFit = Mth.clamp((areaWidth - 2 * SCREEN_MARGIN - 2 * PADDING) / LootSlots.TILE_W, 1, MAX_COLUMNS);
+		final int columns = Math.min(columnsFit, Math.max(1, mostItems));
+		// As many rows as the screen has room for under everything else the card holds
+		final int chrome = PADDING + (tabbed ? TAB_ROW : 0) + TITLE_ROW + (advanced ? LINE : 0) + 2 + FOOTER + PADDING - 2;
+		final int maxRows = Math.max(MIN_ROWS, (screenHeight - 2 * SCREEN_MARGIN - chrome) / LootSlots.ROW_LABELLED);
 
 		// Wide enough for the grid where there is one, and for the longest line up to a point
-		int textWidth = header == null ? 0 : font.width(header);
+		int textWidth = 0;
 		boolean anyGrid = false;
+		int bodyHeight = 0;
+		final int headerHeight = PADDING + (tabbed ? TAB_ROW : 0);
 		for (Section section : sections) {
-			textWidth = Math.max(textWidth, ICON + 4 + font.width(section.title) + (showsCount(section) ? 4 + font.width(countLabel(section.containers)) : 0));
+			textWidth = Math.max(textWidth, ICON + 4 + font.width(section.title) + (section.containers > 1 ? 4 + font.width(countLabel(section.containers)) : 0));
 			if (!section.id.isEmpty()) {
 				textWidth = Math.max(textWidth, font.width(section.id));
 			}
 			if (section.note != null) {
 				textWidth = Math.max(textWidth, font.width(section.note));
 			}
-			anyGrid |= section.items.length > 0;
-		}
-		final int gridWidth = COLUMNS * SLOT;
-		width = Mth.clamp(textWidth, anyGrid ? gridWidth : MIN_TEXT_WIDTH, MAX_TEXT_WIDTH) + 2 * PADDING;
-
-		// The rows and the slots, laid out against a left edge of zero and moved into place below
-		hasFooter = false;
-		hasHiddenItems = false;
-		int y = PADDING;
-		if (header != null) {
-			y += LINE + 3;
-		}
-		for (int i = 0; i < sections.size(); i++) {
-			final Section section = sections.get(i);
-			if (i > 0) {
-				y += 4;
-			}
-			y += TITLE_ROW;
-			if (!section.id.isEmpty()) {
-				y += LINE;
-			}
-			if (section.note != null) {
-				y += LINE;
-			}
-			if (section.items.length > 0) {
-				final int rows = (section.items.length + COLUMNS - 1) / COLUMNS;
-				section.rowsShown = shared ? Math.min(rows, SHARED_SECTION_ROWS) : rows;
-				final int shown = Math.min(section.items.length, section.rowsShown * COLUMNS);
-				section.hiddenItems = section.items.length - shown;
-				hasHiddenItems |= section.hiddenItems > 0;
-				y += 2;
-				for (int item = 0; item < shown; item++) {
-					slots.add(new Slot(PADDING + (item % COLUMNS) * SLOT, y + (item / COLUMNS) * SLOT, LootSlots.stackFor(preview, section.tableIndex, item), section.chances[item], section.minCounts[item], section.maxCounts[item]));
+			if (!section.entries.isEmpty()) {
+				anyGrid = true;
+				section.grid = LootGrid.flow(section.permilles, columns, maxRows);
+				if (section.grid.hidden() > 0) {
+					textWidth = Math.max(textWidth, font.width(I18n.get("string.explorerscompass.lootMoreFooter", String.valueOf(section.grid.hidden()))));
 				}
-				y += section.rowsShown * SLOT;
-				hasFooter = true;
+				section.gridTop = headerHeight + TITLE_ROW + (section.id.isEmpty() ? 0 : LINE) + (section.note == null ? 0 : LINE) + 2;
 			}
+			bodyHeight = Math.max(bodyHeight, section.height());
 		}
-		if (hasFooter) {
-			y += FOOTER_GAP + LINE;
+		// Never wider than the span, though, where a long line is shortened instead
+		final int narrowest = anyGrid ? columns * LootSlots.TILE_W : MIN_TEXT_WIDTH;
+		final int inner = Mth.clamp(textWidth, narrowest, Math.min(MAX_TEXT_WIDTH, Math.max(narrowest, areaWidth - 2 * SCREEN_MARGIN - 2 * PADDING)));
+		width = inner + 2 * PADDING;
+		height = headerHeight + bodyHeight + PADDING - 2;
+		if (tabbed) {
+			layoutTabs(inner);
 		}
-		height = y + PADDING - 2;
 
-		// Beside the badge, on whichever side has room, and never off the screen
-		int cardLeft = badgeRight + GAP_FROM_BADGE;
-		if (cardLeft + width > screenWidth - SCREEN_MARGIN) {
-			cardLeft = badgeLeft - GAP_FROM_BADGE - width;
+		builtMarkers.clear();
+		builtMarkers.addAll(badge.getMarkers());
+		builtSelectedTable = selectedTable;
+		builtScreenHeight = screenHeight;
+		builtAdvanced = advanced;
+	}
+
+	/**
+	 * Lays the tabs out along the top, as many as the card is wide enough for. Where there are more
+	 * tables than that, the last place goes to a tab counting the rest, and the table shown, where it
+	 * is among the rest, takes the place before it, so that the tab of what is shown is always there
+	 * to be seen.
+	 */
+	private void layoutTabs(int inner) {
+		final int maxTabs = Math.max(2, (inner + TAB_GAP) / (TAB_W + TAB_GAP));
+		final int[] shown = new int[Math.min(sections.size(), sections.size() <= maxTabs ? maxTabs : maxTabs - 1)];
+		for (int i = 0; i < shown.length; i++) {
+			shown[i] = i;
 		}
-		left = Mth.clamp(cardLeft, SCREEN_MARGIN, Math.max(SCREEN_MARGIN, screenWidth - SCREEN_MARGIN - width));
-		top = Mth.clamp((badgeTop + badgeBottom) / 2 - height / 2, SCREEN_MARGIN, Math.max(SCREEN_MARGIN, screenHeight - SCREEN_MARGIN - height));
+		if (selectedSection >= shown.length) {
+			shown[shown.length - 1] = selectedSection;
+		}
+		for (int i = 0; i < shown.length; i++) {
+			tabs.add(new Tab(PADDING + i * (TAB_W + TAB_GAP), shown[i], 0));
+		}
+		final int hidden = sections.size() - shown.length;
+		if (hidden > 0) {
+			tabs.add(new Tab(PADDING + shown.length * (TAB_W + TAB_GAP), -1, hidden));
+		}
 	}
 
 	/** Gathers the badge's containers by the table each names, nearest first, into sections. */
@@ -221,67 +339,80 @@ final class LootCard {
 		final Int2IntOpenHashMap sectionByTable = new Int2IntOpenHashMap();
 		sectionByTable.defaultReturnValue(-1);
 		final IntArrayList markers = badge.getMarkers();
-		int overflow = 0;
 		for (int i = 0; i < markers.size(); i++) {
 			final int marker = markers.getInt(i);
 			final int table = preview.getLootMarkerTableIndex(marker);
 			int index = sectionByTable.get(table);
 			if (index < 0) {
-				if (sections.size() >= MAX_SECTIONS) {
-					overflow++;
-					continue;
-				}
 				index = sections.size();
 				sectionByTable.put(table, index);
-				sections.add(describe(preview, table, preview.getLootMarkerIcon(marker)));
+				final Item icon = preview.getLootMarkerIcon(marker);
+				sections.add(new Section(table, new ItemStack(icon == null || icon == Items.AIR ? Items.CHEST : icon)));
 			}
 			sections.get(index).containers++;
 		}
-		if (overflow > 0) {
-			// Said on the last section rather than as a section of its own, which would want a table
-			final Section last = sections.get(sections.size() - 1);
-			last.note = Component.translatable("string.explorerscompass.lootMoreContainers", String.valueOf(overflow));
+	}
+
+	/** What one table is called and what it drops, likeliest first, ready to be laid out. */
+	private void describe(StructurePreview preview, Section section, boolean advanced) {
+		final int table = section.table;
+		final String id = preview.getLootTableId(table);
+		final int[] items = preview.getLootTableItems(table);
+		if (id.isEmpty()) {
+			// A container with no table either holds what it was placed with, or nothing at all
+			section.title = Component.translatable(items.length > 0 ? "string.explorerscompass.lootFixedItems" : "string.explorerscompass.noLootTable");
+		} else {
+			section.title = LootSlots.displayName(id);
+			// Only for the player who asked to see ids, and only where the name does not already say it
+			if (advanced && !section.title.getString().equals(id)) {
+				section.id = id;
+			}
+			if (items.length == 0) {
+				// Named, but nothing could be read out of it: a table that is missing, or one built from
+				// entries a mod added that this does not know how to walk
+				section.note = Component.translatable("string.explorerscompass.lootUnresolved");
+			}
+		}
+		if (items.length == 0) {
+			return;
+		}
+		final int[] chances = preview.getLootTableChances(table);
+		final int[] minCounts = preview.getLootTableMinCounts(table);
+		final int[] maxCounts = preview.getLootTableMaxCounts(table);
+		// The table comes likeliest first already; sorted again, keeping ties in place, since cutting a
+		// long table short keeps its rarest items by counting on that order
+		final Integer[] order = new Integer[items.length];
+		for (int item = 0; item < order.length; item++) {
+			order[item] = item;
+		}
+		Arrays.sort(order, (a, b) -> Integer.compare(chances[b], chances[a]));
+		section.permilles = new int[order.length];
+		for (int i = 0; i < order.length; i++) {
+			final int item = order[i];
+			final int variant = stats.variantOf(table, item);
+			section.permilles[i] = chances[item];
+			section.entries.add(new LootGrid.Entry(stats.stack(variant), chances[item], minCounts[item], maxCounts[item], variant, table, item));
 		}
 	}
 
-	/** What one table is called and what it drops, ready to be laid out. */
-	private static Section describe(StructurePreview preview, int table, Item icon) {
-		final Section section = new Section(table, icon);
-		final String id = preview.getLootTableId(table);
-		section.items = preview.getLootTableItems(table);
-		section.chances = preview.getLootTableChances(table);
-		section.minCounts = preview.getLootTableMinCounts(table);
-		section.maxCounts = preview.getLootTableMaxCounts(table);
-		if (id.isEmpty()) {
-			// A container with no table either holds what it was placed with, or nothing at all
-			section.title = Component.translatable(section.items.length > 0 ? "string.explorerscompass.lootFixedItems" : "string.explorerscompass.noLootTable");
-			return section;
+	private int sectionOf(int table) {
+		for (int i = 0; i < sections.size(); i++) {
+			if (sections.get(i).table == table) {
+				return i;
+			}
 		}
-		section.title = LootSlots.displayName(id);
-		if (!section.title.getString().equals(id)) {
-			section.id = id;
-		}
-		if (section.items.length == 0) {
-			// Named, but nothing could be read out of it: a table that is missing, or one built from
-			// entries a mod added that this does not know how to walk
-			section.note = Component.translatable("string.explorerscompass.lootUnresolved");
-		}
-		return section;
+		return -1;
 	}
 
 	void render(GuiGraphics guiGraphics, int mouseX, int mouseY) {
-		if (badgeId == Integer.MIN_VALUE) {
+		if (badgeId == Integer.MIN_VALUE || sections.isEmpty()) {
 			return;
 		}
 		final Font font = Minecraft.getInstance().font;
-		hoveredSlot = null;
-		for (Slot slot : slots) {
-			final int x = left + slot.x();
-			final int y = top + slot.y();
-			if (mouseX >= x && mouseX < x + SLOT && mouseY >= y && mouseY < y + SLOT) {
-				hoveredSlot = slot;
-			}
-		}
+		final Section section = sections.get(selectedSection);
+		hoveredTile = section.grid == null ? null : LootGrid.tileAt(section.grid, left + PADDING, top + section.gridTop, mouseX, mouseY);
+		hoveredTab = tabAt(mouseX, mouseY);
+		rendered = true;
 
 		guiGraphics.pose().pushPose();
 		guiGraphics.pose().translate(0.0F, 0.0F, Z);
@@ -294,71 +425,40 @@ final class LootCard {
 		final int textLeft = left + PADDING;
 		final int textRight = left + width - PADDING;
 		int y = top + PADDING;
-		if (header != null) {
-			guiGraphics.drawString(font, RenderUtils.trimToWidth(header.getString(), textRight - textLeft), textLeft, y, GuiTheme.TEXT_SECONDARY, false);
+		if (!tabs.isEmpty()) {
+			renderTabs(guiGraphics, font, y);
+			y += TAB_ROW;
+		}
+
+		// The heading: the container's icon, the table's name level with its middle, and how many
+		// containers name it against the right edge
+		guiGraphics.renderItem(section.icon, textLeft, y);
+		final int titleY = y + (ICON - font.lineHeight) / 2 + 1;
+		int titleRight = textRight;
+		if (section.containers > 1) {
+			final String count = countLabel(section.containers);
+			titleRight -= font.width(count) + 4;
+			guiGraphics.drawString(font, count, textRight - font.width(count), titleY, GuiTheme.TEXT_SECONDARY, false);
+		}
+		guiGraphics.drawString(font, RenderUtils.trimToWidth(section.title.getString(), titleRight - (textLeft + ICON + 4)), textLeft + ICON + 4, titleY, GuiTheme.TEXT_PRIMARY, true);
+		y += TITLE_ROW;
+		if (!section.id.isEmpty()) {
+			guiGraphics.drawString(font, RenderUtils.trimToWidth(section.id, textRight - textLeft), textLeft, y, GuiTheme.TEXT_MUTED, false);
 			y += LINE;
-			RenderUtils.drawRect(guiGraphics, textLeft, y, textRight, y + 1, SEPARATOR);
-			y += 3;
+		}
+		if (section.note != null) {
+			guiGraphics.drawString(font, RenderUtils.trimToWidth(section.note.getString(), textRight - textLeft), textLeft, y, GuiTheme.TEXT_MUTED, false);
 		}
 
-		for (int i = 0; i < sections.size(); i++) {
-			final Section section = sections.get(i);
-			if (i > 0) {
-				RenderUtils.drawRect(guiGraphics, textLeft, y + 1, textRight, y + 2, SEPARATOR);
-				y += 4;
-			}
-			// The heading: the container's icon, the table's name level with its middle, and how many
-			// containers name it against the right edge
-			final ItemStack icon = new ItemStack(section.icon == null || section.icon == Items.AIR ? Items.CHEST : section.icon);
-			guiGraphics.renderItem(icon, textLeft, y);
-			final int titleY = y + (ICON - font.lineHeight) / 2 + 1;
-			int titleRight = textRight;
-			if (showsCount(section)) {
-				final String count = countLabel(section.containers);
-				titleRight -= font.width(count) + 4;
-				guiGraphics.drawString(font, count, textRight - font.width(count), titleY, GuiTheme.TEXT_SECONDARY, false);
-			}
-			guiGraphics.drawString(font, RenderUtils.trimToWidth(section.title.getString(), titleRight - (textLeft + ICON + 4)), textLeft + ICON + 4, titleY, GuiTheme.TEXT_PRIMARY, true);
-			y += TITLE_ROW;
-			if (!section.id.isEmpty()) {
-				guiGraphics.drawString(font, RenderUtils.trimToWidth(section.id, textRight - textLeft), textLeft, y, GuiTheme.TEXT_MUTED, false);
-				y += LINE;
-			}
-			if (section.note != null) {
-				guiGraphics.drawString(font, RenderUtils.trimToWidth(section.note.getString(), textRight - textLeft), textLeft, y, GuiTheme.TEXT_MUTED, false);
-				y += LINE;
-			}
-			if (section.items.length > 0) {
-				y += 2 + section.rowsShown * SLOT;
-				if (section.hiddenItems > 0) {
-					// Pinned to the last slot of the last row, where the eye runs out of items, and
-					// lifted over the item drawn there
-					final String more = I18n.get("string.explorerscompass.lootMoreItems", String.valueOf(section.hiddenItems));
-					final int chipWidth = font.width(more) + 4;
-					final int chipLeft = textLeft + COLUMNS * SLOT - chipWidth;
-					guiGraphics.pose().pushPose();
-					guiGraphics.pose().translate(0.0F, 0.0F, LootSlots.OVER_ITEMS);
-					RenderUtils.drawRect(guiGraphics, chipLeft, y - 11, chipLeft + chipWidth, y - 1, MORE_CHIP_BACKGROUND);
-					guiGraphics.drawString(font, more, chipLeft + 2, y - 10, GuiTheme.ACCENT, false);
-					guiGraphics.pose().popPose();
-				}
-			}
-		}
-
-		for (Slot slot : slots) {
-			LootSlots.drawSlot(guiGraphics, font, left + slot.x(), top + slot.y(), slot.stack(), slot.permille(), slot == hoveredSlot);
-		}
-
-		if (hasFooter) {
-			// Level with where the layout left room for it, under a rule a pixel clear of the last row
-			final int footerY = top + height - PADDING - LINE + 2;
-			RenderUtils.drawRect(guiGraphics, textLeft, footerY - FOOTER_GAP + 1, textRight, footerY - FOOTER_GAP + 2, SEPARATOR);
-			if (hoveredSlot != null && !hoveredSlot.stack().isEmpty()) {
-				LootSlots.drawDetail(guiGraphics, font, textLeft, textRight, footerY, hoveredSlot.stack(), hoveredSlot.permille(), hoveredSlot.minCount(), hoveredSlot.maxCount());
-			} else {
-				// Where the card left items out, the one thing worth saying is where the rest are
-				final String hint = I18n.get(hasHiddenItems ? "string.explorerscompass.lootClickForAll" : "string.explorerscompass.lootChanceHint");
-				guiGraphics.drawString(font, RenderUtils.trimToWidth(hint, textRight - textLeft), textLeft, footerY, GuiTheme.TEXT_MUTED, false);
+		if (section.grid != null) {
+			LootGrid.render(guiGraphics, font, section.grid, section.entries, textLeft, top + section.gridTop, hoveredTile, Integer.MIN_VALUE, Integer.MAX_VALUE);
+			if (section.grid.hidden() > 0) {
+				// Along the bottom of the card, which is where it stands whichever tab is shown, under a
+				// rule a pixel clear of the room above it
+				final int footerY = top + height - PADDING - LINE + 2;
+				RenderUtils.drawRect(guiGraphics, textLeft, footerY - FOOTER_GAP + 1, textRight, footerY - FOOTER_GAP + 2, SEPARATOR);
+				final String more = I18n.get("string.explorerscompass.lootMoreFooter", String.valueOf(section.grid.hidden()));
+				guiGraphics.drawString(font, RenderUtils.trimToWidth(more, textRight - textLeft), textLeft, footerY, GuiTheme.TEXT_MUTED, false);
 			}
 		}
 
@@ -366,21 +466,137 @@ final class LootCard {
 	}
 
 	/**
-	 * The tooltip for the slot being pointed at, if any. Drawn apart from the card itself so that the
-	 * screen can put it in front of everything, the card included.
+	 * Draws the tabs along the given row: each a container's icon on a tile, the one shown picked out
+	 * with a bar along its foot, and how many containers name its table in its corner where that is
+	 * more than one, lifted over the icon the way the count on a badge is.
+	 */
+	private void renderTabs(GuiGraphics guiGraphics, Font font, int y) {
+		for (Tab tab : tabs) {
+			final int x = left + tab.x();
+			final boolean selected = tab.section() == selectedSection;
+			RenderUtils.drawRect(guiGraphics, x, y, x + TAB_W, y + TAB_H, selected ? TAB_SELECTED : tab.equals(hoveredTab) ? TAB_HOVER : TAB_IDLE);
+			if (selected) {
+				RenderUtils.drawRect(guiGraphics, x, y + TAB_H - 2, x + TAB_W, y + TAB_H, GuiTheme.ACCENT | 0xFF000000);
+			}
+			if (tab.section() >= 0) {
+				guiGraphics.renderItem(sections.get(tab.section()).icon, x + 3, y + 2);
+			} else {
+				final String more = I18n.get("string.explorerscompass.lootMoreItems", String.valueOf(tab.hidden()));
+				guiGraphics.drawString(font, more, x + TAB_W / 2 - font.width(more) / 2, y + (TAB_H - font.lineHeight) / 2 + 1, GuiTheme.ACCENT, false);
+			}
+		}
+		guiGraphics.pose().pushPose();
+		guiGraphics.pose().translate(0.0F, 0.0F, LootSlots.OVER_ITEMS);
+		for (Tab tab : tabs) {
+			if (tab.section() < 0 || sections.get(tab.section()).containers <= 1) {
+				continue;
+			}
+			final String count = String.valueOf(sections.get(tab.section()).containers);
+			final int chipWidth = font.width(count) + 3;
+			final int chipLeft = left + tab.x() + TAB_W - chipWidth;
+			RenderUtils.drawRect(guiGraphics, chipLeft, y, chipLeft + chipWidth, y + 9, TAB_COUNT_BG);
+			guiGraphics.drawString(font, count, chipLeft + 2, y + 1, TAB_COUNT_TEXT, false);
+		}
+		guiGraphics.pose().popPose();
+	}
+
+	/**
+	 * The tooltip for whatever on the card is being pointed at: an item's, with everything the loot
+	 * says about it, or a tab's name. Drawn apart from the card itself so that the screen can put it
+	 * in front of everything, the card included.
 	 */
 	void renderTooltip(GuiGraphics guiGraphics, int mouseX, int mouseY) {
-		if (hoveredSlot != null) {
-			LootSlots.renderTooltip(guiGraphics, Minecraft.getInstance().font, hoveredSlot.stack(), hoveredSlot.permille(), hoveredSlot.minCount(), hoveredSlot.maxCount(), mouseX, mouseY);
+		if (!rendered) {
+			// The card was not drawn this frame, so whatever was pointed at on it is no longer there
+			hoveredTile = null;
+			hoveredTab = null;
+			return;
+		}
+		rendered = false;
+		final Font font = Minecraft.getInstance().font;
+		if (hoveredTile != null && hoveredTile.entry() >= 0) {
+			final LootGrid.Entry entry = sections.get(selectedSection).entries.get(hoveredTile.entry());
+			LootTooltip.render(guiGraphics, font, preview, stats, entry.variant(), entry.table(), entry.item(), mouseX, mouseY);
+		} else if (hoveredTab != null) {
+			if (hoveredTab.section() >= 0) {
+				guiGraphics.renderTooltip(font, tabName(sections.get(hoveredTab.section())), mouseX, mouseY);
+			} else {
+				guiGraphics.renderTooltip(font, Component.translatable("string.explorerscompass.lootMoreFooter", String.valueOf(hoveredTab.hidden())), mouseX, mouseY);
+			}
 		}
 	}
 
 	/**
-	 * Whether a section says how many containers name its table. Only where the card is shared
-	 * between tables: with one table the heading above the card already says how many there are.
+	 * Takes a click on one of the tabs, which shows its table. Anything else on the card is left to
+	 * the screen, which opens the overview for it, the tab counting the tables left out included.
 	 */
-	private boolean showsCount(Section section) {
-		return sections.size() > 1 && section.containers > 1;
+	boolean mouseClicked(double mouseX, double mouseY, int button) {
+		if (button != 0 || badgeId == Integer.MIN_VALUE) {
+			return false;
+		}
+		final Tab tab = tabAt(mouseX, mouseY);
+		if (tab == null || tab.section() < 0) {
+			return false;
+		}
+		select(tab.section());
+		return true;
+	}
+
+	/**
+	 * Turns from one tab to the next, up for the one before, round from the last to the first, where
+	 * there is more than one; otherwise leaves the wheel to the model.
+	 */
+	boolean mouseScrolled(double scrollY) {
+		if (sections.size() < 2 || scrollY == 0.0D) {
+			return false;
+		}
+		select(Math.floorMod(selectedSection + (scrollY > 0.0D ? -1 : 1), sections.size()));
+		return true;
+	}
+
+	/** The table shown, by its index in the preview, or -1 where the card has not been laid out. */
+	int getSelectedTable() {
+		return selectedTable;
+	}
+
+	/**
+	 * The tables that give the item being pointed at, so that every badge on the model holding one
+	 * can be lit; empty where no item is. Shared, and not to be changed.
+	 */
+	BitSet getHighlightedTables() {
+		if (hoveredTile == null || hoveredTile.entry() < 0 || stats == null) {
+			return NO_TABLES;
+		}
+		return stats.sourceTables(sections.get(selectedSection).entries.get(hoveredTile.entry()).variant());
+	}
+
+	/** Shows the given section; the card is laid out again for it the next time it is laid out. */
+	private void select(int section) {
+		selectedSection = section;
+		selectedTable = sections.get(section).table;
+		hoveredTile = null;
+	}
+
+	private Tab tabAt(double mouseX, double mouseY) {
+		final int tabTop = top + PADDING;
+		if (mouseY < tabTop || mouseY >= tabTop + TAB_H) {
+			return null;
+		}
+		for (Tab tab : tabs) {
+			final int x = left + tab.x();
+			if (mouseX >= x && mouseX < x + TAB_W) {
+				return tab;
+			}
+		}
+		return null;
+	}
+
+	/** What a tab is called when pointed at: its table's name, and how many of the containers name it where that is more than one. */
+	private static Component tabName(Section section) {
+		if (section.containers <= 1) {
+			return section.title;
+		}
+		return Component.empty().append(section.title).append(" ").append(Component.literal(countLabel(section.containers)).withStyle(ChatFormatting.GRAY));
 	}
 
 	private static String countLabel(int containers) {

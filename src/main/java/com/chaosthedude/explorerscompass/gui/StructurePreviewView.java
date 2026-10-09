@@ -2,6 +2,7 @@ package com.chaosthedude.explorerscompass.gui;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -10,6 +11,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
+
+import javax.annotation.Nullable;
 
 import org.lwjgl.opengl.GL11;
 
@@ -54,6 +57,8 @@ import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.network.chat.Style;
+import net.minecraft.network.chat.TextColor;
 import net.minecraft.util.Mth;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.Biomes;
@@ -61,6 +66,7 @@ import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.Rarity;
 import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.level.block.ShulkerBoxBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -526,8 +532,8 @@ public class StructurePreviewView implements AutoCloseable {
 	private static final int BADGE_ICON_MUTE = 0x80000000;
 	private static final int BADGE_COUNT_BACKGROUND = 0xFFFFC24B;
 	private static final int BADGE_COUNT_TEXT = 0x1A1408;
-	/** How far in front of the interface an item is drawn, and a little more, so that what is laid over one shows. */
-	private static final float OVER_ITEMS = 200.0F;
+	/** The dark rim around the dot that says a badge holds something worth finding, so it reads against any icon. */
+	private static final int BADGE_WORTH_RIM = 0x000000;
 
 	/**
 	 * One badge on the screen: the loot containers whose anchors fell together at one spot, and
@@ -547,6 +553,8 @@ public class StructurePreviewView implements AutoCloseable {
 		private int shown;
 		private int shownRank;
 		private boolean hasLoot;
+		/** How much the best thing any container here can give is worth, as an ordinal of the game's rarities. */
+		private int bestWorth;
 
 		private LootBadge(float anchorX, float anchorY, float depth) {
 			this.anchorX = anchorX;
@@ -554,11 +562,13 @@ public class StructurePreviewView implements AutoCloseable {
 			this.depth = depth;
 		}
 
-		private void add(StructurePreview preview, int marker) {
+		private void add(StructurePreview preview, int marker, LootStats stats) {
 			markers.add(marker);
-			final boolean named = !preview.getLootTableId(preview.getLootMarkerTableIndex(marker)).isEmpty();
-			final boolean holdsSomething = named || preview.getLootTableItems(preview.getLootMarkerTableIndex(marker)).length > 0;
+			final int table = preview.getLootMarkerTableIndex(marker);
+			final boolean named = !preview.getLootTableId(table).isEmpty();
+			final boolean holdsSomething = named || preview.getLootTableItems(table).length > 0;
 			hasLoot |= holdsSomething;
+			bestWorth = Math.max(bestWorth, stats.tableWorth(table));
 			// A chest stands for a room better than the pot beside it does, and anything that holds
 			// loot better than anything that does not
 			final int rank = (holdsSomething ? 2 : 0) + (isChestLike(preview.getLootMarkerIcon(marker)) ? 1 : 0);
@@ -599,10 +609,18 @@ public class StructurePreviewView implements AutoCloseable {
 			return hasLoot;
 		}
 
-		/** Whether any container here names the given table, by its index into the preview's tables. */
-		public boolean namesTable(StructurePreview preview, int table) {
+		/**
+		 * How much the best thing any container here can give is worth finding, as an ordinal of the
+		 * game's rarities, so that a chest worth opening can be told from across the model.
+		 */
+		public int getBestWorth() {
+			return bestWorth;
+		}
+
+		/** Whether any container here names one of the given tables, by their indices into the preview's tables. */
+		public boolean namesAny(StructurePreview preview, BitSet tables) {
 			for (int i = 0; i < markers.size(); i++) {
-				if (preview.getLootMarkerTableIndex(markers.getInt(i)) == table) {
+				if (tables.get(preview.getLootMarkerTableIndex(markers.getInt(i)))) {
 					return true;
 				}
 			}
@@ -659,6 +677,7 @@ public class StructurePreviewView implements AutoCloseable {
 		if (lastModelView == null || lastProjection == null || preview.getLootMarkerCount() == 0) {
 			return;
 		}
+		final LootStats stats = LootStats.of(preview);
 		final int layers = layersShown(preview);
 		final float[] screen = new float[3];
 		final List<float[]> projected = new ArrayList<float[]>();
@@ -685,7 +704,7 @@ public class StructurePreviewView implements AutoCloseable {
 				home = new LootBadge(point[0], point[1], point[2]);
 				badges.add(home);
 			}
-			home.add(preview, (int) point[3]);
+			home.add(preview, (int) point[3], stats);
 		}
 		// Drawn farthest first, so that a badge nearer the viewer stands over one behind it
 		badges.sort(Comparator.comparingDouble((badge) -> -badge.depth));
@@ -724,13 +743,14 @@ public class StructurePreviewView implements AutoCloseable {
 	/**
 	 * Pins every loot container onto the screen, through the walls, so a chest inside can be found.
 	 * Each is a small box floating just above its block on a stem, with the container's icon in it
-	 * and a count where several stand together; one that holds nothing is drawn dimmer, and the one
-	 * being pointed at is picked out in the accent, as is every one naming the table that is being
-	 * pointed at in the overview, so that a table can be read against where its containers stand.
+	 * and a count where several stand together; one that holds nothing is drawn dimmer, and one that
+	 * can give something rare carries a dot in the colour of that rarity. The one being pointed at is
+	 * picked out in the accent, as is every one naming a table that can give what is being pointed at
+	 * in the card or the overview, so that loot can be read against where its containers stand.
 	 *
-	 * @param highlightedTable the table whose containers are to be picked out, or a negative number for none
+	 * @param highlightedTables the tables whose containers are to be picked out, or null for none
 	 */
-	public void renderLootBadges(GuiGraphics guiGraphics, StructurePreview preview, LootBadge hovered, int highlightedTable) {
+	public void renderLootBadges(GuiGraphics guiGraphics, StructurePreview preview, LootBadge hovered, @Nullable BitSet highlightedTables) {
 		if (badges.isEmpty()) {
 			return;
 		}
@@ -744,7 +764,7 @@ public class StructurePreviewView implements AutoCloseable {
 		final float depthSpan = Math.max(1.0E-4F, farthest - nearest);
 
 		for (LootBadge badge : badges) {
-			final boolean lit = badge == hovered || (highlightedTable >= 0 && badge.namesTable(preview, highlightedTable));
+			final boolean lit = badge == hovered || (highlightedTables != null && badge.namesAny(preview, highlightedTables));
 			// A little fainter the deeper into the model it stands, which is the one cue there is for
 			// depth in something drawn through every wall
 			final float behind = lit ? 0.0F : (badge.depth - nearest) / depthSpan;
@@ -777,7 +797,7 @@ public class StructurePreviewView implements AutoCloseable {
 			// Anything laid over the icon has to be lifted above it: an item is drawn some way in
 			// front of the interface, and a plain fill would land behind it
 			guiGraphics.pose().pushPose();
-			guiGraphics.pose().translate(0.0F, 0.0F, OVER_ITEMS);
+			guiGraphics.pose().translate(0.0F, 0.0F, LootSlots.OVER_ITEMS);
 			if (!badge.hasLoot()) {
 				// Dimmed rather than left out: an empty chest is still a chest, and worth knowing about
 				RenderUtils.drawRect(guiGraphics, left + 1, top + 1, right - 1, bottom - 1, BADGE_ICON_MUTE);
@@ -790,12 +810,29 @@ public class StructurePreviewView implements AutoCloseable {
 				RenderUtils.drawRect(guiGraphics, chipLeft, chipTop, chipLeft + chipWidth, chipTop + 9, BADGE_COUNT_BACKGROUND);
 				guiGraphics.drawString(font, count, chipLeft + 2, chipTop + 1, BADGE_COUNT_TEXT, false);
 			}
+			if (badge.getBestWorth() >= Rarity.RARE.ordinal()) {
+				// In the corner across from the count, in the colour the game names an item of that
+				// rarity in, so that it reads as the same thing a tooltip would say
+				RenderUtils.drawRect(guiGraphics, left - 2, bottom - 4, left + 3, bottom + 1, withAlpha(BADGE_WORTH_RIM, lineAlpha));
+				RenderUtils.drawRect(guiGraphics, left - 1, bottom - 3, left + 2, bottom, withAlpha(worthColour(badge.getBestWorth()), lineAlpha));
+			}
 			guiGraphics.pose().popPose();
 		}
 	}
 
 	private static int withAlpha(int colour, int alpha) {
 		return (Mth.clamp(alpha, 0, 255) << 24) | (colour & 0xFFFFFF);
+	}
+
+	/**
+	 * The colour the game names an item of the given rarity in, read from the style the rarity puts
+	 * on a name, which is how a rarity another mod adds says its colour too. One whose style sets no
+	 * colour is drawn white, the colour a name with no rarity to speak of is written in.
+	 */
+	private static int worthColour(int worth) {
+		final Rarity[] rarities = Rarity.values();
+		final TextColor colour = rarities[Mth.clamp(worth, 0, rarities.length - 1)].getStyleModifier().apply(Style.EMPTY).getColor();
+		return colour == null ? 0xFFFFFF : colour.getValue();
 	}
 
 	/** Where the middle of the given container lands on the screen, and how deep, or false when it is off the panel. */

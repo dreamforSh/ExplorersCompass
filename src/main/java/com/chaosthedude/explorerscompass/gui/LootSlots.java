@@ -1,188 +1,116 @@
 package com.chaosthedude.explorerscompass.gui;
 
-import java.util.ArrayList;
-import java.util.List;
-
-import com.chaosthedude.explorerscompass.preview.StructurePreview;
 import com.chaosthedude.explorerscompass.util.LootTableNames;
 import com.chaosthedude.explorerscompass.util.RenderUtils;
 
-import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.resources.language.I18n;
-import net.minecraft.core.component.DataComponents;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.TextColor;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
-import net.minecraft.world.item.TooltipFlag;
-import net.minecraft.world.item.alchemy.Potion;
-import net.minecraft.world.item.alchemy.PotionContents;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
 
 /**
  * How a loot table's drops are drawn, wherever they are drawn: the card beside a badge and the
- * overview of a whole structure both lay items out as slots, and a slot has to look the same in
+ * overview of a whole structure both lay items out as tiles, and a tile has to look the same in
  * both for the two to read as one interface.
  *
- * <p>A slot is an item with its chance written small in the corner, coloured by how likely it is:
- * ordinary in white, uncommon in the accent, and rare in violet, so that the one thing worth
- * finding stands out among the bread. An item that comes enchanted is drawn with the glint the
- * game gives an enchanted item, and a bottle as the potion in it, so that the strong regeneration a
- * vault rewards does not draw as a bottle of water.
+ * <p>A tile is a slot with the item in it, how many come at once in the corner where the game
+ * writes a stack's size, and the chance written underneath at full size, so that neither has to be
+ * squinted at. The slot is tinted by the chance's tier, so that a row of tiles reads at a glance
+ * before any number is read, and a rare item's slot is outlined as well, so that the one thing
+ * worth finding stands out among the bread. A certain item needs no label: its green slot says it,
+ * and a row of nothing else is drawn shorter. An item that comes enchanted is drawn with the glint
+ * the game gives an enchanted item, and a bottle as the potion in it, so that the strong
+ * regeneration a vault rewards does not draw as a bottle of water.
  */
 @OnlyIn(Dist.CLIENT)
 final class LootSlots {
 
 	static final int SLOT = 18;
+	/** How wide a tile is: a slot with a little room either side, so that the labels of neighbours do not run together. */
+	static final int TILE_W = 22;
+	/** How far in from the left of its tile a slot is. */
+	static final int SLOT_INSET_X = 2;
+	/** How tall a row of tiles is with labels under its slots: the slot, then a line for the chance. */
+	static final int ROW_LABELLED = 27;
+	/** How tall a row of tiles is where none of them has a label to show. */
+	static final int ROW_PLAIN = 19;
+	/** How far right of the ribbon down a tier's group its tiles begin: the ribbon and a gap after it. */
+	static final int RIBBON = 4;
+	/** The space left between one tier's group and the next. */
+	static final int BAND_GAP = 3;
 	/** How far in front of the interface an item is drawn, and a little more, so that what is laid over one shows. */
 	static final float OVER_ITEMS = 200.0F;
 
-	static final int SLOT_BACKGROUND = 0x1EFFFFFF;
-	static final int SLOT_HOVER = 0x50FFC24B;
-	private static final int CHANCE_BACKDROP = 0xB0000000;
-	private static final int CHANCE_COMMON = 0xFFE4E7EB;
-	private static final int CHANCE_UNCOMMON = 0xFFFFC24B;
-	private static final int CHANCE_RARE = 0xFFD08CFF;
-	/** Below this many thousandths an item is uncommon, and below the next it is rare. */
-	private static final int UNCOMMON_PERMILLE = 500;
-	private static final int RARE_PERMILLE = 100;
+	static final int HOVER_FILL = 0x40FFFFFF;
+	static final int HOVER_OUTLINE = 0xFFFFFFFF;
+	static final int MORE_FILL = 0xC0000000;
+	/** The count is white with a shadow, the way the game writes a stack's size, so that it reads as one. */
+	static final int COUNT_COLOUR = 0xFFFFFFFF;
+	/** The most hidden items the tile that stands for them counts, so that the count fits in the slot. */
+	private static final int MORE_MAX = 99;
 
 	private LootSlots() {
 	}
 
 	/**
-	 * The stack a drop is drawn and named as: the item, holding its potion where it is a bottle of
-	 * one, and made to glint where it comes enchanted. Empty for an item this side does not know.
-	 */
-	static ItemStack stackFor(StructurePreview preview, int table, int item) {
-		final Item resolved = Item.byId(preview.getLootTableItems(table)[item]);
-		if (resolved == null || resolved == Items.AIR) {
-			return ItemStack.EMPTY;
-		}
-		final ItemStack stack = new ItemStack(resolved);
-		final int potionId = preview.getLootTableItemPotion(table, item);
-		if (potionId >= 0) {
-			final Potion potion = BuiltInRegistries.POTION.byId(potionId);
-			if (potion != null) {
-				stack.set(DataComponents.POTION_CONTENTS, new PotionContents(BuiltInRegistries.POTION.wrapAsHolder(potion)));
-			}
-		}
-		if (preview.isLootTableItemEnchanted(table, item)) {
-			stack.set(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, Boolean.TRUE);
-		}
-		return stack;
-	}
-
-	/** Draws one slot with its top left corner at the given point. */
-	static void drawSlot(GuiGraphics guiGraphics, Font font, int x, int y, ItemStack stack, int permille, boolean lit) {
-		RenderUtils.drawRect(guiGraphics, x, y, x + SLOT, y + SLOT, lit ? SLOT_HOVER : SLOT_BACKGROUND);
-		if (lit) {
-			RenderUtils.drawInnerOutline(guiGraphics, x, y, x + SLOT, y + SLOT, GuiTheme.ACCENT | 0xFF000000);
-		}
-		if (stack.isEmpty()) {
-			return;
-		}
-		guiGraphics.renderItem(stack, x + 1, y + 1);
-		drawChance(guiGraphics, font, permille, x, y);
-	}
-
-	/**
-	 * The chance, small, in the bottom right corner of the slot, on a dark backdrop so that it
-	 * reads over whatever the item's own texture puts behind it.
-	 */
-	private static void drawChance(GuiGraphics guiGraphics, Font font, int permille, int slotX, int slotY) {
-		final String text = formatChance(permille);
-		final int textWidth = font.width(text);
-		guiGraphics.pose().pushPose();
-		// Over the item, which is drawn a little way above the slot itself
-		guiGraphics.pose().translate(slotX + SLOT - 1, slotY + SLOT - 1, OVER_ITEMS);
-		guiGraphics.pose().scale(0.5F, 0.5F, 1.0F);
-		RenderUtils.drawRect(guiGraphics, -textWidth - 2, -font.lineHeight - 1, 1, 1, CHANCE_BACKDROP);
-		guiGraphics.drawString(font, text, -textWidth, -font.lineHeight, chanceColour(permille), false);
-		guiGraphics.pose().popPose();
-	}
-
-	/**
-	 * The line that says what a slot holds: how many at once, when that is more than one, and how
-	 * likely, drawn against the right edge of the given span with the stack's name filling what is
-	 * left to the left of it.
-	 */
-	static void drawDetail(GuiGraphics guiGraphics, Font font, int left, int right, int y, ItemStack stack, int permille, int minCount, int maxCount) {
-		final String chance = formatChance(permille);
-		int x = right - font.width(chance);
-		guiGraphics.drawString(font, chance, x, y, chanceColour(permille), false);
-		final String count = formatCount(minCount, maxCount);
-		if (!count.isEmpty()) {
-			final String joined = I18n.get("string.explorerscompass.lootDetailSeparator");
-			x -= font.width(joined);
-			guiGraphics.drawString(font, joined, x, y, GuiTheme.TEXT_MUTED, false);
-			x -= font.width(count);
-			guiGraphics.drawString(font, count, x, y, GuiTheme.TEXT_SECONDARY, false);
-		}
-		guiGraphics.drawString(font, RenderUtils.trimToWidth(stack.getHoverName().getString(), x - 6 - left), left, y, GuiTheme.TEXT_PRIMARY, false);
-	}
-
-	/**
-	 * The tooltip for a slot being pointed at, drawn beside the pointer the way the game draws one
-	 * for an item in a chest: everything the game itself says about the stack — a potion's effects,
-	 * a piece of armour's protection, the item's own lore, its id with advanced tooltips on — and
-	 * under it what the table says: how many come at once, how likely, and that it comes enchanted.
+	 * Draws one tile with its top left corner at the given point: the slot, tinted by the tier of the
+	 * given chance and outlined where the tier asks for it or where the tile is lit, the item in it,
+	 * how many come at once in its corner, and the chance under it unless the item is certain.
 	 *
-	 * <p>Drawn from wherever the screen draws its topmost layer, since the game puts a tooltip a set
-	 * way in front of whatever it is called over, and the slots have items standing in front of them.
+	 * <p>The game draws an item a long way in front of the slot it sits in, so the count is pushed
+	 * in front of that in turn, where the game puts a stack's size, or the item would cover it. The
+	 * slot, its outline and the label stay where they are: the item is meant to stand in front of the
+	 * first two, and nothing stands in front of the last. A stack this side does not know is drawn
+	 * as a question mark, so that the tile still holds its place and its chance.
 	 */
-	static void renderTooltip(GuiGraphics guiGraphics, Font font, ItemStack stack, int permille, int minCount, int maxCount, int mouseX, int mouseY) {
+	static void drawTile(GuiGraphics guiGraphics, Font font, int tileX, int tileY, ItemStack stack, int labelPermille, int minCount, int maxCount, boolean lit) {
+		final LootTier tier = LootTier.of(labelPermille);
+		final int slotX = tileX + SLOT_INSET_X;
+		final int slotY = tileY;
+		RenderUtils.drawRect(guiGraphics, slotX, slotY, slotX + SLOT, slotY + SLOT, tier.slotFill);
+		if (lit) {
+			RenderUtils.drawRect(guiGraphics, slotX, slotY, slotX + SLOT, slotY + SLOT, HOVER_FILL);
+			RenderUtils.drawInnerOutline(guiGraphics, slotX, slotY, slotX + SLOT, slotY + SLOT, HOVER_OUTLINE);
+		} else if (tier.outline != 0) {
+			RenderUtils.drawInnerOutline(guiGraphics, slotX, slotY, slotX + SLOT, slotY + SLOT, tier.outline);
+		}
 		if (stack.isEmpty()) {
-			return;
+			final String unknown = "?";
+			guiGraphics.drawString(font, unknown, slotX + SLOT / 2 - font.width(unknown) / 2, slotY + 5, GuiTheme.TEXT_MUTED, false);
+		} else {
+			guiGraphics.renderItem(stack, slotX + 1, slotY + 1);
 		}
-		final Minecraft mc = Minecraft.getInstance();
-		final TooltipFlag flag = mc.options.advancedItemTooltips ? TooltipFlag.ADVANCED : TooltipFlag.NORMAL;
-		final List<Component> lines = new ArrayList<Component>(stack.getTooltipLines(Item.TooltipContext.of(mc.level), mc.player, flag));
-		lines.add(Component.empty());
-		final String count = formatCount(minCount, maxCount);
-		if (!count.isEmpty()) {
-			lines.add(labeled("string.explorerscompass.lootQuantity", count, GuiTheme.TEXT_SECONDARY));
+		final String count = LootMath.formatGridCount(minCount, maxCount, font::width);
+		if (count != null) {
+			guiGraphics.pose().pushPose();
+			guiGraphics.pose().translate(0.0F, 0.0F, OVER_ITEMS);
+			guiGraphics.drawString(font, count, slotX + SLOT - font.width(count), slotY + 10, COUNT_COLOUR, true);
+			guiGraphics.pose().popPose();
 		}
-		lines.add(labeled("string.explorerscompass.lootChance", formatChance(permille), chanceColour(permille) & 0xFFFFFF));
-		if (Boolean.TRUE.equals(stack.get(DataComponents.ENCHANTMENT_GLINT_OVERRIDE))) {
-			lines.add(Component.translatable("string.explorerscompass.lootTooltipEnchanted").withStyle((style) -> style.withColor(TextColor.fromRgb(GuiTheme.ACCENT))));
+		final String label = LootMath.formatGridChance(labelPermille);
+		if (label != null) {
+			guiGraphics.drawString(font, label, tileX + TILE_W / 2 - font.width(label) / 2, tileY + SLOT + 1, tier.colour, false);
 		}
-		guiGraphics.renderTooltip(font, lines, stack.getTooltipImage(), mouseX, mouseY);
 	}
 
-	/** A labelled value, punctuated the way the player's own language punctuates one, in the given colour. */
-	private static Component labeled(String labelKey, String value, int color) {
-		return Component.literal(I18n.get("string.explorerscompass.labeledValue", I18n.get(labelKey), value)).withStyle((style) -> style.withColor(TextColor.fromRgb(color)));
-	}
-
-	static int chanceColour(int permille) {
-		if (permille < RARE_PERMILLE) {
-			return CHANCE_RARE;
+	/**
+	 * Draws the tile that stands for the items a grid had no room for, with its top left corner at
+	 * the given point: a dark slot saying how many more there are, and no label, since it holds no
+	 * one chance. Lit like any other tile, since clicking it is how the rest are reached.
+	 */
+	static void drawMoreTile(GuiGraphics guiGraphics, Font font, int tileX, int tileY, int hidden, boolean lit) {
+		final int slotX = tileX + SLOT_INSET_X;
+		final int slotY = tileY;
+		RenderUtils.drawRect(guiGraphics, slotX, slotY, slotX + SLOT, slotY + SLOT, MORE_FILL);
+		if (lit) {
+			RenderUtils.drawInnerOutline(guiGraphics, slotX, slotY, slotX + SLOT, slotY + SLOT, HOVER_OUTLINE);
 		}
-		if (permille < UNCOMMON_PERMILLE) {
-			return CHANCE_UNCOMMON;
-		}
-		return CHANCE_COMMON;
-	}
-
-	/** A chance in thousandths, written as a percentage with a decimal only where it says something. */
-	static String formatChance(int permille) {
-		if (permille >= 1000) {
-			return "100%";
-		}
-		if (permille <= 0) {
-			return "0%";
-		}
-		if (permille % 10 == 0) {
-			return (permille / 10) + "%";
-		}
-		return (permille / 10) + "." + (permille % 10) + "%";
+		final String text = I18n.get("string.explorerscompass.lootMoreItems", String.valueOf(Math.min(hidden, MORE_MAX)));
+		guiGraphics.drawString(font, text, slotX + SLOT / 2 - font.width(text) / 2, slotY + 5, GuiTheme.ACCENT, false);
 	}
 
 	/**
