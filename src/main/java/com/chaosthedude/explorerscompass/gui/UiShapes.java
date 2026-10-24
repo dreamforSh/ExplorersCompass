@@ -154,6 +154,48 @@ public final class UiShapes {
 		b.end();
 	}
 
+	/**
+	 * A filled triangle with an anti-aliased edge, such as a compass needle. Each side is given a
+	 * fringe one screen pixel wide pushed outwards along its own normal; where two fringes meet at a
+	 * corner they leave a sliver no wider than that pixel, which is not to be seen.
+	 */
+	public static void triangle(GuiGraphics guiGraphics, float x0, float y0, float x1, float y1, float x2, float y2, int color) {
+		if (alpha(color) == 0) {
+			return;
+		}
+		// Wound one way round, so that every side's outward normal is on the same hand of it
+		if ((x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0) < 0) {
+			final float sx = x1;
+			final float sy = y1;
+			x1 = x2;
+			y1 = y2;
+			x2 = sx;
+			y2 = sy;
+		}
+		final float aa = pixel();
+		final int clear = transparent(color);
+		final float top = Math.min(y0, Math.min(y1, y2));
+		final Builder b = Builder.begin(guiGraphics, top, 1.0F, color, color);
+		b.tri(x0, y0, color, x1, y1, color, x2, y2, color);
+		fringe(b, x0, y0, x1, y1, aa, color, clear);
+		fringe(b, x1, y1, x2, y2, aa, color, clear);
+		fringe(b, x2, y2, x0, y0, aa, color, clear);
+		b.end();
+	}
+
+	/** The fringe along one side of a triangle wound so that its outside lies to the left of the side. */
+	private static void fringe(Builder b, float ax, float ay, float bx, float by, float aa, int color, int clear) {
+		final float dx = bx - ax;
+		final float dy = by - ay;
+		final float length = (float) Math.sqrt(dx * dx + dy * dy);
+		if (length < 1.0E-4F) {
+			return;
+		}
+		final float nx = dy / length * aa;
+		final float ny = -dx / length * aa;
+		b.quad(ax, ay, bx, by, bx + nx, by + ny, ax + nx, ay + ny, color, color, clear, clear);
+	}
+
 	/** One screen pixel, in the units of the scaled interface. */
 	public static float pixel() {
 		return 1.0F / (float) Minecraft.getInstance().getWindow().getGuiScale();

@@ -94,6 +94,12 @@ public final class UiAnim {
 			return approach(hovered ? 1.0F : 0.0F, HOVER_SPEED);
 		}
 
+		/** Puts the value straight at the given one, so that it eases from there rather than from where it stood. */
+		public void snap(float to) {
+			value = to;
+			lastMillis = Util.getMillis();
+		}
+
 	}
 
 }

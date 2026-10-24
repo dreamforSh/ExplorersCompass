@@ -14,6 +14,7 @@ import com.chaosthedude.explorerscompass.preview.StructurePreview;
 import com.chaosthedude.explorerscompass.util.RenderUtils;
 import com.chaosthedude.explorerscompass.util.SearchTarget;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
+import net.minecraft.Util;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
@@ -294,11 +295,28 @@ public class StructurePreviewScreen extends Screen {
 		final int centerX = (left + right) / 2;
 		final int centerY = (top + bottom) / 2;
 		if (StructurePreviewCache.stateOf(structureKey) == StructurePreviewCache.State.PENDING) {
-			guiGraphics.drawCenteredString(font, Component.translatable("string.explorerscompass.previewLoading"), centerX, centerY - 4, GuiTheme.TEXT_SECONDARY);
+			drawSpinner(guiGraphics, centerX, centerY - 14);
+			guiGraphics.drawCenteredString(font, Component.translatable("string.explorerscompass.previewLoading"), centerX, centerY + 2, GuiTheme.TEXT_SECONDARY);
 			return;
 		}
 		guiGraphics.drawCenteredString(font, Component.translatable("string.explorerscompass.previewUnavailable"), centerX, centerY - 10, GuiTheme.TEXT_SECONDARY);
 		guiGraphics.drawCenteredString(font, Component.translatable("string.explorerscompass.previewUnavailableHint"), centerX, centerY + 2, GuiTheme.TEXT_MUTED);
+	}
+
+	/**
+	 * A ring of dots, one of them bright and the light running round them, which says that something
+	 * is on its way rather than that nothing is coming.
+	 */
+	private static void drawSpinner(GuiGraphics guiGraphics, int centerX, int centerY) {
+		final int dots = 8;
+		final float lead = (Util.getMillis() % 960L) / 960.0F * dots;
+		for (int i = 0; i < dots; i++) {
+			final float angle = i * Mth.TWO_PI / dots;
+			// How far behind the bright dot this one is, as a share of the ring
+			final float behind = ((lead - i) % dots + dots) % dots / dots;
+			final int colour = GuiTheme.withAlpha(GuiTheme.ACCENT, Math.round(0x30 + 0xCF * (1.0F - behind)));
+			UiShapes.circle(guiGraphics, centerX + Mth.sin(angle) * 7.0F, centerY - Mth.cos(angle) * 7.0F, 1.6F, colour);
+		}
 	}
 
 	/**

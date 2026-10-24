@@ -501,7 +501,7 @@ public final class LootTooltip {
 				switch (lines.get(i)) {
 					case Rule rule -> {
 						final int lineY = top + (ruled ? RULE_OFFSET : 0);
-						guiGraphics.fill(x, lineY, right, lineY + 1, LootSlots.TIP_RULE);
+						UiShapes.hairline(guiGraphics, x, right, lineY, LootSlots.TIP_RULE);
 						top += ruled ? RULE_HEIGHT : FIRST_RULE_HEIGHT;
 						ruled = true;
 					}

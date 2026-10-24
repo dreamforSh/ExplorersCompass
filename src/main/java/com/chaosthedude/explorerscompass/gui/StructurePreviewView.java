@@ -71,7 +71,6 @@ import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.level.block.ShulkerBoxBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
-import com.chaosthedude.explorerscompass.util.RenderUtils;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
 
@@ -139,8 +138,8 @@ public class StructurePreviewView implements AutoCloseable {
 	private static final int GRID_EDGE_COLOR = 0x70FFFFFF;
 	private static final int GRID_LINE_COLOR = 0x24FFFFFF;
 	private static final int NORTH_COLOR = 0xE0FFC24B;
-	private static final int COMPASS_DISC_COLOR = 0x90000000;
-	private static final int COMPASS_RING_COLOR = 0x40FFFFFF;
+	private static final int COMPASS_DISC_COLOR = 0xB00D1117;
+	private static final int COMPASS_RING_COLOR = 0x60FFFFFF;
 	private static final int COMPASS_TAIL_COLOR = 0xA0A0A6AD;
 
 	/**
@@ -519,6 +518,7 @@ public class StructurePreviewView implements AutoCloseable {
 	/** The box an icon sits in, and how far its bottom edge floats above the block it stands for. */
 	private static final int BADGE_SIZE = 18;
 	private static final int BADGE_LIFT = 5;
+	private static final float BADGE_RADIUS = 4.0F;
 	private static final int BADGE_FILL_TOP = 0x1C2028;
 	private static final int BADGE_FILL_BOTTOM = 0x0C0E12;
 	private static final int BADGE_FILL_HOVER_TOP = 0x3A3222;
@@ -526,7 +526,7 @@ public class StructurePreviewView implements AutoCloseable {
 	private static final int BADGE_BORDER = 0x70FFFFFF;
 	private static final int BADGE_BORDER_MUTED = 0x38FFFFFF;
 	private static final int BADGE_BORDER_HOVER = 0xFFFFC24B;
-	private static final int BADGE_GLOW_HOVER = 0x50FFC24B;
+	private static final int BADGE_GLOW_HOVER = 0x70FFC24B;
 	private static final int BADGE_STEM = 0x90FFFFFF;
 	private static final int BADGE_STEM_HOVER = 0xFFFFC24B;
 	private static final int BADGE_ICON_MUTE = 0x80000000;
@@ -777,16 +777,19 @@ public class StructurePreviewView implements AutoCloseable {
 			final int anchorX = badge.getAnchorX();
 			final int anchorY = badge.getAnchorY();
 
-			// The stem down to the block, and a dot on the block itself
-			RenderUtils.drawRect(guiGraphics, anchorX, bottom, anchorX + 1, anchorY - 1, lit ? BADGE_STEM_HOVER : withAlpha(BADGE_STEM, lineAlpha * 0x90 / 0xFF));
-			RenderUtils.drawRect(guiGraphics, anchorX - 1, anchorY - 1, anchorX + 2, anchorY + 2, lit ? BADGE_STEM_HOVER : withAlpha(BADGE_STEM, lineAlpha));
+			// The stem down to the block, and a round dot on the block itself
+			final int stem = lit ? BADGE_STEM_HOVER : withAlpha(BADGE_STEM, lineAlpha * 0x90 / 0xFF);
+			UiShapes.roundRect(guiGraphics, anchorX, bottom, 1.0F, Math.max(0, anchorY - 1 - bottom), 0.0F, stem);
+			UiShapes.circle(guiGraphics, anchorX + 0.5F, anchorY + 0.5F, 1.75F, lit ? BADGE_STEM_HOVER : withAlpha(BADGE_STEM, lineAlpha));
 
+			final int size = right - left;
 			if (lit) {
-				RenderUtils.drawOutline(guiGraphics, left - 1, top - 1, right + 1, bottom + 1, BADGE_GLOW_HOVER);
+				// A soft glow of the accent rather than a hard ring, so a lit badge reads as lit and not as boxed in
+				UiShapes.shadow(guiGraphics, left, top, size, size, BADGE_RADIUS, 4.0F, BADGE_GLOW_HOVER);
 			}
-			RenderUtils.drawVerticalGradient(guiGraphics, left, top, right, bottom, withAlpha(lit ? BADGE_FILL_HOVER_TOP : BADGE_FILL_TOP, fillAlpha), withAlpha(lit ? BADGE_FILL_HOVER_BOTTOM : BADGE_FILL_BOTTOM, fillAlpha));
+			UiShapes.roundRect(guiGraphics, left, top, size, bottom - top, BADGE_RADIUS, withAlpha(lit ? BADGE_FILL_HOVER_TOP : BADGE_FILL_TOP, fillAlpha), withAlpha(lit ? BADGE_FILL_HOVER_BOTTOM : BADGE_FILL_BOTTOM, fillAlpha));
 			final int border = lit ? BADGE_BORDER_HOVER : badge.hasLoot() ? BADGE_BORDER : BADGE_BORDER_MUTED;
-			RenderUtils.drawInnerOutline(guiGraphics, left, top, right, bottom, lit ? border : withAlpha(border, (border >>> 24) * lineAlpha / 0xFF));
+			UiShapes.roundRectStroke(guiGraphics, left, top, size, bottom - top, BADGE_RADIUS, lit ? 1.0F : UiShapes.stroke(), lit ? border : withAlpha(border, (border >>> 24) * lineAlpha / 0xFF));
 
 			ItemStack stack = new ItemStack(preview.getLootMarkerIcon(badge.getShownMarker()));
 			if (stack.isEmpty()) {
@@ -800,21 +803,21 @@ public class StructurePreviewView implements AutoCloseable {
 			guiGraphics.pose().translate(0.0F, 0.0F, LootSlots.OVER_ITEMS);
 			if (!badge.hasLoot()) {
 				// Dimmed rather than left out: an empty chest is still a chest, and worth knowing about
-				RenderUtils.drawRect(guiGraphics, left + 1, top + 1, right - 1, bottom - 1, BADGE_ICON_MUTE);
+				UiShapes.roundRect(guiGraphics, left + 1, top + 1, right - left - 2, bottom - top - 2, BADGE_RADIUS - 1, BADGE_ICON_MUTE);
 			}
 			if (badge.getCount() > 1) {
 				final String count = String.valueOf(badge.getCount());
-				final int chipWidth = font.width(count) + 3;
-				final int chipLeft = right - chipWidth + 2;
+				final int chipWidth = Math.max(9, font.width(count) + 4);
+				final int chipLeft = right - chipWidth + 3;
 				final int chipTop = top - 3;
-				RenderUtils.drawRect(guiGraphics, chipLeft, chipTop, chipLeft + chipWidth, chipTop + 9, BADGE_COUNT_BACKGROUND);
-				guiGraphics.drawString(font, count, chipLeft + 2, chipTop + 1, BADGE_COUNT_TEXT, false);
+				UiShapes.pill(guiGraphics, chipLeft, chipTop, chipWidth, 9, BADGE_COUNT_BACKGROUND);
+				guiGraphics.drawString(font, count, chipLeft + (chipWidth - font.width(count) + 1) / 2, chipTop + 1, BADGE_COUNT_TEXT, false);
 			}
 			if (badge.getBestWorth() >= Rarity.RARE.ordinal()) {
 				// In the corner across from the count, in the colour the game names an item of that
 				// rarity in, so that it reads as the same thing a tooltip would say
-				RenderUtils.drawRect(guiGraphics, left - 2, bottom - 4, left + 3, bottom + 1, withAlpha(BADGE_WORTH_RIM, lineAlpha));
-				RenderUtils.drawRect(guiGraphics, left - 1, bottom - 3, left + 2, bottom, withAlpha(worthColour(badge.getBestWorth()), lineAlpha));
+				UiShapes.circle(guiGraphics, left + 0.5F, bottom - 1.5F, 3.0F, withAlpha(BADGE_WORTH_RIM, lineAlpha));
+				UiShapes.circle(guiGraphics, left + 0.5F, bottom - 1.5F, 2.0F, withAlpha(worthColour(badge.getBestWorth()), lineAlpha));
 			}
 			guiGraphics.pose().popPose();
 		}
@@ -884,51 +887,29 @@ public class StructurePreviewView implements AutoCloseable {
 	 * currently turned, since a building turned about freely soon stops saying so itself.
 	 */
 	public void renderCompass(GuiGraphics guiGraphics, Font font, int centerX, int centerY, int radius) {
-		guiGraphics.flush();
 		// North is the model's -z, turned by the yaw and then laid flat onto the panel: what points
 		// away from the viewer on the model points up on the panel
 		final float radians = yaw * Mth.DEG_TO_RAD;
 		final float northX = -Mth.sin(radians);
 		final float northY = -Mth.cos(radians);
 
-		RenderSystem.enableBlend();
-		RenderSystem.defaultBlendFunc();
-		RenderSystem.disableCull();
-		RenderSystem.setShader(GameRenderer::getPositionColorShader);
-		final Matrix4f pose = guiGraphics.pose().last().pose();
-
-		final BufferBuilder disc = Tesselator.getInstance().begin(VertexFormat.Mode.TRIANGLE_FAN, DefaultVertexFormat.POSITION_COLOR);
-		disc.addVertex(pose, centerX, centerY, 0.0F).setColor(COMPASS_DISC_COLOR);
-		final int segments = 24;
-		for (int i = 0; i <= segments; i++) {
-			final float angle = (float) (i * Math.PI * 2.0D / segments);
-			disc.addVertex(pose, centerX + Mth.cos(angle) * radius, centerY + Mth.sin(angle) * radius, 0.0F).setColor(COMPASS_DISC_COLOR);
+		UiShapes.circle(guiGraphics, centerX, centerY, radius, COMPASS_DISC_COLOR);
+		UiShapes.roundRectStroke(guiGraphics, centerX - radius, centerY - radius, radius * 2, radius * 2, radius, UiShapes.stroke(), COMPASS_RING_COLOR);
+		// Four ticks round the rim, so that the needle reads against something as it turns
+		for (int i = 0; i < 4; i++) {
+			final float angle = radians + i * Mth.HALF_PI;
+			final float tickX = centerX - Mth.sin(angle) * (radius - 2.5F);
+			final float tickY = centerY - Mth.cos(angle) * (radius - 2.5F);
+			UiShapes.circle(guiGraphics, tickX, tickY, 0.75F, COMPASS_RING_COLOR);
 		}
-		BufferUploader.drawWithShader(disc.buildOrThrow());
-
-		final BufferBuilder ring = Tesselator.getInstance().begin(VertexFormat.Mode.DEBUG_LINE_STRIP, DefaultVertexFormat.POSITION_COLOR);
-		for (int i = 0; i <= segments; i++) {
-			final float angle = (float) (i * Math.PI * 2.0D / segments);
-			ring.addVertex(pose, centerX + Mth.cos(angle) * radius, centerY + Mth.sin(angle) * radius, 0.0F).setColor(COMPASS_RING_COLOR);
-		}
-		BufferUploader.drawWithShader(ring.buildOrThrow());
 
 		// The needle: a bright half pointing north and a dim half pointing away from it
-		final float tipX = centerX + northX * (radius - 3);
-		final float tipY = centerY + northY * (radius - 3);
+		final float reach = radius - 3;
 		final float sideX = -northY * 2.5F;
 		final float sideY = northX * 2.5F;
-		final BufferBuilder needle = Tesselator.getInstance().begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
-		needle.addVertex(pose, tipX, tipY, 0.0F).setColor(NORTH_COLOR);
-		needle.addVertex(pose, centerX + sideX, centerY + sideY, 0.0F).setColor(NORTH_COLOR);
-		needle.addVertex(pose, centerX - sideX, centerY - sideY, 0.0F).setColor(NORTH_COLOR);
-		needle.addVertex(pose, centerX - northX * (radius - 3), centerY - northY * (radius - 3), 0.0F).setColor(COMPASS_TAIL_COLOR);
-		needle.addVertex(pose, centerX - sideX, centerY - sideY, 0.0F).setColor(COMPASS_TAIL_COLOR);
-		needle.addVertex(pose, centerX + sideX, centerY + sideY, 0.0F).setColor(COMPASS_TAIL_COLOR);
-		BufferUploader.drawWithShader(needle.buildOrThrow());
-
-		RenderSystem.enableCull();
-		RenderSystem.disableBlend();
+		UiShapes.triangle(guiGraphics, centerX + northX * reach, centerY + northY * reach, centerX + sideX, centerY + sideY, centerX - sideX, centerY - sideY, NORTH_COLOR);
+		UiShapes.triangle(guiGraphics, centerX - northX * reach, centerY - northY * reach, centerX - sideX, centerY - sideY, centerX + sideX, centerY + sideY, COMPASS_TAIL_COLOR);
+		UiShapes.circle(guiGraphics, centerX, centerY, 1.25F, 0xFF0D1117);
 
 		final String north = I18n.get("string.explorerscompass.direction.north");
 		guiGraphics.drawString(font, north, Math.round(centerX + northX * (radius + 6)) - font.width(north) / 2, Math.round(centerY + northY * (radius + 6)) - font.lineHeight / 2, GuiTheme.ACCENT, true);

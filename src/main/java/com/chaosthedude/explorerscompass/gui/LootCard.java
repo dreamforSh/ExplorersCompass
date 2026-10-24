@@ -108,6 +108,8 @@ final class LootCard {
 	private static final int SCREEN_MARGIN = 4;
 	/** Drawn over the model and the controls both, at the height the game draws its own tooltips. */
 	private static final float Z = 400.0F;
+	/** How far toward its badge a card starts when it opens, before it eases into place. */
+	private static final float SLIDE = 6.0F;
 
 	/** Lit for nothing, handed out where no tile is pointed at. Never changed. */
 	private static final BitSet NO_TABLES = new BitSet();
@@ -212,6 +214,10 @@ final class LootCard {
 	private Tab hoveredTab;
 	/** Whether the card was drawn since its tooltip last was, so that a card no longer open leaves no tooltip and no lit badge behind. */
 	private boolean rendered;
+	/** How far the card has eased in since it opened for its badge, from 0 to 1. */
+	private final UiAnim.Value openAnim = new UiAnim.Value();
+	/** How far the bar under the tab shown has slid toward it, as a place along the row of tabs. */
+	private final UiAnim.Value tabBarAnim = new UiAnim.Value();
 
 	/** Whether the card has been laid out for the given badge, so that its rectangle can be trusted. */
 	boolean isFor(StructurePreviewView.LootBadge badge) {
@@ -256,6 +262,8 @@ final class LootCard {
 		if (otherBadge) {
 			// A badge opens on the table it is drawn as, which is the container most worth seeing
 			selectedTable = preview.getLootMarkerTableIndex(badge.getShownMarker());
+			openAnim.snap(0.0F);
+			tabBarAnim.snap(Float.NaN);
 		}
 		badgeId = badge.getId();
 		this.preview = preview;
@@ -490,12 +498,12 @@ final class LootCard {
 		rendered = true;
 
 		guiGraphics.pose().pushPose();
-		guiGraphics.pose().translate(0.0F, 0.0F, Z);
+		// Eases out from its badge when it opens, which says which badge it belongs to
+		final float opened = openAnim.approach(1.0F, UiAnim.SLIDE_SPEED);
+		final float slide = (1.0F - opened) * SLIDE * (left >= badgeRight ? -1.0F : 1.0F);
+		guiGraphics.pose().translate(slide, 0.0F, Z);
 
-		RenderUtils.drawVerticalGradient(guiGraphics, left, top, left + width, top + height, LootSlots.PANEL_TOP, LootSlots.PANEL_BOTTOM);
-		RenderUtils.drawInnerOutline(guiGraphics, left, top, left + width, top + height, LootSlots.PANEL_BORDER);
-		// The bar along the leading edge, which is how everything picked out on these screens is marked
-		RenderUtils.drawRect(guiGraphics, left, top, left + BAR, top + height, LootSlots.ACCENT_BAR);
+		LootSlots.drawPanel(guiGraphics, left, top, left + width, top + height, GuiTheme.CARD_RADIUS, BAR + PAD - 3);
 
 		int y = top + PAD;
 		if (!tabs.isEmpty()) {
@@ -505,7 +513,8 @@ final class LootCard {
 
 		// The heading: the container's icon on its plate, the table's name with the tally under it,
 		// and how many containers name it in a pill against the right edge
-		RenderUtils.drawRect(guiGraphics, innerLeft, y, innerLeft + HEADING, y + HEADING, LootSlots.SLOT_FILL);
+		UiShapes.roundRect(guiGraphics, innerLeft, y, HEADING, HEADING, GuiTheme.CONTROL_RADIUS, LootSlots.SLOT_FILL);
+		UiShapes.roundRectStroke(guiGraphics, innerLeft, y, HEADING, HEADING, GuiTheme.CONTROL_RADIUS, UiShapes.stroke(), LootSlots.SLOT_RIM);
 		guiGraphics.renderItem(section.icon, innerLeft + PLATE_ICON, y + PLATE_ICON);
 		final int titleX = innerLeft + TITLE_X;
 		int titleRight = innerRight;
@@ -555,9 +564,11 @@ final class LootCard {
 		for (Tab tab : tabs) {
 			final int x = left + tab.x();
 			final boolean selected = tab.section() == selectedSection;
-			RenderUtils.drawRect(guiGraphics, x, y, x + tab.w(), y + TAB_H, selected ? LootSlots.SEG_ON : tab.equals(hoveredTab) ? LootSlots.SEG_HOVER : LootSlots.SEG_TRACK);
+			UiShapes.roundRect(guiGraphics, x, y, tab.w(), TAB_H, GuiTheme.CONTROL_RADIUS, selected ? LootSlots.SEG_ON : tab.equals(hoveredTab) ? LootSlots.SEG_HOVER : LootSlots.SEG_TRACK);
 			if (selected) {
-				RenderUtils.drawRect(guiGraphics, x, y + TAB_H - TAB_BAR, x + tab.w(), y + TAB_H, LootSlots.ACCENT_BAR);
+				// The bar under the tab shown slides along the row to whichever tab is picked next
+				final float barX = tabBarAnim.approach(tab.x(), UiAnim.SLIDE_SPEED);
+				UiShapes.pill(guiGraphics, left + barX + 4, y + TAB_H - TAB_BAR - 1, tab.w() - 8, TAB_BAR, LootSlots.ACCENT_BAR);
 			}
 			if (tab.section() >= 0) {
 				final Section section = sections.get(tab.section());

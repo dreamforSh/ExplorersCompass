@@ -75,7 +75,7 @@ final class LootOverview {
 	private static final int CHIP_COUNT_MARGIN = 2;
 	/** The room under the view switch and under the tier chips. */
 	private static final int CONTROL_GAP = 5;
-	private static final int SCROLLBAR_WIDTH = 2;
+	private static final int SCROLLBAR_WIDTH = 3;
 	/** Room between the list and the scrollbar, so that the last column does not touch it. */
 	private static final int SCROLLBAR_GAP = 3;
 	/** How far the scrollbar's track stops short of either end of the list. */
@@ -111,6 +111,11 @@ final class LootOverview {
 
 	/** Lit up when nothing in the drawer is pointed at. Shared, and never changed. */
 	private static final BitSet NONE = new BitSet();
+	/** The keys the eased values of the drawer are kept under. */
+	private static final Object SCROLL = new Object();
+	private static final Object SWITCH = new Object();
+	/** How wide the shadow the drawer casts onto the model beside it is. */
+	private static final int EDGE_SHADOW = 6;
 
 	/** The two ways the drawer reads the loot: a section to a table, or a tile to an item across the structure. */
 	enum View {
@@ -203,6 +208,10 @@ final class LootOverview {
 	/** How far the list runs from its top, the room above its first heading included, to where its last line ends. */
 	private int contentHeight;
 	private int scroll;
+	/** Where the list is drawn scrolled to this frame, easing toward {@link #scroll}, which is where it is going. */
+	private float shownScroll;
+	/** The fades and slides of the drawer's controls, kept from one frame to the next. */
+	private final UiAnim anim = new UiAnim();
 	/** Where the list wants to be scrolled to, set by a click on a badge or an item and applied at the next layout. */
 	private int pendingFocus = -1;
 	private int columns = 1;
@@ -287,6 +296,7 @@ final class LootOverview {
 			laidOutColumns = -1;
 			solo = null;
 			scroll = 0;
+			anim.clear();
 		}
 		if (newColumns != laidOutColumns || view != laidOutView || solo != laidOutSolo || advanced != laidOutAdvanced) {
 			columns = newColumns;
@@ -310,6 +320,10 @@ final class LootOverview {
 			pendingFocus = -1;
 		}
 		scroll = Mth.clamp(scroll, 0, maxScroll());
+		// Eased here rather than when drawn, so that what the pointer is on is worked out against the
+		// list where it is drawn this frame
+		anim.frame();
+		shownScroll = anim.approach(SCROLL, scroll, UiAnim.SLIDE_SPEED);
 	}
 
 	/**
@@ -487,10 +501,10 @@ final class LootOverview {
 		hoveredView = viewAt(mouseX, mouseY);
 		hoveredTier = tierAt(mouseX, mouseY);
 
-		RenderUtils.drawVerticalGradient(guiGraphics, left, top, right, bottom, LootSlots.PANEL_TOP, LootSlots.PANEL_BOTTOM);
-		RenderUtils.drawInnerOutline(guiGraphics, left, top, right, bottom, LootSlots.PANEL_BORDER);
-		// The bar along the leading edge, which is how everything picked out on these screens is marked
-		RenderUtils.drawRect(guiGraphics, left, top, left + BAR, bottom, LootSlots.ACCENT_BAR);
+		// Set into the panel the model stands in rather than floating over it, so it casts its shadow
+		// onto the model alone, along its leading edge
+		RenderUtils.drawHorizontalGradient(guiGraphics, left - EDGE_SHADOW, top + (int) GuiTheme.PANEL_RADIUS, left, bottom - (int) GuiTheme.PANEL_RADIUS, 0x00000000, 0x48000000);
+		LootSlots.drawSheet(guiGraphics, left, top, right, bottom, GuiTheme.PANEL_RADIUS, BAR + PAD - 3);
 
 		renderHeading(guiGraphics, font, mouseX, mouseY, innerLeft, innerRight);
 		LootSlots.drawHairline(guiGraphics, innerLeft, innerRight, separatorY);
@@ -523,10 +537,10 @@ final class LootOverview {
 		final int track = listBottom - SCROLLBAR_INSET - trackTop;
 		if (contentHeight > viewport && track > 0) {
 			final int trackLeft = innerRight - SCROLLBAR_WIDTH;
-			RenderUtils.drawRect(guiGraphics, trackLeft, trackTop, innerRight, trackTop + track, LootSlots.SCROLL_TRACK);
 			final int thumbHeight = Math.min(track, Math.max(SCROLLBAR_MIN_THUMB, track * viewport / contentHeight));
-			final int thumbTop = trackTop + (track - thumbHeight) * scroll / Math.max(1, contentHeight - viewport);
-			RenderUtils.drawRect(guiGraphics, trackLeft, thumbTop, innerRight, thumbTop + thumbHeight, LootSlots.SCROLL_THUMB);
+			final float thumbTop = trackTop + (track - thumbHeight) * shownScroll / Math.max(1, contentHeight - viewport);
+			final boolean overTrack = mouseX >= trackLeft - 2 && mouseX < innerRight + 2 && mouseY >= trackTop && mouseY < trackTop + track;
+			GuiTheme.drawScrollbar(guiGraphics, trackLeft, trackTop, trackTop + track, SCROLLBAR_WIDTH, thumbTop, thumbHeight, overTrack);
 		}
 	}
 
@@ -539,24 +553,28 @@ final class LootOverview {
 		final int closeTop = top + CLOSE_Y;
 		final String title = RenderUtils.trimToWidth(I18n.get("string.explorerscompass.lootOverview"), closeLeft - 4 - innerLeft);
 		guiGraphics.drawString(font, title, innerLeft, top + TITLE_Y, GuiTheme.TEXT_PRIMARY, true);
-		final boolean closeLit = isOverClose(mouseX, mouseY);
-		RenderUtils.drawRect(guiGraphics, closeLeft, closeTop, closeLeft + CLOSE_SIZE, closeTop + CLOSE_SIZE, closeLit ? LootSlots.CLOSE_HOVER : LootSlots.CLOSE_BG);
-		guiGraphics.drawString(font, "×", closeLeft + CLOSE_MARK_X, closeTop + CLOSE_MARK_Y, closeLit ? GuiTheme.TEXT_PRIMARY : GuiTheme.TEXT_SECONDARY, false);
+		// A round close box that reddens under the pointer, the way the other screens close things
+		final float closeLit = anim.hover("close", isOverClose(mouseX, mouseY));
+		UiShapes.circle(guiGraphics, closeLeft + CLOSE_SIZE / 2.0F, closeTop + CLOSE_SIZE / 2.0F, CLOSE_SIZE / 2.0F, GuiTheme.lerpColor(LootSlots.CLOSE_BG, GuiTheme.withAlpha(GuiTheme.TEXT_DANGER, 0x60), closeLit));
+		guiGraphics.drawString(font, "×", closeLeft + CLOSE_MARK_X, closeTop + CLOSE_MARK_Y, GuiTheme.lerpColor(GuiTheme.TEXT_SECONDARY, GuiTheme.TEXT_PRIMARY, closeLit), false);
 		guiGraphics.drawString(font, fitSummary(font, innerRight - innerLeft), innerLeft, top + SUMMARY_Y, GuiTheme.TEXT_MUTED, false);
 
-		RenderUtils.drawRect(guiGraphics, innerLeft, viewTop, innerRight, viewTop + SWITCH_HEIGHT, LootSlots.SEG_TRACK);
+		// The two views as one rounded switch, the fill of the current one sliding across to the other
+		UiShapes.pill(guiGraphics, innerLeft, viewTop, innerRight - innerLeft, SWITCH_HEIGHT, GuiTheme.WIDGET_BACKGROUND);
+		UiShapes.roundRectStroke(guiGraphics, innerLeft, viewTop, innerRight - innerLeft, SWITCH_HEIGHT, SWITCH_HEIGHT / 2.0F, UiShapes.stroke(), GuiTheme.WIDGET_BORDER);
+		final float fillLeft = anim.approach(SWITCH, viewPartLeft(view) - innerLeft, UiAnim.SLIDE_SPEED);
+		UiShapes.pill(guiGraphics, innerLeft + fillLeft + 1, viewTop + 1, viewPartRight(view) - viewPartLeft(view) - 2, SWITCH_HEIGHT - 2, GuiTheme.opaque(GuiTheme.ACCENT));
 		for (View each : View.values()) {
-			// Each part stands a pixel inside the track, so that the track shows round the picked one
 			final int partLeft = viewPartLeft(each) + 1;
-			final int partRight = each.ordinal() == 0 ? viewPartRight(each) : viewPartRight(each) - 1;
+			final int partRight = viewPartRight(each) - 1;
 			final boolean current = each == view;
-			final boolean lit = each == hoveredView;
-			if (current || lit) {
-				RenderUtils.drawRect(guiGraphics, partLeft, viewTop + 1, partRight, viewTop + SWITCH_HEIGHT - 1, current ? LootSlots.SEG_ON : LootSlots.SEG_HOVER);
+			final float lit = anim.hover(each, each == hoveredView && !current);
+			if (lit > 0.01F) {
+				UiShapes.pill(guiGraphics, partLeft, viewTop + 1, partRight - partLeft, SWITCH_HEIGHT - 2, GuiTheme.withAlpha(0xFFFFFF, Math.round(0x18 * lit)));
 			}
-			final String label = RenderUtils.trimToWidth(I18n.get(each.key), partRight - partLeft - 4);
-			final int colour = current || lit ? GuiTheme.TEXT_PRIMARY : GuiTheme.TEXT_SECONDARY;
-			guiGraphics.drawString(font, label, (partLeft + partRight) / 2 - font.width(label) / 2, viewTop + SWITCH_LABEL_Y, colour, current);
+			final String label = RenderUtils.trimToWidth(I18n.get(each.key), partRight - partLeft - 6);
+			final int colour = current ? GuiTheme.ACCENT_INK : GuiTheme.lerpColor(GuiTheme.TEXT_SECONDARY, GuiTheme.TEXT_PRIMARY, lit);
+			guiGraphics.drawString(font, label, (partLeft + partRight) / 2 - font.width(label) / 2, viewTop + SWITCH_LABEL_Y, colour, false);
 		}
 
 		final int[] counts = tierCounts();
@@ -569,11 +587,12 @@ final class LootOverview {
 			// A tier hidden by another being picked out, or with nothing in it to pick, is drawn faint,
 			// so that the chip still says which tier it is while saying that none of its tiles show
 			final boolean dim = empty || solo != null && !picked;
+			final float lit = anim.hover(tier, tier == hoveredTier && !empty && !picked);
 			if (picked) {
-				RenderUtils.drawRect(guiGraphics, x, tierTop, x + width, tierTop + CHIP_HEIGHT, LootSlots.tint(tier, LootSlots.CHIP_PICKED_ALPHA));
-				RenderUtils.drawInnerOutline(guiGraphics, x, tierTop, x + width, tierTop + CHIP_HEIGHT, LootSlots.CHIP_PICKED_OUTLINE);
+				UiShapes.roundRect(guiGraphics, x, tierTop, width, CHIP_HEIGHT, GuiTheme.CONTROL_RADIUS, LootSlots.tint(tier, LootSlots.CHIP_PICKED_ALPHA));
+				UiShapes.roundRectStroke(guiGraphics, x, tierTop, width, CHIP_HEIGHT, GuiTheme.CONTROL_RADIUS, 1.0F, LootSlots.tint(tier, 0xD0));
 			} else {
-				RenderUtils.drawRect(guiGraphics, x, tierTop, x + width, tierTop + CHIP_HEIGHT, tier == hoveredTier && !empty ? LootSlots.SEG_HOVER : LootSlots.SEG_TRACK);
+				UiShapes.roundRect(guiGraphics, x, tierTop, width, CHIP_HEIGHT, GuiTheme.CONTROL_RADIUS, GuiTheme.lerpColor(LootSlots.SEG_TRACK, LootSlots.SEG_HOVER, lit));
 			}
 			// The count is left out where the chip is too narrow for it rather than being cut, since
 			// the icon alone still says which tier is which
@@ -621,12 +640,13 @@ final class LootOverview {
 			}
 			// A heading under the pointer is lit across the list with the bar at its left, the way a
 			// picked row is marked elsewhere on these screens, and its title stays white to stay readable
-			if (section == hoveredHeading) {
+			final float lit = anim.hover(section, section == hoveredHeading);
+			if (lit > 0.01F) {
 				final int lightLeft = innerLeft - HOVER_REACH_LEFT;
 				final int lightTop = y - HOVER_REACH_Y;
 				final int lightBottom = origin + section.headingBottom + HOVER_REACH_Y;
-				RenderUtils.drawRect(guiGraphics, lightLeft, lightTop, listRight + HOVER_REACH_RIGHT, lightBottom, LootSlots.ROW_HOVER);
-				RenderUtils.drawRect(guiGraphics, lightLeft, lightTop, lightLeft + 1, lightBottom, LootSlots.ACCENT_BAR);
+				GuiTheme.drawRowBand(guiGraphics, lightLeft, lightTop, listRight + HOVER_REACH_RIGHT, lightBottom, lit, 0.0F, false);
+				UiShapes.pill(guiGraphics, lightLeft + 1, lightTop + 3, 2.0F, lightBottom - lightTop - 6, GuiTheme.scaleAlpha(LootSlots.ACCENT_BAR, lit));
 			}
 			guiGraphics.renderItem(section.icon, innerLeft, y);
 			int titleRight = listRight;
@@ -777,9 +797,9 @@ final class LootOverview {
 		return listRight() + HOVER_REACH_RIGHT;
 	}
 
-	/** Where the top of the list's content is drawn, as scrolled. */
+	/** Where the top of the list's content is drawn, as scrolled this frame. */
 	private int contentOrigin() {
-		return listTop + CONTENT_TOP - scroll;
+		return listTop + CONTENT_TOP - Math.round(shownScroll);
 	}
 
 	private int maxScroll() {
@@ -849,6 +869,8 @@ final class LootOverview {
 			if (clickedView != view) {
 				view = clickedView;
 				scroll = 0;
+				// The list under the switch is another list now, so it is not scrolled through to get there
+				anim.snap(SCROLL, 0.0F);
 				// A tier is counted afresh in each view, and one that holds nothing in this one would
 				// leave an empty list behind a chip that cannot be picked
 				if (solo != null && tierCounts()[solo.ordinal()] == 0) {

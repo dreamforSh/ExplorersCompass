@@ -3,6 +3,7 @@ package com.chaosthedude.explorerscompass.client;
 import com.chaosthedude.explorerscompass.ExplorersCompass;
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.gui.GuiTheme;
+import com.chaosthedude.explorerscompass.gui.UiShapes;
 import com.chaosthedude.explorerscompass.gui.WaypointMarkers;
 import com.chaosthedude.explorerscompass.items.ExplorersCompassItem;
 import com.chaosthedude.explorerscompass.util.CompassState;
@@ -446,7 +447,11 @@ public class ClientEventHandler {
 
 		final int textLeft = panelLeft + HUD_PADDING;
 		int y = panelTop + HUD_PADDING;
-		guiGraphics.drawString(mc.font, DOT_GLYPH, textLeft, y, dotColor, true);
+		// Drawn round rather than written, the way the compass screen's status strip marks the state,
+		// with a dark rim of its own standing in for the shadow the glyph used to carry
+		final float dotX = textLeft + mc.font.width(DOT_GLYPH) / 2.0F;
+		UiShapes.circle(guiGraphics, dotX, y + 3.5F, 3.5F, 0x80000000);
+		UiShapes.circle(guiGraphics, dotX, y + 3.5F, 2.75F, (dotColor >>> 24) == 0 ? GuiTheme.opaque(dotColor) : dotColor);
 		guiGraphics.drawString(mc.font, data.headline,
 				textLeft + mc.font.width(DOT_GLYPH) + 4, y, GuiTheme.TEXT_PRIMARY, true);
 		guiGraphics.drawString(mc.font, target, textLeft + headlineFixedWidth, y, GuiTheme.TEXT_SECONDARY, true);
