@@ -15,16 +15,20 @@ import net.neoforged.api.distmarker.OnlyIn;
 @OnlyIn(Dist.CLIENT)
 public class TransparentTextField extends EditBox {
 
-	private static final int BACKGROUND = 0x66000000;
-	private static final int BORDER = 0x26FFFFFF;
-	private static final int BORDER_FOCUSED = 0x99FFC24B;
 	/** The glyph that empties the field, and how much room is kept clear for it. */
 	private static final String CLEAR_GLYPH = "✕";
 	private static final int CLEAR_WIDTH = 12;
 
 	private Font font;
 	private Component label;
-	private int labelColor = 0x808080;
+	private int labelColor = GuiTheme.TEXT_MUTED;
+	/** Whether what has been typed is not something the field can take, which its border shows in red. */
+	private boolean invalid;
+	/** Whether the field offers the cross that empties it, which a field that must always hold something does not. */
+	private boolean clearable = true;
+	private final UiAnim.Value focusAnim = new UiAnim.Value();
+	private final UiAnim.Value hoverAnim = new UiAnim.Value();
+	private final UiAnim.Value clearAnim = new UiAnim.Value();
 
 	private boolean pseudoIsEnabled = true;
 	private boolean pseudoEnableBackgroundDrawing = true;
@@ -51,16 +55,28 @@ public class TransparentTextField extends EditBox {
 		if (isVisible()) {
 			final int x = getX();
 			final int y = getY();
-			final boolean showClear = !getValue().isEmpty();
+			final boolean showClear = clearable && !getValue().isEmpty();
 			if (pseudoEnableBackgroundDrawing) {
-				RenderUtils.drawRect(guiGraphics, x, y, x + width, y + height, BACKGROUND);
 				// The border is what says whether typing lands here, which the blinking cursor alone
-				// does not make obvious on a field that has no chrome of its own
-				RenderUtils.drawInnerOutline(guiGraphics, x, y, x + width, y + height, isFocused() ? BORDER_FOCUSED : BORDER);
+				// does not make obvious on a field that has no chrome of its own; it eases toward the
+				// accent as the field takes the focus, and turns red over anything it cannot take
+				final float focus = focusAnim.approach(isFocused() ? 1.0F : 0.0F, UiAnim.SLIDE_SPEED);
+				final float hover = hoverAnim.hover(isHovered());
+				UiShapes.roundRect(guiGraphics, x, y, width, height, GuiTheme.CONTROL_RADIUS, GuiTheme.INPUT_BACKGROUND);
+				final int resting = GuiTheme.lerpColor(GuiTheme.WIDGET_BORDER, GuiTheme.withAlpha(GuiTheme.TEXT_MUTED, 0xA0), hover);
+				final int border = invalid ? GuiTheme.opaque(GuiTheme.TEXT_DANGER) : GuiTheme.lerpColor(resting, GuiTheme.withAlpha(GuiTheme.ACCENT, 0xE0), focus);
+				UiShapes.roundRectStroke(guiGraphics, x, y, width, height, GuiTheme.CONTROL_RADIUS, focus > 0.5F || invalid ? 1.0F : UiShapes.stroke(), border);
 			}
 			if (showClear) {
 				final boolean overClear = isOverClearGlyph(mouseX, mouseY);
-				guiGraphics.drawString(font, CLEAR_GLYPH, x + width - CLEAR_WIDTH + 1, y + (height - 8) / 2, overClear ? GuiTheme.ACCENT : GuiTheme.TEXT_MUTED, false);
+				final float clearHover = clearAnim.hover(overClear);
+				final float glyphLeft = x + width - CLEAR_WIDTH + 1;
+				if (clearHover > 0.01F) {
+					UiShapes.circle(guiGraphics, glyphLeft + font.width(CLEAR_GLYPH) / 2.0F, y + height / 2.0F, 5.5F, GuiTheme.withAlpha(GuiTheme.TEXT_DANGER, Math.round(0x40 * clearHover)));
+				}
+				guiGraphics.drawString(font, CLEAR_GLYPH, (int) glyphLeft, y + (height - 8) / 2, GuiTheme.lerpColor(GuiTheme.TEXT_MUTED, GuiTheme.TEXT_PRIMARY, clearHover), false);
+			} else {
+				clearAnim.hover(false);
 			}
 			boolean showLabel = !isFocused() && getValue().isEmpty();
             int i = showLabel ? labelColor : (pseudoIsEnabled ? pseudoEnabledColor : pseudoDisabledColor);
@@ -116,7 +132,7 @@ public class TransparentTextField extends EditBox {
 	public boolean mouseClicked(double mouseX, double mouseY, int button) {
 		// Emptying the field is a click away, rather than a held backspace, which matters when the
 		// filter is what is standing between the player and the rest of the list
-		if (button == 0 && !getValue().isEmpty() && isOverClearGlyph((int) mouseX, (int) mouseY)) {
+		if (button == 0 && clearable && !getValue().isEmpty() && isOverClearGlyph((int) mouseX, (int) mouseY)) {
 			setValue("");
 			setFocused(true);
 			return true;
@@ -191,6 +207,20 @@ public class TransparentTextField extends EditBox {
 
 	         pseudoLineScrollOffset = Mth.clamp(pseudoLineScrollOffset, 0, i);
 	      }
+	}
+
+	/** Marks what has been typed as something the field cannot take, which shows as a red border. */
+	public void setInvalid(boolean invalid) {
+		this.invalid = invalid;
+	}
+
+	public boolean isInvalid() {
+		return invalid;
+	}
+
+	/** Leaves out the cross that empties the field, for a field that must always hold something. */
+	public void setClearable(boolean clearable) {
+		this.clearable = clearable;
 	}
 
 	public void setLabel(Component label) {

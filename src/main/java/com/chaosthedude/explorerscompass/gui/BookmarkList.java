@@ -4,12 +4,10 @@ import java.util.List;
 import java.util.Objects;
 
 import com.chaosthedude.explorerscompass.util.BookmarkEntry;
-import com.chaosthedude.explorerscompass.util.RenderUtils;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.ObjectSelectionList;
-import net.minecraft.util.Mth;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
 
@@ -21,6 +19,7 @@ public class BookmarkList extends ObjectSelectionList<BookmarkListEntry> {
 	private static final int SCROLLBAR_WIDTH = 6;
 
 	private final BookmarksScreen parentScreen;
+	private final ListChrome chrome = new ListChrome();
 
 	/**
 	 * The list now takes its vertical extent as a height rather than as a pair of edges, which is
@@ -79,6 +78,10 @@ public class BookmarkList extends ObjectSelectionList<BookmarkListEntry> {
 		// one the pointer is on
 		final BookmarkListEntry hoveredEntry = getHoveredEntry(mouseX, mouseY);
 
+		chrome.beginFrame();
+		// Drawn before any of the rows, so that it slides under them on its way to the next pick
+		chrome.drawSelection(guiGraphics, getSelected() != null ? children().indexOf(getSelected()) : -1, this::getRowTop, itemHeight, bandLeft, bandRight);
+
 		final int firstRow = Math.max(0,
 				(int) Math.floor(getScrollAmount() / itemHeight) - 1);
 		final int visibleRowCount = (int) Math.ceil((double) height / itemHeight) + 3;
@@ -93,15 +96,10 @@ public class BookmarkList extends ObjectSelectionList<BookmarkListEntry> {
 
 			final BookmarkListEntry entry = getEntry(j);
 			final boolean hovered = Objects.equals(entry, hoveredEntry);
-			if (isSelectedItem(j)) {
-				RenderUtils.drawHorizontalGradient(guiGraphics, bandLeft, bandTop, bandRight, bandBottom, GuiTheme.ROW_SELECTED_LEFT, GuiTheme.ROW_SELECTED_RIGHT);
-				RenderUtils.drawRect(guiGraphics, bandLeft, bandTop, bandLeft + 2, bandBottom, GuiTheme.ACCENT | 0xFF000000);
-			} else if (hovered) {
-				RenderUtils.drawRect(guiGraphics, bandLeft, bandTop, bandRight, bandBottom, GuiTheme.ROW_HOVER);
-			}
+			chrome.drawRowBand(guiGraphics, entry, bandLeft, bandTop, bandRight, bandBottom, hovered && !isSelectedItem(j), false);
 
 			if (j < getItemCount() - 1) {
-				RenderUtils.drawRect(guiGraphics, bandLeft + 2, bandBottom - 1, bandRight - 2, bandBottom, GuiTheme.ROW_SEPARATOR);
+				ListChrome.drawSeparator(guiGraphics, bandLeft, bandRight, bandBottom, false);
 			}
 
 			entry.render(guiGraphics, j, rowTop, getRowLeft(), getRowWidth(), itemHeight - 4, mouseX, mouseY, hovered, partialTicks);
@@ -114,26 +112,13 @@ public class BookmarkList extends ObjectSelectionList<BookmarkListEntry> {
 	 */
 	@Override
 	protected void renderDecorations(GuiGraphics guiGraphics, int mouseX, int mouseY) {
-		if (getMaxScroll() <= 0) {
-			return;
-		}
-
-		final int left = getScrollbarPosition();
-		final int right = left + SCROLLBAR_WIDTH;
-		int thumbHeight = (int) ((float) (height * height) / (float) getMaxPosition());
-		thumbHeight = Mth.clamp(thumbHeight, 32, height - 8);
-		int thumbTop = (int) getScrollAmount() * (height - thumbHeight) / getMaxScroll() + getY();
-		if (thumbTop < getY()) {
-			thumbTop = getY();
-		}
-
-		RenderUtils.drawRect(guiGraphics, left, getY(), right, getBottom(), GuiTheme.SCROLLBAR_TRACK);
-		RenderUtils.drawRect(guiGraphics, left + 1, thumbTop, right - 1, thumbTop + thumbHeight, GuiTheme.SCROLLBAR_THUMB);
+		ListChrome.drawScrollbar(guiGraphics, getScrollbarPosition(), getY(), getBottom(), SCROLLBAR_WIDTH, getScrollAmount(), getMaxScroll(), getMaxPosition(), mouseX, mouseY);
 	}
 
 	/** Rebuilds the rows, showing the most recently located structure first. */
 	public void refreshList() {
 		clearEntries();
+		chrome.reset();
 		final List<BookmarkEntry> bookmarks = parentScreen.getBookmarks();
 		for (int i = bookmarks.size() - 1; i >= 0; i--) {
 			addEntry(new BookmarkListEntry(this, bookmarks.get(i), i));

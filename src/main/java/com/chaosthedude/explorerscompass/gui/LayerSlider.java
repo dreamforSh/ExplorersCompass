@@ -2,8 +2,6 @@ package com.chaosthedude.explorerscompass.gui;
 
 import java.util.function.IntConsumer;
 
-import com.chaosthedude.explorerscompass.util.RenderUtils;
-
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractWidget;
@@ -27,13 +25,14 @@ import net.neoforged.api.distmarker.OnlyIn;
 public class LayerSlider extends AbstractWidget {
 
 	private static final int HANDLE_HEIGHT = 7;
-	private static final int TRACK_COLOR = 0x50000000;
+	private static final int TRACK_WIDTH = 4;
+	private static final int TRACK_COLOR = 0x60000000;
 	private static final int TRACK_BORDER = 0x28FFFFFF;
-	private static final int TRACK_FILL = 0x50FFC24B;
-	private static final int HANDLE_COLOR = 0xFFC9A24A;
-	private static final int HANDLE_COLOR_HOVERED = 0xFFFFC24B;
+	private static final int TRACK_FILL = 0x90FFC24B;
 
 	private final IntConsumer onChange;
+	private final UiAnim.Value hoverAnim = new UiAnim.Value();
+	private final UiAnim.Value handleAnim = new UiAnim.Value();
 	private int max = 1;
 	private int value = 1;
 
@@ -69,24 +68,24 @@ public class LayerSlider extends AbstractWidget {
 	protected void renderWidget(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
 		final int x = getX();
 		final int y = getY();
-		final int trackLeft = x + width / 2 - 2;
-		final int trackRight = trackLeft + 4;
-		RenderUtils.drawRect(guiGraphics, trackLeft, y, trackRight, y + height, TRACK_COLOR);
-		RenderUtils.drawInnerOutline(guiGraphics, trackLeft, y, trackRight, y + height, TRACK_BORDER);
+		final float trackLeft = x + (width - TRACK_WIDTH) / 2.0F;
+		UiShapes.pill(guiGraphics, trackLeft, y, TRACK_WIDTH, height, TRACK_COLOR);
+		UiShapes.roundRectStroke(guiGraphics, trackLeft, y, TRACK_WIDTH, height, TRACK_WIDTH / 2.0F, UiShapes.stroke(), TRACK_BORDER);
 
-		// The track fills from the ground up to the handle: what is filled is what is shown
-		final int top = handleTop();
-		RenderUtils.drawRect(guiGraphics, trackLeft + 1, top + HANDLE_HEIGHT / 2, trackRight - 1, y + height - 1, TRACK_FILL);
+		// The handle eases to where it is put, and the track fills from the ground up to it: what is
+		// filled is what is shown
+		final float top = handleAnim.approach(handleTop(), 24.0F);
+		UiShapes.pill(guiGraphics, trackLeft, top + HANDLE_HEIGHT / 2.0F, TRACK_WIDTH, y + height - (top + HANDLE_HEIGHT / 2.0F), TRACK_FILL);
 
-		final boolean lit = isHoveredOrFocused();
-		RenderUtils.drawRect(guiGraphics, x, top, x + width, top + HANDLE_HEIGHT, lit ? HANDLE_COLOR_HOVERED : HANDLE_COLOR);
-		RenderUtils.drawRect(guiGraphics, x + 1, top + 1, x + width - 1, top + 2, 0x60FFFFFF);
+		final float lit = hoverAnim.hover(isHoveredOrFocused());
+		UiShapes.pill(guiGraphics, x, top, width, HANDLE_HEIGHT, GuiTheme.lerpColor(0xFFC9A24A, GuiTheme.opaque(GuiTheme.ACCENT_HOVER), lit));
+		UiShapes.pill(guiGraphics, x + 2, top + 1.5F, width - 4, 1.5F, 0x60FFFFFF);
 
 		// The reading stands to the left of the handle, kept inside the panel at either end
 		final String reading = value + " / " + max;
 		final int textWidth = Minecraft.getInstance().font.width(reading);
-		final int textY = Mth.clamp(top + HANDLE_HEIGHT / 2 - 4, y, y + height - 8);
-		guiGraphics.drawString(Minecraft.getInstance().font, reading, x - 4 - textWidth, textY, lit ? GuiTheme.TEXT_PRIMARY : GuiTheme.TEXT_SECONDARY, true);
+		final int textY = Mth.clamp(Math.round(top) + HANDLE_HEIGHT / 2 - 4, y, y + height - 8);
+		guiGraphics.drawString(Minecraft.getInstance().font, reading, x - 4 - textWidth, textY, GuiTheme.lerpColor(GuiTheme.TEXT_SECONDARY, GuiTheme.TEXT_PRIMARY, lit), true);
 	}
 
 	@Override

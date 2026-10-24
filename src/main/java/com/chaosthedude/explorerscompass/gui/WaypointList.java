@@ -3,12 +3,10 @@ package com.chaosthedude.explorerscompass.gui;
 import java.util.Objects;
 
 import com.chaosthedude.explorerscompass.client.CompassWaypoint;
-import com.chaosthedude.explorerscompass.util.RenderUtils;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.ObjectSelectionList;
-import net.minecraft.util.Mth;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
 
@@ -20,6 +18,7 @@ public class WaypointList extends ObjectSelectionList<WaypointListEntry> {
 	private static final int SCROLLBAR_WIDTH = 6;
 
 	private final WaypointsScreen parentScreen;
+	private final ListChrome chrome = new ListChrome();
 
 	public WaypointList(WaypointsScreen parentScreen, Minecraft mc, int left, int width, int top, int bottom, int slotHeight) {
 		super(mc, width, bottom - top, top, slotHeight);
@@ -78,6 +77,10 @@ public class WaypointList extends ObjectSelectionList<WaypointListEntry> {
 		final int bandRight = getRowLeft() + getRowWidth() + 3;
 		final WaypointListEntry hoveredEntry = getHoveredEntry(mouseX, mouseY);
 
+		chrome.beginFrame();
+		// Drawn before any of the rows, so that it slides under them on its way to the next pick
+		chrome.drawSelection(guiGraphics, getSelected() != null ? children().indexOf(getSelected()) : -1, this::getRowTop, itemHeight, bandLeft, bandRight);
+
 		final int firstRow = Math.max(0, (int) Math.floor(getScrollAmount() / itemHeight) - 1);
 		final int visibleRowCount = (int) Math.ceil((double) height / itemHeight) + 3;
 		final int lastRow = Math.min(getItemCount(), firstRow + visibleRowCount);
@@ -91,15 +94,10 @@ public class WaypointList extends ObjectSelectionList<WaypointListEntry> {
 
 			final WaypointListEntry entry = getEntry(j);
 			final boolean hovered = Objects.equals(entry, hoveredEntry);
-			if (isSelectedItem(j)) {
-				RenderUtils.drawHorizontalGradient(guiGraphics, bandLeft, bandTop, bandRight, bandBottom, GuiTheme.ROW_SELECTED_LEFT, GuiTheme.ROW_SELECTED_RIGHT);
-				RenderUtils.drawRect(guiGraphics, bandLeft, bandTop, bandLeft + 2, bandBottom, GuiTheme.ACCENT | 0xFF000000);
-			} else if (hovered) {
-				RenderUtils.drawRect(guiGraphics, bandLeft, bandTop, bandRight, bandBottom, GuiTheme.ROW_HOVER);
-			}
+			chrome.drawRowBand(guiGraphics, entry, bandLeft, bandTop, bandRight, bandBottom, hovered && !isSelectedItem(j), false);
 
 			if (j < getItemCount() - 1) {
-				RenderUtils.drawRect(guiGraphics, bandLeft + 2, bandBottom - 1, bandRight - 2, bandBottom, GuiTheme.ROW_SEPARATOR);
+				ListChrome.drawSeparator(guiGraphics, bandLeft, bandRight, bandBottom, false);
 			}
 
 			entry.render(guiGraphics, j, rowTop, getRowLeft(), getRowWidth(), itemHeight - 4, mouseX, mouseY, hovered, partialTicks);
@@ -112,27 +110,14 @@ public class WaypointList extends ObjectSelectionList<WaypointListEntry> {
 	 */
 	@Override
 	protected void renderDecorations(GuiGraphics guiGraphics, int mouseX, int mouseY) {
-		if (getMaxScroll() <= 0) {
-			return;
-		}
-
-		final int left = getScrollbarPosition();
-		final int right = left + SCROLLBAR_WIDTH;
-		int thumbHeight = (int) ((float) (height * height) / (float) getMaxPosition());
-		thumbHeight = Mth.clamp(thumbHeight, 32, height - 8);
-		int thumbTop = (int) getScrollAmount() * (height - thumbHeight) / getMaxScroll() + getY();
-		if (thumbTop < getY()) {
-			thumbTop = getY();
-		}
-
-		RenderUtils.drawRect(guiGraphics, left, getY(), right, getBottom(), GuiTheme.SCROLLBAR_TRACK);
-		RenderUtils.drawRect(guiGraphics, left + 1, thumbTop, right - 1, thumbTop + thumbHeight, GuiTheme.SCROLLBAR_THUMB);
+		ListChrome.drawScrollbar(guiGraphics, getScrollbarPosition(), getY(), getBottom(), SCROLLBAR_WIDTH, getScrollAmount(), getMaxScroll(), getMaxPosition(), mouseX, mouseY);
 	}
 
 	/** Rebuilds the rows from the screen's list, which is newest first. */
 	public void refreshList() {
 		final CompassWaypoint selected = getSelected() != null ? getSelected().getWaypoint() : null;
 		clearEntries();
+		chrome.reset();
 		for (CompassWaypoint waypoint : parentScreen.getWaypoints()) {
 			addEntry(new WaypointListEntry(this, waypoint));
 		}

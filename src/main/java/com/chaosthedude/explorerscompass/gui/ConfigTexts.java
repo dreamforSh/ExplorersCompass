@@ -46,17 +46,26 @@ public final class ConfigTexts {
 
 	/**
 	 * Everything worth knowing about a setting, for the tooltip: its name, what it does, what it may be
-	 * set to, and what it starts as.
+	 * set to, and what it starts as. The name is left without a colour of its own, so that the tooltip
+	 * sets it apart as a title the way it sets apart every other tooltip's first line.
 	 */
 	public static List<Component> tooltip(ConfigValue<?> value) {
+		return tooltip(value, false);
+	}
+
+	/**
+	 * Everything worth knowing about a setting, and, where what has been typed for it is not something
+	 * it can take, a last line saying so.
+	 */
+	public static List<Component> tooltip(ConfigValue<?> value, boolean invalid) {
 		final List<Component> lines = new ArrayList<Component>();
-		lines.add(label(value).copy().withStyle((style) -> style.withColor(TextColor.fromRgb(GuiTheme.TEXT_PRIMARY))));
+		lines.add(label(value));
 
 		final ValueSpec spec = value.getSpec();
 		final String tooltipKey = PREFIX + keyOf(value) + ".tooltip";
 		final String comment = spec.getComment();
 		if (I18n.exists(tooltipKey) || (comment != null && !comment.isBlank())) {
-			lines.add(Component.translatableWithFallback(tooltipKey, comment == null ? "" : comment).withStyle((style) -> style.withColor(TextColor.fromRgb(GuiTheme.TEXT_SECONDARY))));
+			lines.add(Component.translatableWithFallback(tooltipKey, comment == null ? "" : comment));
 		}
 
 		final ModConfigSpec.Range<?> range = spec.getRange();
@@ -65,10 +74,26 @@ public final class ConfigTexts {
 		}
 		lines.add(muted(I18n.get(PREFIX + "default", format(value.getDefault()))));
 		if (spec.restartType() != ModConfigSpec.RestartType.NONE) {
-			lines.add(Component.translatable(PREFIX + (spec.restartType() == ModConfigSpec.RestartType.GAME ? "restartGame" : "restartWorld")).withStyle(ChatFormatting.RED));
+			lines.add(Component.translatable(PREFIX + (spec.restartType() == ModConfigSpec.RestartType.GAME ? "restartGame" : "restartWorld")).withStyle((style) -> style.withColor(TextColor.fromRgb(GuiTheme.TEXT_WARNING))));
 		}
-		lines.add(Component.literal(keyOf(value)).withStyle(ChatFormatting.DARK_GRAY));
+		if (invalid) {
+			lines.add(Component.translatable(PREFIX + "invalid").withStyle((style) -> style.withColor(TextColor.fromRgb(GuiTheme.TEXT_DANGER))));
+		}
+		lines.add(Component.literal(keyOf(value)).withStyle((style) -> style.withColor(TextColor.fromRgb(GuiTheme.TEXT_DISABLED))));
 		return lines;
+	}
+
+	/**
+	 * The colour a whole number set for the given setting stands for, as an opaque colour, or 0 where
+	 * its values stand for none. Only the waypoint colour does: it is an index into the game's list of
+	 * text colours, which says far more drawn as the colour than as the index.
+	 */
+	public static int swatch(ConfigValue<?> value, int number) {
+		if (!"xaeroWaypointColor".equals(keyOf(value))) {
+			return 0;
+		}
+		final ChatFormatting formatting = ChatFormatting.getById(number);
+		return formatting != null && formatting.getColor() != null ? 0xFF000000 | formatting.getColor() : 0;
 	}
 
 	/** A value as the screen writes it: switches as on or off, choices by their names, lists by their length. */

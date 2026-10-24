@@ -1,7 +1,6 @@
 package com.chaosthedude.explorerscompass.gui;
 
 import java.util.Locale;
-import java.util.function.ToIntFunction;
 
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
@@ -25,10 +24,6 @@ final class LootMath {
 
 	/** Thousandths of certainty. */
 	private static final int ALWAYS = 1000;
-	/** The widest a count may be written in the corner of a slot before only the larger end is kept. */
-	private static final int COUNT_MAX_WIDTH = 18;
-	/** The largest count written in the corner of a slot; anything over it is said to be more. */
-	private static final int MAX_GRID_COUNT = 999;
 
 	private LootMath() {
 	}
@@ -108,13 +103,17 @@ final class LootMath {
 		return baseOrdinal;
 	}
 
-	/** A chance in thousandths, written as a percentage with a decimal only where it says something. */
+	/**
+	 * A chance in thousandths, written as a percentage with a decimal only where it says something.
+	 * One that rounds to nothing reads as less than a tenth of a percent rather than as none, since
+	 * an item a table names is one it can give.
+	 */
 	static String formatChance(int permille) {
 		if (permille >= ALWAYS) {
 			return "100%";
 		}
 		if (permille <= 0) {
-			return "0%";
+			return "<0.1%";
 		}
 		if (permille % 10 == 0) {
 			return (permille / 10) + "%";
@@ -144,11 +143,15 @@ final class LootMath {
 	 * A chance as the label under a slot, which has twenty pixels to say it in: whole percentages
 	 * from ten up, and a tenth below that, where a decimal is what tells one rare item from another.
 	 * Never 100% short of certain, and nothing at all for a certain item, whose slot is told apart by
-	 * its colour and needs no label.
+	 * its check mark and needs no label. One that rounds to nothing reads as less than a percent, as
+	 * the tenth that the tooltip says it with would not fit.
 	 */
 	static String formatGridChance(int permille) {
 		if (permille >= ALWAYS) {
 			return null;
+		}
+		if (permille <= 0) {
+			return "<1%";
 		}
 		if (permille >= 100) {
 			return Math.min(99, (permille + 5) / 10) + "%";
@@ -158,24 +161,16 @@ final class LootMath {
 
 	/**
 	 * How many come at once, as written in the corner of a slot the way the game writes a stack's
-	 * size: nothing for one, the count where it is fixed, and the range where it fits, falling back
-	 * to the larger end where it does not. The whole range is in the tooltip.
+	 * size, and only where the number is fixed. A range would crowd the item it sits on, and its
+	 * larger end alone would promise a stack the table seldom gives, so a slot whose count varies says
+	 * nothing and leaves the range to the tooltip. One is never written, as the game never writes it,
+	 * and anything over 99 is written as 99, the most two digits in the corner have room for.
 	 */
-	static String formatGridCount(int minCount, int maxCount, ToIntFunction<String> width) {
-		if (maxCount <= 1) {
+	static String formatGridCount(int minCount, int maxCount) {
+		if (minCount != maxCount || maxCount <= 1) {
 			return null;
 		}
-		if (maxCount > MAX_GRID_COUNT) {
-			return "99+";
-		}
-		if (minCount == maxCount) {
-			return String.valueOf(maxCount);
-		}
-		final String range = minCount + "-" + maxCount;
-		if (width.applyAsInt(range) <= COUNT_MAX_WIDTH) {
-			return range;
-		}
-		return String.valueOf(maxCount);
+		return String.valueOf(Math.min(maxCount, 99));
 	}
 
 	/**

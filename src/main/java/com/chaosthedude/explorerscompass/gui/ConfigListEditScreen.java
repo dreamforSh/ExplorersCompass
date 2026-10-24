@@ -16,7 +16,6 @@ import net.minecraft.client.gui.components.ObjectSelectionList;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.network.chat.Component;
-import net.minecraft.util.Mth;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
 import net.neoforged.neoforge.common.ModConfigSpec.ConfigValue;
@@ -78,7 +77,7 @@ public class ConfigListEditScreen extends Screen {
 		}
 		for (Object widget : renderables) {
 			if (widget instanceof TransparentButton button && button.visible && button.isPointedAt() && !button.getTooltipLines().isEmpty()) {
-				guiGraphics.renderComponentTooltip(font, button.getTooltipLines(), mouseX, mouseY);
+				ThemedTooltip.render(guiGraphics, font, button, mouseX, mouseY);
 				return;
 			}
 		}
@@ -161,16 +160,19 @@ public class ConfigListEditScreen extends Screen {
 		addButton = addSidebarButton(Component.translatable(ConfigTexts.PREFIX + "list.add"), (onPress) -> {
 			addEntry();
 		});
+		addButton.setPrimary(true);
 		addButton.setTooltipLines(Component.translatable(ConfigTexts.PREFIX + "list.add.tooltip"));
 		removeButton = addSidebarButton(Component.translatable("string.explorerscompass.remove"), (onPress) -> {
 			if (entryList.getSelected() != null) {
 				remove(entryList.getSelected().entry);
 			}
 		});
+		removeButton.setDanger(true);
 		removeButton.setTooltipLines(Component.translatable(ConfigTexts.PREFIX + "list.remove.tooltip"));
 		clearButton = addSidebarButton(Component.translatable("string.explorerscompass.clearAll"), (onPress) -> {
 			apply(new ArrayList<String>());
 		});
+		clearButton.setDanger(true);
 		clearButton.setTooltipLines(Component.translatable(ConfigTexts.PREFIX + "list.clear.tooltip"), Component.translatable("string.explorerscompass.tooltip.clearAll.warning").withStyle(ChatFormatting.RED));
 		resetButton = addSidebarButton(Component.translatable(ConfigTexts.PREFIX + "resetTab"), (onPress) -> {
 			apply(new ArrayList<String>(value.getDefault()));
@@ -210,6 +212,8 @@ public class ConfigListEditScreen extends Screen {
 	private class EntryList extends ObjectSelectionList<EntryRow> {
 
 		private static final int SCROLLBAR_WIDTH = 6;
+
+		private final ListChrome chrome = new ListChrome();
 
 		EntryList(Minecraft mc, int left, int width, int top, int bottom) {
 			super(mc, width, bottom - top, top, 16);
@@ -255,6 +259,8 @@ public class ConfigListEditScreen extends Screen {
 			final int bandLeft = getRowLeft() - 3;
 			final int bandRight = getRowLeft() + getRowWidth() + 3;
 			final EntryRow hoveredEntry = isMouseOver(mouseX, mouseY) ? getEntryAtPosition(mouseX, mouseY) : null;
+			chrome.beginFrame();
+			chrome.drawSelection(guiGraphics, getSelected() != null ? children().indexOf(getSelected()) : -1, this::getRowTop, itemHeight, bandLeft, bandRight);
 			for (int j = 0; j < getItemCount(); j++) {
 				final int rowTop = getRowTop(j);
 				final int bandTop = rowTop - 2;
@@ -264,36 +270,20 @@ public class ConfigListEditScreen extends Screen {
 				}
 				final EntryRow row = getEntry(j);
 				final boolean hovered = Objects.equals(row, hoveredEntry);
-				if (isSelectedItem(j)) {
-					RenderUtils.drawHorizontalGradient(guiGraphics, bandLeft, bandTop, bandRight, bandBottom, GuiTheme.ROW_SELECTED_LEFT, GuiTheme.ROW_SELECTED_RIGHT);
-					RenderUtils.drawRect(guiGraphics, bandLeft, bandTop, bandLeft + 2, bandBottom, GuiTheme.ACCENT | 0xFF000000);
-				} else if (hovered) {
-					RenderUtils.drawRect(guiGraphics, bandLeft, bandTop, bandRight, bandBottom, GuiTheme.ROW_HOVER);
-				}
+				chrome.drawRowBand(guiGraphics, row, bandLeft, bandTop, bandRight, bandBottom, hovered && !isSelectedItem(j), false);
 				row.render(guiGraphics, j, rowTop, getRowLeft(), getRowWidth(), itemHeight - 4, mouseX, mouseY, hovered, partialTicks);
 			}
 		}
 
 		@Override
 		protected void renderDecorations(GuiGraphics guiGraphics, int mouseX, int mouseY) {
-			if (getMaxScroll() <= 0) {
-				return;
-			}
-			final int left = getScrollbarPosition();
-			final int right = left + SCROLLBAR_WIDTH;
-			int thumbHeight = (int) ((float) (height * height) / (float) getMaxPosition());
-			thumbHeight = Mth.clamp(thumbHeight, 32, height - 8);
-			int thumbTop = (int) getScrollAmount() * (height - thumbHeight) / getMaxScroll() + getY();
-			if (thumbTop < getY()) {
-				thumbTop = getY();
-			}
-			RenderUtils.drawRect(guiGraphics, left, getY(), right, getBottom(), GuiTheme.SCROLLBAR_TRACK);
-			RenderUtils.drawRect(guiGraphics, left + 1, thumbTop, right - 1, thumbTop + thumbHeight, GuiTheme.SCROLLBAR_THUMB);
+			ListChrome.drawScrollbar(guiGraphics, getScrollbarPosition(), getY(), getBottom(), SCROLLBAR_WIDTH, getScrollAmount(), getMaxScroll(), getMaxPosition(), mouseX, mouseY);
 		}
 
 		void refreshList() {
 			final String selected = getSelected() != null ? getSelected().entry : null;
 			clearEntries();
+			chrome.reset();
 			for (String entry : value.get()) {
 				addEntry(new EntryRow(entry));
 			}
@@ -311,6 +301,7 @@ public class ConfigListEditScreen extends Screen {
 	private class EntryRow extends ObjectSelectionList.Entry<EntryRow> {
 
 		private final String entry;
+		private final UiAnim.Value removeAnim = new UiAnim.Value();
 		private int removeLeft;
 		private int removeTop;
 
@@ -324,8 +315,12 @@ public class ConfigListEditScreen extends Screen {
 			removeTop = top - 2;
 			guiGraphics.drawString(font, RenderUtils.trimToWidth(entry, width - REMOVE_WIDTH - 8), left + 4, top + 2, GuiTheme.TEXT_PRIMARY, false);
 			// The cross shows on the row the pointer is over, and lights up when it is over the cross itself
+			final float removeHover = removeAnim.hover(isOverRemove(mouseX, mouseY));
 			if (hovered || Objects.equals(entryList.getSelected(), this)) {
-				guiGraphics.drawString(font, REMOVE_GLYPH, removeLeft + 3, top + 2, isOverRemove(mouseX, mouseY) ? GuiTheme.TEXT_WARNING : GuiTheme.TEXT_MUTED, false);
+				if (removeHover > 0.01F) {
+					UiShapes.circle(guiGraphics, removeLeft + 3 + font.width(REMOVE_GLYPH) / 2.0F, top + 5.5F, 5.5F, GuiTheme.withAlpha(GuiTheme.TEXT_DANGER, Math.round(0x40 * removeHover)));
+				}
+				guiGraphics.drawString(font, REMOVE_GLYPH, removeLeft + 3, top + 2, GuiTheme.lerpColor(GuiTheme.TEXT_MUTED, GuiTheme.TEXT_DANGER, removeHover), false);
 			}
 		}
 

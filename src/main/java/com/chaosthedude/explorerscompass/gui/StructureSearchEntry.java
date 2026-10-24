@@ -66,7 +66,8 @@ public class StructureSearchEntry extends ObjectSelectionList.Entry<StructureSea
 		dimensionLine = labeled("string.explorerscompass.dimension", document.getDimensions());
 
 		final List<Component> lines = new ArrayList<Component>();
-		lines.add(Component.literal(document.getDisplayName()).withStyle((style) -> style.withColor(TextColor.fromRgb(GuiTheme.TEXT_PRIMARY))));
+		// Left without a colour of its own, so that the tooltip heads itself with it as a title
+		lines.add(Component.literal(document.getDisplayName()));
 		addLabeled(lines, "string.explorerscompass.source", document.getSourceName());
 		addLabeled(lines, "string.explorerscompass.group", document.getGroupName());
 		addLabeled(lines, "string.explorerscompass.dimension", document.getDimensions());

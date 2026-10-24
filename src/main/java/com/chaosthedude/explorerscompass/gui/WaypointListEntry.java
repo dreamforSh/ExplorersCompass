@@ -140,7 +140,8 @@ public class WaypointListEntry extends ObjectSelectionList.Entry<WaypointListEnt
 	 */
 	public List<Component> getTooltipLines() {
 		final List<Component> lines = new ArrayList<Component>();
-		lines.add(Component.literal(waypoint.getName()).withStyle((style) -> style.withColor(TextColor.fromRgb(GuiTheme.TEXT_PRIMARY))));
+		// Left without a colour of its own, so that the tooltip heads itself with it as a title
+		lines.add(Component.literal(waypoint.getName()));
 		lines.add(muted(coordinateLine, GuiTheme.TEXT_SECONDARY));
 
 		final boolean here = isInCurrentDimension();

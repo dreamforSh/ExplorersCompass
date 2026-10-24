@@ -15,7 +15,6 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.network.chat.Component;
-import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.util.Mth;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -46,38 +45,69 @@ import net.neoforged.api.distmarker.OnlyIn;
 @OnlyIn(Dist.CLIENT)
 final class LootOverview {
 
-	private static final int PADDING = 6;
+	/** The bar down the drawer's leading edge. */
+	private static final int BAR = 2;
+	/** The room between the drawer's edges, past the bar on the left, and what it holds. */
+	private static final int PAD = 7;
 	private static final int LINE = 10;
 	private static final int ICON = 16;
-	/** The heading of a section: an icon tall, and a pixel under it. */
-	private static final int TITLE_ROW = ICON + 1;
-	private static final int SECTION_GAP = 5;
-	private static final int CLOSE_SIZE = 10;
-	private static final int SCROLLBAR_WIDTH = 3;
-	/** Room between the grid and the scrollbar, so that the last column does not touch it. */
+	/** How far below the drawer's top the title is written, with the close box a pixel higher so that its "×" sits level with it. */
+	private static final int TITLE_Y = 8;
+	private static final int CLOSE_Y = 7;
+	private static final int CLOSE_SIZE = 11;
+	/** Where the "×" stands in the close box. */
+	private static final int CLOSE_MARK_X = 3;
+	private static final int CLOSE_MARK_Y = 2;
+	/** How far below the drawer's top the summary is written, on a line of its own under the title. */
+	private static final int SUMMARY_Y = 19;
+	/** How far below the drawer's top the view switch stands. */
+	private static final int SWITCH_Y = 31;
+	private static final int SWITCH_HEIGHT = 14;
+	/** How far below the top of the view switch its labels are written. */
+	private static final int SWITCH_LABEL_Y = 3;
+	private static final int CHIP_HEIGHT = 13;
+	private static final int CHIP_GAP = 2;
+	/** Where a tier chip's icon stands from the chip's top left, and how far right its count starts. */
+	private static final int CHIP_ICON_INSET = 2;
+	private static final int CHIP_COUNT_X = 13;
+	private static final int CHIP_COUNT_Y = 3;
+	/** The room a tier chip keeps after its count, which is left out where the chip has less. */
+	private static final int CHIP_COUNT_MARGIN = 2;
+	/** The room under the view switch and under the tier chips. */
+	private static final int CONTROL_GAP = 5;
+	private static final int SCROLLBAR_WIDTH = 2;
+	/** Room between the list and the scrollbar, so that the last column does not touch it. */
 	private static final int SCROLLBAR_GAP = 3;
+	/** How far the scrollbar's track stops short of either end of the list. */
+	private static final int SCROLLBAR_INSET = 3;
+	private static final int SCROLLBAR_MIN_THUMB = 8;
+	/** Everything across the drawer that is not columns of tiles: the bar, the room either side and the scrollbar. */
+	private static final int CHROME = BAR + PAD + SCROLLBAR_GAP + SCROLLBAR_WIDTH + PAD;
+	/** How far above the drawer's bottom the list is cut. */
+	private static final int LIST_BOTTOM_GAP = 3;
+	/** The room above the list's first heading, so that the light behind it when pointed at is not cut. */
+	private static final int CONTENT_TOP = 5;
+	/** The room every row of tiles leaves under itself, which the last row of the list has no need of. */
+	private static final int TRAIL = LootSlots.ROW_PLAIN - LootSlots.SLOT;
+	/** The room between the rule that ends a section and the heading of the next. */
+	private static final int HEADING_GAP = 6;
+	/** The room between a section's heading and what it holds. */
+	private static final int HEADING_CONTENT_GAP = 5;
+	/** How far right of a heading's icon its title starts. */
+	private static final int HEADING_TITLE_X = ICON + 5;
+	/** How far below the top of a heading its pill and its title stand, so that both sit level with the icon's middle. */
+	private static final int HEADING_PILL_Y = 3;
+	private static final int HEADING_TITLE_Y = 4;
+	/** The room kept between a heading's title and its pill. */
+	private static final int HEADING_PILL_GAP = 4;
+	/** How far the light behind a heading under the pointer reaches past it, above and below, to the left and to the right. */
+	private static final int HOVER_REACH_Y = 2;
+	private static final int HOVER_REACH_LEFT = 4;
+	private static final int HOVER_REACH_RIGHT = 2;
+	/** The room between the rule over the item view's footer and its line. */
+	private static final int FOOTER_GAP = 5;
 	/** How far one notch of the wheel moves the list: one row of labelled tiles. */
 	private static final int SCROLL_STEP = LootSlots.ROW_LABELLED;
-	private static final int CHIP_HEIGHT = 12;
-	private static final int CHIP_GAP = 3;
-	/** The two views are drawn as one control split in two, so they stand only a pixel apart. */
-	private static final int VIEW_CHIP_GAP = 1;
-	/** The square of a tier's colour a tier chip leads with. */
-	private static final int TIER_SWATCH = 5;
-	/** The room either side of what a tier chip holds. */
-	private static final int TIER_CHIP_MARGIN = 3;
-	/** The room between a tier chip's swatch and its count. */
-	private static final int TIER_COUNT_GAP = 2;
-	/** How wide a chip's tooltip is allowed to run before it is broken into lines. */
-	private static final int TOOLTIP_WIDTH = 200;
-
-	private static final int BACKGROUND_TOP = 0xF0141821;
-	private static final int BACKGROUND_BOTTOM = 0xF00A0C10;
-	private static final int BORDER = 0x50FFFFFF;
-	private static final int SEPARATOR = 0x28FFFFFF;
-	private static final int HEADING_HOVER = 0x28FFC24B;
-	/** What a line saying how to use something is written in, the way the game writes its own such hints. */
-	private static final int HINT = 0x555555;
 
 	/** Lit up when nothing in the drawer is pointed at. Shared, and never changed. */
 	private static final BitSet NONE = new BitSet();
@@ -87,7 +117,7 @@ final class LootOverview {
 		CONTAINERS("string.explorerscompass.lootViewContainers"),
 		ITEMS("string.explorerscompass.lootViewItems");
 
-		/** The key the view's chip is labelled under, and, with ".tooltip" after it, explained under. */
+		/** The key the view's half of the switch is labelled under, and, with ".tooltip" after it, explained under. */
 		final String key;
 
 		View(String key) {
@@ -170,16 +200,21 @@ final class LootOverview {
 	/** The band the list scrolls in, under the heading of the drawer. */
 	private int listTop;
 	private int listBottom;
+	/** How far the list runs from its top, the room above its first heading included, to where its last line ends. */
 	private int contentHeight;
 	private int scroll;
 	/** Where the list wants to be scrolled to, set by a click on a badge or an item and applied at the next layout. */
 	private int pendingFocus = -1;
 	private int columns = 1;
-	/** Where each tier chip stands, indexed by tier, and whether there was room to count in them. */
+	/** Where the item view's footer is ruled, measured as the list is, or -1 where it has none. */
+	private int footerTop = -1;
+	/** Where each tier chip stands, indexed by tier. */
 	private final int[] tierChipLeft = new int[LootTier.values().length];
 	private final int[] tierChipWidth = new int[LootTier.values().length];
-	private boolean tierCountsShown;
+	/** How many containers hold loot and how many tables they name, said three ways, from the whole sentence down to the containers alone. */
 	private String summary = "";
+	private String shortSummary = "";
+	private String containersSummary = "";
 
 	private Section hoveredSection;
 	private LootGrid.Tile hoveredTile;
@@ -237,15 +272,14 @@ final class LootOverview {
 		this.top = top;
 		this.right = right;
 		this.bottom = bottom;
-		final int headingTop = top + PADDING;
-		viewTop = headingTop + LINE + 2;
-		tierTop = viewTop + CHIP_HEIGHT + CHIP_GAP;
-		separatorY = tierTop + CHIP_HEIGHT + 2;
-		listTop = separatorY + 2;
-		listBottom = Math.max(listTop, bottom - PADDING);
+		viewTop = top + SWITCH_Y;
+		tierTop = viewTop + SWITCH_HEIGHT + CONTROL_GAP;
+		separatorY = tierTop + CHIP_HEIGHT + CONTROL_GAP;
+		listTop = separatorY + 1;
+		listBottom = Math.max(listTop, bottom - LIST_BOTTOM_GAP);
 
-		final int innerLeft = left + PADDING;
-		final int newColumns = Math.max(1, (listRight() - innerLeft - LootSlots.RIBBON) / LootSlots.TILE_W);
+		final int innerLeft = innerLeft();
+		final int newColumns = Math.max(1, (listRight() - innerLeft + 2 * LootSlots.SLOT_INSET_X) / LootSlots.TILE_W);
 		final boolean advanced = Minecraft.getInstance().options.advancedItemTooltips;
 		if (preview != laidOutFor) {
 			gather(preview);
@@ -260,9 +294,9 @@ final class LootOverview {
 			laidOutView = view;
 			laidOutSolo = solo;
 			laidOutAdvanced = advanced;
-			layoutTiles(advanced);
+			layoutTiles(Minecraft.getInstance().font, advanced);
 		}
-		layoutTierChips(Minecraft.getInstance().font, innerLeft, right - PADDING);
+		layoutTierChips(innerLeft, innerRight());
 
 		if (pendingFocus >= 0) {
 			if (view == View.CONTAINERS) {
@@ -359,16 +393,33 @@ final class LootOverview {
 			itemTierCounts[LootTier.of(permille).ordinal()]++;
 		}
 		summary = I18n.get("string.explorerscompass.lootOverviewSummary", String.valueOf(containers), String.valueOf(tables));
+		shortSummary = I18n.get("string.explorerscompass.lootOverviewSummaryShort", String.valueOf(containers), String.valueOf(tables));
+		containersSummary = I18n.get("string.explorerscompass.lootStructureContainers", String.valueOf(containers));
 	}
 
 	/**
 	 * Lays the tiles of the current view out in groups by tier, and the sections around them, at a y
-	 * measured from the top of the list before scrolling.
+	 * measured from the top of the list's content before scrolling.
+	 *
+	 * <p>A section ends where its last row's room ends, or a little after its last line where it ends
+	 * in text, and that is where the rule before the next one goes. The list as a whole ends without
+	 * the room after its last row, so that scrolled to the bottom it sits as close to the drawer's
+	 * edge as its first heading does to the controls.
 	 */
-	private void layoutTiles(boolean advanced) {
+	private void layoutTiles(Font font, boolean advanced) {
+		footerTop = -1;
 		if (view == View.ITEMS) {
 			itemGrid = LootGrid.grouped(itemPermilles, columns, solo);
-			contentHeight = itemGrid.tiles().isEmpty() ? 0 : 2 + itemGrid.height() + 2;
+			if (itemGrid.tiles().isEmpty()) {
+				contentHeight = 0;
+			} else if (solo != null && itemGrid.hidden() > 0) {
+				// Picking a tier out hides the others' tiles without a trace in the list, so a line
+				// under it says how many there are, which keeps the filter from reading as the whole
+				footerTop = itemGrid.height() + TRAIL;
+				contentHeight = CONTENT_TOP + footerTop + FOOTER_GAP + font.lineHeight;
+			} else {
+				contentHeight = CONTENT_TOP + itemGrid.height() - TRAIL;
+			}
 			return;
 		}
 		itemGrid = null;
@@ -376,11 +427,11 @@ final class LootOverview {
 		for (int i = 0; i < sections.size(); i++) {
 			final Section section = sections.get(i);
 			if (i > 0) {
-				y += SECTION_GAP;
+				y += 1 + HEADING_GAP;
 			}
 			section.top = y;
-			y += TITLE_ROW;
-			section.headingBottom = y;
+			section.headingBottom = y + ICON;
+			y = section.headingBottom + HEADING_CONTENT_GAP;
 			// The id says nothing the name does not to most players, so it is shown only to those who
 			// asked the game for ids
 			if (advanced && !section.id.isEmpty()) {
@@ -390,37 +441,32 @@ final class LootOverview {
 				y += LINE;
 			}
 			section.grid = null;
-			if (!section.entries.isEmpty()) {
-				y += 2;
+			if (section.entries.isEmpty()) {
+				y += TRAIL;
+			} else {
 				section.gridTop = y;
 				section.grid = LootGrid.grouped(section.permilles, columns, solo);
 				// A table with nothing in the tier picked out keeps its heading and says so, so that the
 				// list still reads as every table the structure has
-				y += section.grid.tiles().isEmpty() ? LINE : section.grid.height();
+				y += section.grid.tiles().isEmpty() ? LINE + TRAIL : section.grid.height();
 			}
-			y += 2;
 			section.bottom = y;
 		}
-		contentHeight = y;
+		contentHeight = sections.isEmpty() ? 0 : CONTENT_TOP + y - TRAIL;
 	}
 
 	/**
-	 * Lays the tier chips out from the left, each holding its tier's swatch and how many tiles of the
-	 * current view are in it. Where the four do not fit with their counts, as in a narrow drawer, they
-	 * go without them rather than being cut, since the swatch alone still says which tier is which.
+	 * Lays the four tier chips out across the whole row, equally wide, with the pixels that do not
+	 * divide going to the first ones. Equal chips read as one control, and a count that grows by a
+	 * digit does not push the chips after it along.
 	 */
-	private void layoutTierChips(Font font, int innerLeft, int innerRight) {
-		final int[] counts = tierCounts();
-		final int bare = TIER_CHIP_MARGIN + TIER_SWATCH + TIER_CHIP_MARGIN;
-		int total = CHIP_GAP * (counts.length - 1);
-		for (int count : counts) {
-			total += bare + TIER_COUNT_GAP + font.width(String.valueOf(count));
-		}
-		tierCountsShown = total <= innerRight - innerLeft;
+	private void layoutTierChips(int innerLeft, int innerRight) {
+		final int chips = LootTier.values().length;
+		final int total = innerRight - innerLeft - CHIP_GAP * (chips - 1);
 		int x = innerLeft;
-		for (int i = 0; i < counts.length; i++) {
+		for (int i = 0; i < chips; i++) {
 			tierChipLeft[i] = x;
-			tierChipWidth[i] = tierCountsShown ? bare + TIER_COUNT_GAP + font.width(String.valueOf(counts[i])) : bare;
+			tierChipWidth[i] = total / chips + (i < total % chips ? 1 : 0);
 			x += tierChipWidth[i] + CHIP_GAP;
 		}
 	}
@@ -434,120 +480,166 @@ final class LootOverview {
 			return;
 		}
 		final Font font = Minecraft.getInstance().font;
-		final int innerLeft = left + PADDING;
-		final int innerRight = right - PADDING;
+		final int innerLeft = innerLeft();
+		final int innerRight = innerRight();
 		final int listRight = listRight();
 		findHover(mouseX, mouseY);
 		hoveredView = viewAt(mouseX, mouseY);
 		hoveredTier = tierAt(mouseX, mouseY);
 
-		RenderUtils.drawVerticalGradient(guiGraphics, left, top, right, bottom, BACKGROUND_TOP, BACKGROUND_BOTTOM);
-		RenderUtils.drawInnerOutline(guiGraphics, left, top, right, bottom, BORDER);
+		RenderUtils.drawVerticalGradient(guiGraphics, left, top, right, bottom, LootSlots.PANEL_TOP, LootSlots.PANEL_BOTTOM);
+		RenderUtils.drawInnerOutline(guiGraphics, left, top, right, bottom, LootSlots.PANEL_BORDER);
 		// The bar along the leading edge, which is how everything picked out on these screens is marked
-		RenderUtils.drawRect(guiGraphics, left, top, left + 2, bottom, GuiTheme.ACCENT | 0xFF000000);
+		RenderUtils.drawRect(guiGraphics, left, top, left + BAR, bottom, LootSlots.ACCENT_BAR);
 
 		renderHeading(guiGraphics, font, mouseX, mouseY, innerLeft, innerRight);
-		RenderUtils.drawRect(guiGraphics, innerLeft, separatorY, innerRight, separatorY + 1, SEPARATOR);
+		LootSlots.drawHairline(guiGraphics, innerLeft, innerRight, separatorY);
 
-		// The list, cut to its band so that a section half scrolled out is drawn half
-		guiGraphics.enableScissor(innerLeft, listTop, innerRight, listBottom);
+		// The list, cut to its band so that a section half scrolled out is drawn half. The band runs
+		// left of the list to take in the light behind a heading, and stops short of the scrollbar
+		final int origin = contentOrigin();
+		guiGraphics.enableScissor(left + BAR, listTop, listClipRight(), listBottom);
 		if (view == View.ITEMS) {
 			if (itemGrid == null || itemGrid.tiles().isEmpty()) {
 				final String empty = RenderUtils.trimToWidth(I18n.get("string.explorerscompass.lootTierEmpty"), listRight - innerLeft);
 				guiGraphics.drawString(font, empty, (innerLeft + listRight - font.width(empty)) / 2, (listTop + listBottom - font.lineHeight) / 2, GuiTheme.TEXT_MUTED, false);
 			} else {
-				LootGrid.render(guiGraphics, font, itemGrid, itemEntries, innerLeft, listTop - scroll + 2, hoveredTile, listTop, listBottom);
+				LootGrid.render(guiGraphics, font, itemGrid, itemEntries, innerLeft - LootSlots.SLOT_INSET_X, origin, hoveredTile, listTop, listBottom, listRight, true, false);
+				if (footerTop >= 0) {
+					LootSlots.drawHairline(guiGraphics, innerLeft, listRight, origin + footerTop);
+					final String footer = RenderUtils.trimToWidth(I18n.get("string.explorerscompass.lootHiddenByFilter", String.valueOf(itemGrid.hidden())), listRight - innerLeft);
+					guiGraphics.drawString(font, footer, innerLeft, origin + footerTop + FOOTER_GAP, GuiTheme.TEXT_MUTED, false);
+				}
 			}
 		} else {
-			renderSections(guiGraphics, font, innerLeft, listRight);
+			renderSections(guiGraphics, font, origin, innerLeft, listRight);
 		}
 		guiGraphics.disableScissor();
 
-		// The scrollbar, only where there is more than fits
+		// The scrollbar, only where there is more than fits, kept thin and short of the list's ends so
+		// that it reads as where the list is rather than as something to grab
 		final int viewport = listBottom - listTop;
-		if (contentHeight > viewport && viewport > 0) {
+		final int trackTop = listTop + SCROLLBAR_INSET;
+		final int track = listBottom - SCROLLBAR_INSET - trackTop;
+		if (contentHeight > viewport && track > 0) {
 			final int trackLeft = innerRight - SCROLLBAR_WIDTH;
-			RenderUtils.drawRect(guiGraphics, trackLeft, listTop, innerRight, listBottom, GuiTheme.SCROLLBAR_TRACK);
-			final int thumbHeight = Math.max(8, viewport * viewport / contentHeight);
-			final int thumbTop = listTop + Math.round((viewport - thumbHeight) * (scroll / (float) (contentHeight - viewport)));
-			RenderUtils.drawRect(guiGraphics, trackLeft, thumbTop, innerRight, thumbTop + thumbHeight, GuiTheme.SCROLLBAR_THUMB);
+			RenderUtils.drawRect(guiGraphics, trackLeft, trackTop, innerRight, trackTop + track, LootSlots.SCROLL_TRACK);
+			final int thumbHeight = Math.min(track, Math.max(SCROLLBAR_MIN_THUMB, track * viewport / contentHeight));
+			final int thumbTop = trackTop + (track - thumbHeight) * scroll / Math.max(1, contentHeight - viewport);
+			RenderUtils.drawRect(guiGraphics, trackLeft, thumbTop, innerRight, thumbTop + thumbHeight, LootSlots.SCROLL_THUMB);
 		}
 	}
 
 	/**
-	 * The heading of the drawer: the title with the close box against the right edge and the summary
-	 * between them where it fits whole, then the two views, then the tier chips.
+	 * The heading of the drawer: the title with the close box against the right edge, the summary on
+	 * a line of its own under them, then the two views as one switch, then the tier chips.
 	 */
 	private void renderHeading(GuiGraphics guiGraphics, Font font, int mouseX, int mouseY, int innerLeft, int innerRight) {
-		final int y = top + PADDING;
 		final int closeLeft = innerRight - CLOSE_SIZE;
+		final int closeTop = top + CLOSE_Y;
 		final String title = RenderUtils.trimToWidth(I18n.get("string.explorerscompass.lootOverview"), closeLeft - 4 - innerLeft);
-		guiGraphics.drawString(font, title, innerLeft, y, GuiTheme.TEXT_PRIMARY, true);
-		// Left out rather than cut where it does not fit, since half a count says nothing; the views'
-		// tooltips say it as well
-		final int summaryWidth = font.width(summary);
-		if (innerLeft + font.width(title) + 4 + summaryWidth <= closeLeft - 4) {
-			guiGraphics.drawString(font, summary, closeLeft - 4 - summaryWidth, y, GuiTheme.TEXT_MUTED, false);
-		}
+		guiGraphics.drawString(font, title, innerLeft, top + TITLE_Y, GuiTheme.TEXT_PRIMARY, true);
 		final boolean closeLit = isOverClose(mouseX, mouseY);
-		RenderUtils.drawRect(guiGraphics, closeLeft, y - 1, closeLeft + CLOSE_SIZE, y - 1 + CLOSE_SIZE, closeLit ? GuiTheme.CHIP_ACCENT_BACKGROUND : GuiTheme.CHIP_BACKGROUND);
-		guiGraphics.drawString(font, "×", closeLeft + (CLOSE_SIZE - font.width("×")) / 2 + 1, y, closeLit ? GuiTheme.ACCENT : GuiTheme.TEXT_SECONDARY, false);
+		RenderUtils.drawRect(guiGraphics, closeLeft, closeTop, closeLeft + CLOSE_SIZE, closeTop + CLOSE_SIZE, closeLit ? LootSlots.CLOSE_HOVER : LootSlots.CLOSE_BG);
+		guiGraphics.drawString(font, "×", closeLeft + CLOSE_MARK_X, closeTop + CLOSE_MARK_Y, closeLit ? GuiTheme.TEXT_PRIMARY : GuiTheme.TEXT_SECONDARY, false);
+		guiGraphics.drawString(font, fitSummary(font, innerRight - innerLeft), innerLeft, top + SUMMARY_Y, GuiTheme.TEXT_MUTED, false);
 
-		final int viewWidth = viewChipWidth();
+		RenderUtils.drawRect(guiGraphics, innerLeft, viewTop, innerRight, viewTop + SWITCH_HEIGHT, LootSlots.SEG_TRACK);
 		for (View each : View.values()) {
-			final int x = viewChipLeft(each);
+			// Each part stands a pixel inside the track, so that the track shows round the picked one
+			final int partLeft = viewPartLeft(each) + 1;
+			final int partRight = each.ordinal() == 0 ? viewPartRight(each) : viewPartRight(each) - 1;
 			final boolean current = each == view;
-			RenderUtils.drawRect(guiGraphics, x, viewTop, x + viewWidth, viewTop + CHIP_HEIGHT, current ? GuiTheme.CHIP_ACCENT_BACKGROUND : GuiTheme.CHIP_BACKGROUND);
-			final String label = RenderUtils.trimToWidth(I18n.get(each.key), viewWidth - 4);
-			final int colour = current ? GuiTheme.ACCENT : each == hoveredView ? GuiTheme.TEXT_PRIMARY : GuiTheme.TEXT_SECONDARY;
-			guiGraphics.drawString(font, label, x + (viewWidth - font.width(label)) / 2, viewTop + 2, colour, false);
+			final boolean lit = each == hoveredView;
+			if (current || lit) {
+				RenderUtils.drawRect(guiGraphics, partLeft, viewTop + 1, partRight, viewTop + SWITCH_HEIGHT - 1, current ? LootSlots.SEG_ON : LootSlots.SEG_HOVER);
+			}
+			final String label = RenderUtils.trimToWidth(I18n.get(each.key), partRight - partLeft - 4);
+			final int colour = current || lit ? GuiTheme.TEXT_PRIMARY : GuiTheme.TEXT_SECONDARY;
+			guiGraphics.drawString(font, label, (partLeft + partRight) / 2 - font.width(label) / 2, viewTop + SWITCH_LABEL_Y, colour, current);
 		}
 
 		final int[] counts = tierCounts();
 		for (LootTier tier : LootTier.values()) {
 			final int i = tier.ordinal();
 			final int x = tierChipLeft[i];
+			final int width = tierChipWidth[i];
 			final boolean picked = solo == tier;
-			// A tier hidden by another being picked out is drawn hollow, so that the chip still says
-			// which tier it is while saying that its tiles are not shown
-			final boolean hidden = solo != null && !picked;
-			RenderUtils.drawRect(guiGraphics, x, tierTop, x + tierChipWidth[i], tierTop + CHIP_HEIGHT, picked ? GuiTheme.CHIP_ACCENT_BACKGROUND : GuiTheme.CHIP_BACKGROUND);
-			final int swatchLeft = x + TIER_CHIP_MARGIN;
-			final int swatchTop = tierTop + (CHIP_HEIGHT - TIER_SWATCH) / 2;
-			if (hidden) {
-				RenderUtils.drawInnerOutline(guiGraphics, swatchLeft, swatchTop, swatchLeft + TIER_SWATCH, swatchTop + TIER_SWATCH, tier.colour);
+			final boolean empty = counts[i] == 0;
+			// A tier hidden by another being picked out, or with nothing in it to pick, is drawn faint,
+			// so that the chip still says which tier it is while saying that none of its tiles show
+			final boolean dim = empty || solo != null && !picked;
+			if (picked) {
+				RenderUtils.drawRect(guiGraphics, x, tierTop, x + width, tierTop + CHIP_HEIGHT, LootSlots.tint(tier, LootSlots.CHIP_PICKED_ALPHA));
+				RenderUtils.drawInnerOutline(guiGraphics, x, tierTop, x + width, tierTop + CHIP_HEIGHT, LootSlots.CHIP_PICKED_OUTLINE);
 			} else {
-				RenderUtils.drawRect(guiGraphics, swatchLeft, swatchTop, swatchLeft + TIER_SWATCH, swatchTop + TIER_SWATCH, tier.colour);
+				RenderUtils.drawRect(guiGraphics, x, tierTop, x + width, tierTop + CHIP_HEIGHT, tier == hoveredTier && !empty ? LootSlots.SEG_HOVER : LootSlots.SEG_TRACK);
 			}
-			if (tierCountsShown) {
-				final int colour = hidden || counts[i] == 0 ? GuiTheme.TEXT_MUTED : picked || tier == hoveredTier ? GuiTheme.TEXT_PRIMARY : GuiTheme.TEXT_SECONDARY;
-				guiGraphics.drawString(font, String.valueOf(counts[i]), swatchLeft + TIER_SWATCH + TIER_COUNT_GAP, tierTop + 2, colour, false);
+			// The count is left out where the chip is too narrow for it rather than being cut, since
+			// the icon alone still says which tier is which
+			final String count = String.valueOf(counts[i]);
+			final boolean counted = CHIP_COUNT_X + font.width(count) + CHIP_COUNT_MARGIN <= width;
+			final int iconLeft = counted ? x + CHIP_ICON_INSET : x + (width - LootTier.ICON_SIZE) / 2;
+			tier.drawIcon(guiGraphics, iconLeft, tierTop + CHIP_ICON_INSET, false, dim ? LootTier.DIM_ALPHA : 1.0F);
+			if (counted) {
+				final int colour = dim ? GuiTheme.TEXT_MUTED : picked ? GuiTheme.TEXT_PRIMARY : GuiTheme.TEXT_SECONDARY;
+				guiGraphics.drawString(font, count, x + CHIP_COUNT_X, tierTop + CHIP_COUNT_Y, colour, picked);
 			}
 		}
 	}
 
-	/** Every section in sight: its heading, its id and note, and its tiles. */
-	private void renderSections(GuiGraphics guiGraphics, Font font, int innerLeft, int listRight) {
+	/**
+	 * The summary as the heading has room for it: the whole sentence, then the shorter one, then the
+	 * containers alone, cut only where even that does not fit, so that what is shown is a count that
+	 * can be read rather than half of one wherever there is room for that.
+	 */
+	private String fitSummary(Font font, int width) {
+		if (font.width(summary) <= width) {
+			return summary;
+		}
+		if (font.width(shortSummary) <= width) {
+			return shortSummary;
+		}
+		return RenderUtils.trimToWidth(containersSummary, width);
+	}
+
+	/**
+	 * Every section in sight: the rule before it, its heading, its id and note, and its tiles under a
+	 * header for each tier.
+	 */
+	private void renderSections(GuiGraphics guiGraphics, Font font, int origin, int innerLeft, int listRight) {
 		final boolean advanced = Minecraft.getInstance().options.advancedItemTooltips;
 		for (int i = 0; i < sections.size(); i++) {
 			final Section section = sections.get(i);
-			final int sectionTop = section.top + listTop - scroll;
-			if (sectionTop >= listBottom || section.bottom + listTop - scroll <= listTop) {
+			final int y = origin + section.top;
+			final int ruleY = y - HEADING_GAP - 1;
+			if (ruleY >= listBottom || origin + section.bottom <= listTop) {
 				continue;
 			}
 			if (i > 0) {
-				RenderUtils.drawRect(guiGraphics, innerLeft, sectionTop - SECTION_GAP / 2 - 1, listRight, sectionTop - SECTION_GAP / 2, SEPARATOR);
+				LootSlots.drawHairline(guiGraphics, innerLeft, listRight, ruleY);
 			}
-			final boolean lit = section == hoveredHeading;
-			if (lit) {
-				RenderUtils.drawRect(guiGraphics, innerLeft, sectionTop - 1, listRight, sectionTop + TITLE_ROW, HEADING_HOVER);
+			// A heading under the pointer is lit across the list with the bar at its left, the way a
+			// picked row is marked elsewhere on these screens, and its title stays white to stay readable
+			if (section == hoveredHeading) {
+				final int lightLeft = innerLeft - HOVER_REACH_LEFT;
+				final int lightTop = y - HOVER_REACH_Y;
+				final int lightBottom = origin + section.headingBottom + HOVER_REACH_Y;
+				RenderUtils.drawRect(guiGraphics, lightLeft, lightTop, listRight + HOVER_REACH_RIGHT, lightBottom, LootSlots.ROW_HOVER);
+				RenderUtils.drawRect(guiGraphics, lightLeft, lightTop, lightLeft + 1, lightBottom, LootSlots.ACCENT_BAR);
 			}
-			guiGraphics.renderItem(section.icon, innerLeft, sectionTop);
-			final int titleY = sectionTop + (ICON - font.lineHeight) / 2 + 1;
-			final String count = I18n.get("string.explorerscompass.lootTableCount", String.valueOf(section.containers));
-			guiGraphics.drawString(font, count, listRight - font.width(count), titleY, GuiTheme.TEXT_SECONDARY, false);
-			guiGraphics.drawString(font, RenderUtils.trimToWidth(section.title.getString(), listRight - font.width(count) - 4 - (innerLeft + ICON + 4)), innerLeft + ICON + 4, titleY, lit ? GuiTheme.ACCENT : GuiTheme.TEXT_PRIMARY, true);
-			int lineY = sectionTop + TITLE_ROW;
+			guiGraphics.renderItem(section.icon, innerLeft, y);
+			int titleRight = listRight;
+			// A table only one container names needs no count to say so
+			if (section.containers > 1) {
+				final String count = I18n.get("string.explorerscompass.lootTableCount", String.valueOf(section.containers));
+				final int pillLeft = listRight - LootSlots.pillWidth(font, count);
+				LootSlots.drawPill(guiGraphics, font, pillLeft, y + HEADING_PILL_Y, count);
+				titleRight = pillLeft - HEADING_PILL_GAP;
+			}
+			final int titleX = innerLeft + HEADING_TITLE_X;
+			guiGraphics.drawString(font, RenderUtils.trimToWidth(section.title.getString(), titleRight - titleX), titleX, y + HEADING_TITLE_Y, GuiTheme.TEXT_PRIMARY, true);
+			int lineY = origin + section.headingBottom + HEADING_CONTENT_GAP;
 			if (advanced && !section.id.isEmpty()) {
 				guiGraphics.drawString(font, RenderUtils.trimToWidth(section.id, listRight - innerLeft), innerLeft, lineY, GuiTheme.TEXT_MUTED, false);
 				lineY += LINE;
@@ -558,11 +650,11 @@ final class LootOverview {
 			if (section.grid == null) {
 				continue;
 			}
-			final int gridY = section.gridTop + listTop - scroll;
+			final int gridY = origin + section.gridTop;
 			if (section.grid.tiles().isEmpty()) {
 				guiGraphics.drawString(font, RenderUtils.trimToWidth(I18n.get("string.explorerscompass.lootTierEmpty"), listRight - innerLeft), innerLeft, gridY, GuiTheme.TEXT_MUTED, false);
 			} else {
-				LootGrid.render(guiGraphics, font, section.grid, section.entries, innerLeft, gridY, section == hoveredSection ? hoveredTile : null, listTop, listBottom);
+				LootGrid.render(guiGraphics, font, section.grid, section.entries, innerLeft - LootSlots.SLOT_INSET_X, gridY, section == hoveredSection ? hoveredTile : null, listTop, listBottom, listRight, false, false);
 			}
 		}
 	}
@@ -579,49 +671,39 @@ final class LootOverview {
 		if (hoveredEntry != null) {
 			LootTooltip.render(guiGraphics, font, laidOutFor, stats, hoveredEntry.variant(), hoveredEntry.table(), hoveredEntry.item(), mouseX, mouseY);
 		} else if (hoveredView != null) {
-			// Both views lead with the summary, which the heading leaves out where it does not fit
+			// Both views lead with the whole summary, which the heading shortens where it does not fit
 			final List<Component> lines = new ArrayList<Component>();
-			lines.add(Component.literal(summary).withColor(GuiTheme.TEXT_SECONDARY));
+			lines.add(Component.literal(summary));
 			lines.add(Component.translatable(hoveredView.key + ".tooltip"));
-			guiGraphics.renderTooltip(font, wrapped(font, lines), mouseX, mouseY);
+			ThemedTooltip.render(guiGraphics, font, lines, mouseX, mouseY);
 		} else if (hoveredTier != null) {
 			final List<Component> lines = new ArrayList<Component>();
 			lines.add(hoveredTier.displayName().copy().withColor(hoveredTier.colour & 0xFFFFFF)
 					.append(Component.literal(" · ").append(hoveredTier.hint()).withColor(GuiTheme.TEXT_SECONDARY)));
 			// A tier with nothing in it cannot be picked out, so picking it out is not offered
 			if (solo == hoveredTier || tierCounts()[hoveredTier.ordinal()] > 0) {
-				lines.add(Component.translatable("string.explorerscompass.lootTierFilterHint").withColor(HINT));
+				lines.add(Component.translatable("string.explorerscompass.lootTierFilterHint").withColor(GuiTheme.TEXT_SECONDARY));
 			}
-			guiGraphics.renderTooltip(font, wrapped(font, lines), mouseX, mouseY);
+			ThemedTooltip.render(guiGraphics, font, lines, mouseX, mouseY);
 		}
-	}
-
-	/**
-	 * A view's description runs to a sentence, and a tooltip is drawn one line to a component, so the
-	 * long ones are split at a readable width. Split as styled text rather than as a string, so that a
-	 * line coloured in parts, like a tier's name and its range, keeps each part's colour across the break.
-	 */
-	private static List<FormattedCharSequence> wrapped(Font font, List<Component> lines) {
-		final List<FormattedCharSequence> out = new ArrayList<FormattedCharSequence>();
-		for (Component line : lines) {
-			out.addAll(font.split(line, TOOLTIP_WIDTH));
-		}
-		return out;
 	}
 
 	/**
 	 * Works out what in the list the pointer is on, and from that what to light up on the model: a
-	 * tile lights every table that may give its item, and a heading lights its own table.
+	 * tile lights every table that may give its item, and a heading lights its own table. A heading
+	 * answers for all of the light it is drawn with, which reaches a little past it on every side.
 	 */
 	private void findHover(double mouseX, double mouseY) {
 		clearHover();
-		final int innerLeft = left + PADDING;
-		if (mouseX < innerLeft || mouseX >= listRight() || mouseY < listTop || mouseY >= listBottom) {
+		if (mouseX < left + BAR || mouseX >= listClipRight() || mouseY < listTop || mouseY >= listBottom) {
 			return;
 		}
+		final int innerLeft = innerLeft();
+		final int gridLeft = innerLeft - LootSlots.SLOT_INSET_X;
+		final int origin = contentOrigin();
 		if (view == View.ITEMS) {
 			if (itemGrid != null) {
-				final LootGrid.Tile tile = LootGrid.tileAt(itemGrid, innerLeft, listTop - scroll + 2, mouseX, mouseY);
+				final LootGrid.Tile tile = LootGrid.tileAt(itemGrid, gridLeft, origin, mouseX, mouseY);
 				if (tile != null && tile.entry() >= 0) {
 					hoveredTile = tile;
 					hoveredEntry = itemEntries.get(tile.entry());
@@ -629,20 +711,21 @@ final class LootOverview {
 			}
 		} else {
 			for (Section section : sections) {
-				if (mouseY < section.top + listTop - scroll || mouseY >= section.bottom + listTop - scroll) {
-					continue;
+				if (mouseY >= origin + section.top - HOVER_REACH_Y && mouseY < origin + section.headingBottom + HOVER_REACH_Y) {
+					if (mouseX >= innerLeft - HOVER_REACH_LEFT) {
+						hoveredHeading = section;
+					}
+					break;
 				}
-				if (mouseY < section.headingBottom + listTop - scroll) {
-					hoveredHeading = section;
-				} else if (section.grid != null) {
-					final LootGrid.Tile tile = LootGrid.tileAt(section.grid, innerLeft, section.gridTop + listTop - scroll, mouseX, mouseY);
+				if (section.grid != null && mouseY >= origin + section.gridTop && mouseY < origin + section.bottom) {
+					final LootGrid.Tile tile = LootGrid.tileAt(section.grid, gridLeft, origin + section.gridTop, mouseX, mouseY);
 					if (tile != null && tile.entry() >= 0) {
 						hoveredSection = section;
 						hoveredTile = tile;
 						hoveredEntry = section.entries.get(tile.entry());
 					}
+					break;
 				}
-				break;
 			}
 		}
 		if (hoveredEntry != null) {
@@ -664,31 +747,61 @@ final class LootOverview {
 		highlighted = NONE;
 	}
 
-	/** Where the list ends on the right, short of the scrollbar. */
+	/**
+	 * The widest the drawer can stand at or under the given width with its list a whole number of
+	 * tile columns across, so that the headings, pills and rules of the list end where the last slot
+	 * does rather than a part of a column short of it. The width cut goes to the model beside it.
+	 * Never less than one column.
+	 */
+	static int snapWidth(int width) {
+		final int columns = Math.max(1, (width - CHROME + 2 * LootSlots.SLOT_INSET_X) / LootSlots.TILE_W);
+		return CHROME + columns * LootSlots.TILE_W - 2 * LootSlots.SLOT_INSET_X;
+	}
+
+	/** Where what the drawer holds starts on the left, past the bar and the room after it. */
+	private int innerLeft() {
+		return left + BAR + PAD;
+	}
+
+	private int innerRight() {
+		return right - PAD;
+	}
+
+	/** Where the list ends on the right, short of the scrollbar, which is the right of its last slot. */
 	private int listRight() {
-		return right - PADDING - SCROLLBAR_WIDTH - SCROLLBAR_GAP;
+		return innerRight() - SCROLLBAR_WIDTH - SCROLLBAR_GAP;
+	}
+
+	/** Where the list is cut on the right: past its last slot by the reach of a lit heading, and short of the scrollbar. */
+	private int listClipRight() {
+		return listRight() + HOVER_REACH_RIGHT;
+	}
+
+	/** Where the top of the list's content is drawn, as scrolled. */
+	private int contentOrigin() {
+		return listTop + CONTENT_TOP - scroll;
 	}
 
 	private int maxScroll() {
 		return Math.max(0, contentHeight - (listBottom - listTop));
 	}
 
-	private int viewChipWidth() {
-		return (right - left - 2 * PADDING - VIEW_CHIP_GAP) / 2;
+	/** Where the given half of the view switch starts, the first taking whatever pixel does not divide. */
+	private int viewPartLeft(View each) {
+		final int innerLeft = innerLeft();
+		return innerLeft + each.ordinal() * ((innerRight() - innerLeft) / 2);
 	}
 
-	private int viewChipLeft(View each) {
-		return left + PADDING + each.ordinal() * (viewChipWidth() + VIEW_CHIP_GAP);
+	private int viewPartRight(View each) {
+		return each.ordinal() == 0 ? viewPartLeft(View.values()[1]) : innerRight();
 	}
 
 	private View viewAt(double mouseX, double mouseY) {
-		if (mouseY < viewTop || mouseY >= viewTop + CHIP_HEIGHT) {
+		if (mouseY < viewTop || mouseY >= viewTop + SWITCH_HEIGHT) {
 			return null;
 		}
-		final int width = viewChipWidth();
 		for (View each : View.values()) {
-			final int x = viewChipLeft(each);
-			if (mouseX >= x && mouseX < x + width) {
+			if (mouseX >= viewPartLeft(each) && mouseX < viewPartRight(each)) {
 				return each;
 			}
 		}
@@ -709,15 +822,16 @@ final class LootOverview {
 	}
 
 	private boolean isOverClose(double mouseX, double mouseY) {
-		final int closeLeft = right - PADDING - CLOSE_SIZE;
-		final int closeTop = top + PADDING - 1;
+		final int closeLeft = innerRight() - CLOSE_SIZE;
+		final int closeTop = top + CLOSE_Y;
 		return mouseX >= closeLeft && mouseX < closeLeft + CLOSE_SIZE && mouseY >= closeTop && mouseY < closeTop + CLOSE_SIZE;
 	}
 
 	/**
-	 * Takes a click on the drawer: the close box closes it, a view chip switches to that view, a tier
-	 * chip picks that tier out or puts every tier back, and an item in the item view goes to the table
-	 * likeliest to hold it. Anywhere else on it is swallowed, so that it does not turn the model.
+	 * Takes a click on the drawer: the close box closes it, a half of the view switch switches to that
+	 * view, a tier chip picks that tier out or puts every tier back, and an item in the item view goes
+	 * to the table likeliest to hold it. Anywhere else on it is swallowed, so that it does not turn the
+	 * model.
 	 */
 	boolean mouseClicked(double mouseX, double mouseY, int button) {
 		if (!isMouseOver(mouseX, mouseY)) {

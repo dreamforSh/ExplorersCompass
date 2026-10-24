@@ -408,7 +408,15 @@ public class ExplorersCompassScreen extends Screen {
 			dotColor = GuiTheme.TEXT_MUTED;
 		}
 
-		guiGraphics.drawString(font, DOT_GLYPH, left + 6, top + 6, dotColor, false);
+		// The marker is drawn round rather than written as a glyph, and while a search runs a ring
+		// spreads out from it and fades, the way a beacon pings
+		final float dotX = left + 6 + font.width(DOT_GLYPH) / 2.0F;
+		final float dotY = top + 9.5F;
+		if (state == CompassState.SEARCHING) {
+			final float ping = (Util.getMillis() % 1200L) / 1200.0F;
+			UiShapes.circle(guiGraphics, dotX, dotY, 2.75F + ping * 4.0F, GuiTheme.withAlpha(GuiTheme.ACCENT, Math.round(0x70 * (1.0F - ping))));
+		}
+		UiShapes.circle(guiGraphics, dotX, dotY, 2.75F, (dotColor >>> 24) == 0 ? GuiTheme.opaque(dotColor) : dotColor);
 		int headlineX = left + 6 + font.width(DOT_GLYPH) + 4;
 		guiGraphics.drawString(font, headline, headlineX, top + 6, GuiTheme.TEXT_PRIMARY, true);
 		headlineX += font.width(headline) + 6;
@@ -419,6 +427,16 @@ public class ExplorersCompassScreen extends Screen {
 			final String target = state == CompassState.SEARCHING ? ClientEventHandler.searchTargetName(explorersCompass, stack) : explorersCompass.getSearchTarget(stack).getPrettyName(explorersCompass.getTargetKey(stack));
 			if (!target.isEmpty()) {
 				guiGraphics.drawString(font, RenderUtils.trimToWidth(target, statusTextRight - headlineX), headlineX, top + 6, GuiTheme.TEXT_SECONDARY, false);
+			}
+		}
+
+		if (state == CompassState.SEARCHING) {
+			// How far the search has reached of how far it may go, as a thin bar along the foot of the strip
+			final int maxRadius = ConfigHandler.GENERAL.maxRadius.get();
+			final int radius = explorersCompass.getSearchRadius(stack);
+			if (maxRadius > 0 && radius >= 0) {
+				RenderUtils.drawProgressBar(guiGraphics, left + 6, top + STATUS_BAR_HEIGHT - 5, statusTextRight, top + STATUS_BAR_HEIGHT - 3,
+						radius / (float) maxRadius, GuiTheme.withAlpha(GuiTheme.TEXT_MUTED, 0x40), GuiTheme.opaque(GuiTheme.ACCENT));
 			}
 		}
 
@@ -465,22 +483,23 @@ public class ExplorersCompassScreen extends Screen {
 			return;
 		}
 		if (searchTextField.isMouseOver(mouseX, mouseY)) {
-			guiGraphics.renderComponentTooltip(font, List.of(
+			// Three ways of using the filter of equal weight, so none of them is made a title of
+			ThemedTooltip.render(guiGraphics, font, List.of(
 					Component.translatable("string.explorerscompass.searchSyntax.fields"),
 					Component.translatable("string.explorerscompass.searchSyntax.combine"),
 					Component.translatable("string.explorerscompass.searchSyntax.example")),
-					mouseX, mouseY);
+					false, mouseX, mouseY);
 			return;
 		}
 		for (Object widget : renderables) {
 			if (widget instanceof TransparentButton button && button.visible && button.isPointedAt() && !button.getTooltipLines().isEmpty()) {
-				guiGraphics.renderComponentTooltip(font, button.getTooltipLines(), mouseX, mouseY);
+				ThemedTooltip.render(guiGraphics, font, button, mouseX, mouseY);
 				return;
 			}
 		}
 		final StructureSearchEntry hovered = selectionList.getHoveredEntry(mouseX, mouseY);
 		if (hovered != null) {
-			guiGraphics.renderComponentTooltip(font, hovered.getTooltipLines(), mouseX, mouseY);
+			ThemedTooltip.render(guiGraphics, font, hovered.getTooltipLines(), mouseX, mouseY);
 		}
 	}
 
@@ -930,10 +949,12 @@ public class ExplorersCompassScreen extends Screen {
 		waypointsButton = addRenderableWidget(new TransparentButton(rightButtonsLeft, 8, PREVIEW_BUTTON_WIDTH, PREVIEW_BUTTON_HEIGHT, Component.literal(WAYPOINTS_GLYPH), (onPress) -> {
 			minecraft.setScreen(new WaypointsScreen(this, player));
 		}));
+		waypointsButton.setTooltipTitle(Component.translatable("string.explorerscompass.waypoints"));
 		waypointsButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.waypoints"), Component.translatable("string.explorerscompass.tooltip.waypoints.detail"));
 		settingsButton = addRenderableWidget(new TransparentButton(rightButtonsLeft + PREVIEW_BUTTON_WIDTH + PREVIEW_BUTTON_GAP, 8, PREVIEW_BUTTON_WIDTH, PREVIEW_BUTTON_HEIGHT, Component.literal(SETTINGS_GLYPH), (onPress) -> {
 			minecraft.setScreen(new ConfigScreen(this));
 		}));
+		settingsButton.setTooltipTitle(Component.translatable(ConfigTexts.PREFIX + "title"));
 		settingsButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.settings"), Component.translatable("string.explorerscompass.tooltip.settings.detail"));
 
 		searchButton = addSidebarButton(Component.translatable("string.explorerscompass.search"), (onPress) -> {
@@ -945,6 +966,7 @@ public class ExplorersCompassScreen extends Screen {
 				selectionList.getSelected().search();
 			}
 		});
+		searchButton.setPrimary(true);
 		searchButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.search"), Component.translatable("string.explorerscompass.tooltip.multiSelect"));
 		searchGroupButton = addSidebarButton(Component.translatable("string.explorerscompass.searchForGroup"), (onPress) -> {
 			if (selectionList.hasSelection()) {
@@ -963,6 +985,7 @@ public class ExplorersCompassScreen extends Screen {
 			clearCacheButton = addSidebarButton(Component.translatable("string.explorerscompass.clearCache"), (onPress) -> {
 				clearCache();
 			});
+			clearCacheButton.setDanger(true);
 			clearCacheButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.clearCache"));
 		}
 
@@ -1023,6 +1046,7 @@ public class ExplorersCompassScreen extends Screen {
 		stopButton = addRenderableWidget(new TransparentButton(0, statusButtonY, STATUS_BUTTON_WIDTH, STATUS_BUTTON_HEIGHT, stopButtonLabel(), (onPress) -> {
 			cancelSearch();
 		}));
+		stopButton.setDanger(true);
 		stopButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.stopSearch"));
 
 		// Carry the filter and the selection over, so that resizing the window does not lose them

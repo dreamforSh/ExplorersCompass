@@ -34,9 +34,6 @@ public class ModFilterPanel {
 	private static final int PADDING = 3;
 	private static final int SCROLLBAR_WIDTH = 4;
 
-	private static final int BACKGROUND_TOP = 0xF2121418;
-	private static final int BACKGROUND_BOTTOM = 0xF20A0B0E;
-
 	/** One mod, or, when the namespace is null, every mod at once. */
 	public static class ModOption {
 
@@ -73,6 +70,8 @@ public class ModFilterPanel {
 	private int y;
 	private int height;
 	private int scrollRow;
+	/** The fades of the rows, keyed by the mod each row stands for. */
+	private final UiAnim anim = new UiAnim();
 
 	public ModFilterPanel(ExplorersCompassScreen parentScreen, Minecraft mc) {
 		this.parentScreen = parentScreen;
@@ -112,6 +111,7 @@ public class ModFilterPanel {
 	public void open(List<ResourceLocation> keys, int anchorX, int anchorY, int screenWidth, int screenHeight, String selectedNamespace) {
 		options = collectOptions(keys);
 		open = true;
+		anim.clear();
 		x = Math.min(anchorX, Math.max(0, screenWidth - WIDTH - 4));
 
 		// The panel drops down from the anchor when there is room for it, and rises from it when there
@@ -163,9 +163,10 @@ public class ModFilterPanel {
 			return;
 		}
 
-		RenderUtils.drawPanel(guiGraphics, x, y, x + WIDTH, y + height, BACKGROUND_TOP, BACKGROUND_BOTTOM, GuiTheme.PANEL_BORDER);
-		guiGraphics.drawString(mc.font, I18n.get("string.explorerscompass.filterByMod"), x + PADDING + 2, y + PADDING + 1, GuiTheme.TEXT_MUTED, false);
-		RenderUtils.drawRect(guiGraphics, x + PADDING, y + HEADER_HEIGHT - 1, x + WIDTH - PADDING, y + HEADER_HEIGHT, GuiTheme.ROW_SEPARATOR);
+		anim.frame();
+		GuiTheme.drawFloatingPanel(guiGraphics, x, y, x + WIDTH, y + height);
+		guiGraphics.drawString(mc.font, I18n.get("string.explorerscompass.filterByMod"), x + PADDING + 3, y + PADDING + 1, GuiTheme.TEXT_MUTED, false);
+		UiShapes.hairline(guiGraphics, x + PADDING + 1, x + WIDTH - PADDING - 1, y + HEADER_HEIGHT - 1, GuiTheme.PANEL_BORDER);
 
 		final boolean scrollable = maxScrollRow() > 0;
 		final int rowsLeft = x + PADDING;
@@ -176,17 +177,14 @@ public class ModFilterPanel {
 			final int rowTop = rowTop(i);
 			final boolean selected = option.getNamespace() == null ? selectedNamespace == null : option.getNamespace().equals(selectedNamespace);
 			final boolean hovered = mouseX >= rowsLeft && mouseX < rowsRight && mouseY >= rowTop && mouseY < rowTop + ROW_HEIGHT;
-
-			if (selected) {
-				RenderUtils.drawHorizontalGradient(guiGraphics, rowsLeft, rowTop, rowsRight, rowTop + ROW_HEIGHT, GuiTheme.ROW_SELECTED_LEFT, GuiTheme.ROW_SELECTED_RIGHT);
-			} else if (hovered) {
-				RenderUtils.drawRect(guiGraphics, rowsLeft, rowTop, rowsRight, rowTop + ROW_HEIGHT, GuiTheme.ROW_HOVER);
-			}
+			final float hover = anim.hover(i, hovered && !selected);
+			GuiTheme.drawRowBand(guiGraphics, rowsLeft, rowTop, rowsRight, rowTop + ROW_HEIGHT, hover, selected ? 1.0F : 0.0F, false);
 
 			final String count = String.valueOf(option.getEntryCount());
 			final int countWidth = mc.font.width(count);
-			final String name = RenderUtils.trimToWidth(option.getDisplayName(), rowsRight - rowsLeft - countWidth - 12);
-			guiGraphics.drawString(mc.font, name, rowsLeft + 4, rowTop + 3, selected ? GuiTheme.ACCENT : (hovered ? GuiTheme.TEXT_PRIMARY : GuiTheme.TEXT_SECONDARY), false);
+			final String name = RenderUtils.trimToWidth(option.getDisplayName(), rowsRight - rowsLeft - countWidth - 14);
+			final int nameColor = selected ? GuiTheme.ACCENT : GuiTheme.lerpColor(GuiTheme.TEXT_SECONDARY, GuiTheme.TEXT_PRIMARY, hover);
+			guiGraphics.drawString(mc.font, name, rowsLeft + 7, rowTop + 3, nameColor, false);
 			guiGraphics.drawString(mc.font, count, rowsRight - countWidth - 4, rowTop + 3, GuiTheme.TEXT_MUTED, false);
 		}
 
@@ -194,10 +192,10 @@ public class ModFilterPanel {
 			final int trackTop = y + HEADER_HEIGHT + PADDING;
 			final int trackBottom = y + height - PADDING;
 			final int trackLeft = x + WIDTH - PADDING - SCROLLBAR_WIDTH;
-			RenderUtils.drawRect(guiGraphics, trackLeft, trackTop, trackLeft + SCROLLBAR_WIDTH, trackBottom, GuiTheme.SCROLLBAR_TRACK);
 			final int thumbHeight = Math.max(12, (trackBottom - trackTop) * visibleRows() / options.size());
 			final int thumbTop = trackTop + (trackBottom - trackTop - thumbHeight) * scrollRow / maxScrollRow();
-			RenderUtils.drawRect(guiGraphics, trackLeft, thumbTop, trackLeft + SCROLLBAR_WIDTH, thumbTop + thumbHeight, GuiTheme.SCROLLBAR_THUMB);
+			final boolean overTrack = mouseX >= trackLeft - 2 && mouseX < trackLeft + SCROLLBAR_WIDTH + 2 && mouseY >= trackTop && mouseY < trackBottom;
+			GuiTheme.drawScrollbar(guiGraphics, trackLeft, trackTop, trackBottom, SCROLLBAR_WIDTH, thumbTop, thumbHeight, overTrack);
 		}
 	}
 

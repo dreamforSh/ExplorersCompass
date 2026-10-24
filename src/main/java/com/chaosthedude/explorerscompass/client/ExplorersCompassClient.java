@@ -3,6 +3,7 @@ package com.chaosthedude.explorerscompass.client;
 import com.chaosthedude.explorerscompass.ExplorersCompass;
 import com.chaosthedude.explorerscompass.gui.ConfigScreen;
 import com.chaosthedude.explorerscompass.gui.LootTooltip;
+import com.chaosthedude.explorerscompass.gui.ThemedTooltip;
 import com.chaosthedude.explorerscompass.items.ExplorersCompassItem;
 import com.chaosthedude.explorerscompass.util.CompassState;
 
@@ -48,6 +49,8 @@ public class ExplorersCompassClient {
 
 	private void clientSetup(FMLClientSetupEvent event) {
 		NeoForge.EVENT_BUS.register(new ClientEventHandler());
+		// Item tooltips over the compass screens take the colours of the screens' own tooltips
+		NeoForge.EVENT_BUS.addListener(ThemedTooltip::onTooltipColor);
 
 		event.enqueueWork(() -> {
 			ItemProperties.register(ExplorersCompass.explorersCompass, ResourceLocation.withDefaultNamespace("angle"), new ClampedItemPropertyFunction() {

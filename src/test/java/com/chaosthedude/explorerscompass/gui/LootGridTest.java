@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 class LootGridTest {
 
 	@Test
-	void theOverviewGroupsTilesByTierWithAGapBetweenGroups() {
+	void theOverviewGroupsTilesByTierUnderAHeaderEach() {
 		// Two certain, three common and one rare, given out of order
 		final int[] permilles = { 600, 1000, 50, 700, 1000, 550 };
 		final LootGrid.Layout layout = LootGrid.grouped(permilles, 2, null);
@@ -25,13 +25,24 @@ class LootGridTest {
 		assertSame(LootTier.COMMON, common.tier());
 		assertSame(LootTier.RARE, rare.tier());
 
+		assertEquals(2, guaranteed.count());
+		assertEquals(3, common.count());
+		assertEquals(1, rare.count());
+
+		// Each group's header comes first, then its rows, then a little gap before the next header
 		assertEquals(0, guaranteed.top());
-		assertEquals(LootSlots.ROW_PLAIN, guaranteed.bottom());
+		assertEquals(LootSlots.GROUP_HEAD + LootSlots.ROW_PLAIN, guaranteed.bottom());
 		assertEquals(guaranteed.bottom() + LootSlots.BAND_GAP, common.top());
-		assertEquals(common.top() + 2 * LootSlots.ROW_LABELLED, common.bottom());
+		assertEquals(common.top() + LootSlots.GROUP_HEAD + 2 * LootSlots.ROW_LABELLED, common.bottom());
 		assertEquals(common.bottom() + LootSlots.BAND_GAP, rare.top());
+		assertEquals(rare.top() + LootSlots.GROUP_HEAD + LootSlots.ROW_LABELLED, rare.bottom());
 		assertEquals(rare.bottom(), layout.height());
-		assertEquals(LootSlots.RIBBON + 2 * LootSlots.TILE_W, layout.width());
+		assertEquals(34, guaranteed.bottom());
+		assertEquals(107, rare.top());
+		assertEquals(149, layout.height());
+		// As wide as its columns, with nothing down the side
+		assertEquals(2 * LootSlots.TILE_W, layout.width());
+		assertEquals(48, layout.width());
 		assertEquals(0, layout.hidden());
 
 		final List<LootGrid.Tile> tiles = layout.tiles();
@@ -40,16 +51,17 @@ class LootGridTest {
 		final int[] order = { 1, 4, 0, 3, 5, 2 };
 		for (int i = 0; i < order.length; i++) {
 			assertEquals(order[i], tiles.get(i).entry());
-			assertTrue(tiles.get(i).x() >= LootSlots.RIBBON);
 		}
-		assertEquals(LootSlots.RIBBON, tiles.get(0).x());
-		assertEquals(LootSlots.RIBBON + LootSlots.TILE_W, tiles.get(1).x());
+		assertEquals(0, tiles.get(0).x());
+		assertEquals(LootSlots.TILE_W, tiles.get(1).x());
+		assertEquals(guaranteed.top() + LootSlots.GROUP_HEAD, tiles.get(0).y());
 		assertEquals(LootSlots.ROW_PLAIN, tiles.get(0).height());
+		assertEquals(common.top() + LootSlots.GROUP_HEAD, tiles.get(2).y());
 		assertEquals(LootSlots.ROW_LABELLED, tiles.get(2).height());
 		// The third common tile wraps to a row of its own
-		assertEquals(LootSlots.RIBBON, tiles.get(4).x());
-		assertEquals(common.top() + LootSlots.ROW_LABELLED, tiles.get(4).y());
-		assertEquals(rare.top(), tiles.get(5).y());
+		assertEquals(0, tiles.get(4).x());
+		assertEquals(common.top() + LootSlots.GROUP_HEAD + LootSlots.ROW_LABELLED, tiles.get(4).y());
+		assertEquals(rare.top() + LootSlots.GROUP_HEAD, tiles.get(5).y());
 	}
 
 	@Test
@@ -60,6 +72,8 @@ class LootGridTest {
 		assertEquals(1, layout.bands().size());
 		assertSame(LootTier.RARE, layout.bands().get(0).tier());
 		assertEquals(0, layout.bands().get(0).top());
+		assertEquals(2, layout.bands().get(0).count());
+		assertEquals(LootSlots.GROUP_HEAD + LootSlots.ROW_LABELLED, layout.height());
 		assertEquals(3, layout.hidden());
 		assertEquals(2, layout.tiles().size());
 		assertEquals(3, layout.tiles().get(0).entry());
@@ -142,11 +156,11 @@ class LootGridTest {
 		final int originY = 50;
 
 		assertEquals(0, LootGrid.tileAt(layout, originX, originY, 100.0D, 50.0D).entry());
-		assertEquals(0, LootGrid.tileAt(layout, originX, originY, 121.9D, 76.9D).entry());
+		assertEquals(0, LootGrid.tileAt(layout, originX, originY, 123.9D, 78.9D).entry());
 		// The right and bottom edges belong to what comes after
-		assertEquals(1, LootGrid.tileAt(layout, originX, originY, 122.0D, 60.0D).entry());
-		assertNull(LootGrid.tileAt(layout, originX, originY, 144.0D, 60.0D));
-		assertNull(LootGrid.tileAt(layout, originX, originY, 110.0D, 77.0D));
+		assertEquals(1, LootGrid.tileAt(layout, originX, originY, 124.0D, 60.0D).entry());
+		assertNull(LootGrid.tileAt(layout, originX, originY, 148.0D, 60.0D));
+		assertNull(LootGrid.tileAt(layout, originX, originY, 110.0D, 79.0D));
 		assertNull(LootGrid.tileAt(layout, originX, originY, 99.9D, 60.0D));
 		assertNull(LootGrid.tileAt(layout, originX, originY, 110.0D, 49.9D));
 	}

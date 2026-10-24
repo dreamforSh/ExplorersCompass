@@ -114,7 +114,8 @@ public class BookmarkListEntry extends ObjectSelectionList.Entry<BookmarkListEnt
 	 */
 	public List<Component> getTooltipLines() {
 		final List<Component> lines = new ArrayList<Component>();
-		lines.add(Component.literal(displayName).withStyle((style) -> style.withColor(TextColor.fromRgb(GuiTheme.TEXT_PRIMARY))));
+		// Left without a colour of its own, so that the tooltip heads itself with it as a title
+		lines.add(Component.literal(displayName));
 		lines.add(muted(coordinateLine, GuiTheme.TEXT_SECONDARY));
 
 		final boolean here = isInCurrentDimension();

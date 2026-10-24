@@ -2,6 +2,7 @@ package com.chaosthedude.explorerscompass.gui;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.util.RenderUtils;
@@ -9,11 +10,10 @@ import com.chaosthedude.explorerscompass.util.RenderUtils;
 import net.minecraft.ChatFormatting;
 import net.minecraft.Util;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.FormattedText;
+import net.minecraft.util.Mth;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
 import net.neoforged.fml.config.ModConfig;
@@ -23,8 +23,11 @@ import net.neoforged.neoforge.common.ModConfigSpec.ConfigValue;
 
 /**
  * Every setting of the mod, on a screen of its own, so that none of them has to be changed by
- * finding and editing a file. The two files are two tabs: this computer's settings, and the settings
- * a server goes by. Each setting is changed in place and written out as it is changed.
+ * finding and editing a file. The two files are two tabs at the top of the sidebar: this computer's
+ * settings, and the settings a server goes by. Under them the sidebar lists the groups the file's
+ * settings fall into, one of which is shown at a time, with a dot beside any group holding a setting
+ * that is not at its default; typing in the filter gathers the matching settings from every group at
+ * once instead. Each setting is changed in place and written out as it is changed.
  *
  * <p>Reached from the gear on the compass screen and from the mod list's configure button alike.
  */
@@ -53,19 +56,30 @@ public class ConfigScreen extends Screen {
 		String fileName() {
 			return ConfigTexts.fileName(type);
 		}
+
+		String translationKey() {
+			return ConfigTexts.PREFIX + (this == CLIENT ? "tab.client" : "tab.server");
+		}
 	}
+
+	private static final String RESET_GLYPH = "↺";
+	private static final int GLYPH_BUTTON_WIDTH = 24;
+	private static final int GLYPH_BUTTON_GAP = 4;
 
 	private final Screen parentScreen;
 	private Tab tab;
+	/** Which group of the tab is shown while nothing is typed in the filter. */
+	private int groupIndex;
 	private ConfigOptionList optionList;
 	private TransparentTextField filterField;
-	private TransparentButton clientTabButton;
-	private TransparentButton serverTabButton;
+	private NavList tabList;
+	private NavList groupList;
 	private TransparentButton resetButton;
 	private TransparentButton folderButton;
 	private TransparentButton backButton;
-	/** Where the sidebar has room for the next control. */
-	private int sidebarY;
+	/** Where the column of groups starts and how far down it may run. */
+	private int groupListTop;
+	private int groupListBottom;
 
 	public ConfigScreen(Screen parentScreen) {
 		this(parentScreen, Tab.CLIENT);
@@ -88,6 +102,8 @@ public class ConfigScreen extends Screen {
 		GuiTheme.drawHeader(guiGraphics, width);
 		GuiTheme.drawSidebar(guiGraphics, height);
 		GuiTheme.drawTitle(guiGraphics, font, title.getString(), tab.fileName(), GuiTheme.SIDEBAR_CONTENT_X, 10);
+		// Sets the tabs, which choose the file, apart from the groups of the file they chose
+		UiShapes.hairline(guiGraphics, GuiTheme.SIDEBAR_CONTENT_X + 2, GuiTheme.SIDEBAR_CONTENT_X + GuiTheme.SIDEBAR_CONTENT_WIDTH - 2, groupListTop - 5, GuiTheme.PANEL_BORDER);
 
 		// Under the filter, a line on how the screen works, or on whose settings the server tab shows
 		final String hint = tab == Tab.SERVER ? serverHint() : I18n.get(ConfigTexts.PREFIX + "hint");
@@ -109,11 +125,11 @@ public class ConfigScreen extends Screen {
 	public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
 		super.render(guiGraphics, mouseX, mouseY, partialTicks);
 
-		if (optionList.children().isEmpty()) {
-			guiGraphics.drawCenteredString(font, Component.translatable(ConfigTexts.PREFIX + "noMatches"), GuiTheme.contentLeft() + GuiTheme.contentWidth(width) / 2, height / 2 - 4, GuiTheme.TEXT_SECONDARY);
-		}
+		final int centerX = columnLeft() + columnWidth() / 2;
 		if (!tab.spec().isLoaded()) {
-			guiGraphics.drawCenteredString(font, Component.translatable(ConfigTexts.PREFIX + "notLoaded"), GuiTheme.contentLeft() + GuiTheme.contentWidth(width) / 2, height / 2 - 4, GuiTheme.TEXT_WARNING);
+			guiGraphics.drawCenteredString(font, Component.translatable(ConfigTexts.PREFIX + "notLoaded"), centerX, height / 2 - 4, GuiTheme.TEXT_WARNING);
+		} else if (optionList.children().isEmpty()) {
+			guiGraphics.drawCenteredString(font, Component.translatable(ConfigTexts.PREFIX + "noMatches"), centerX, height / 2 - 4, GuiTheme.TEXT_SECONDARY);
 		}
 		renderTooltips(guiGraphics, mouseX, mouseY);
 	}
@@ -122,40 +138,30 @@ public class ConfigScreen extends Screen {
 	private void renderTooltips(GuiGraphics guiGraphics, int mouseX, int mouseY) {
 		for (Object widget : renderables) {
 			if (widget instanceof TransparentButton button && button.visible && button.isPointedAt() && !button.getTooltipLines().isEmpty()) {
-				guiGraphics.renderComponentTooltip(font, button.getTooltipLines(), mouseX, mouseY);
+				ThemedTooltip.render(guiGraphics, font, button, mouseX, mouseY);
 				return;
 			}
+		}
+		final int hoveredTab = tabList.entryAt(mouseX, mouseY);
+		if (hoveredTab >= 0) {
+			final Tab pointed = Tab.values()[hoveredTab];
+			ThemedTooltip.render(guiGraphics, font, List.of(Component.translatable(pointed.translationKey()), Component.translatable(pointed.translationKey() + ".tooltip")), mouseX, mouseY);
+			return;
 		}
 		final ConfigOptionList.Row row = optionList.getHoveredRow(mouseX, mouseY);
 		if (row != null) {
 			final List<Component> lines = row.getTooltipLines(mouseX, mouseY);
 			if (lines != null && !lines.isEmpty()) {
-				guiGraphics.renderComponentTooltip(font, wrapped(lines), mouseX, mouseY);
+				ThemedTooltip.render(guiGraphics, font, lines, mouseX, mouseY);
 			}
 		}
-	}
-
-	/**
-	 * A description can run to a paragraph, and a tooltip is drawn one line to a component, so the
-	 * long ones are split at a readable width.
-	 */
-	private List<Component> wrapped(List<Component> lines) {
-		final int maxWidth = Math.max(160, Math.min(300, width / 2));
-		final List<Component> out = new ArrayList<Component>();
-		for (Component line : lines) {
-			if (font.width(line) <= maxWidth) {
-				out.add(line);
-				continue;
-			}
-			for (FormattedText part : font.getSplitter().splitLines(line.getString(), maxWidth, line.getStyle())) {
-				out.add(Component.literal(part.getString()).withStyle(line.getStyle()));
-			}
-		}
-		return out;
 	}
 
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+		if (groupList.mouseScrolled(mouseX, mouseY, scrollX, scrollY)) {
+			return true;
+		}
 		return optionList.mouseScrolled(mouseX, mouseY, scrollX, scrollY) || super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
 	}
 
@@ -187,9 +193,39 @@ public class ConfigScreen extends Screen {
 			return;
 		}
 		tab = newTab;
-		clientTabButton.setHighlighted(tab == Tab.CLIENT);
-		serverTabButton.setHighlighted(tab == Tab.SERVER);
+		groupIndex = 0;
+		tabList.setSelected(tab.ordinal());
+		// The other file falls into other groups, so the column of them is laid out again
+		removeWidget(groupList);
+		groupList = addRenderableWidget(createGroupList());
 		rebuildList();
+		optionList.setScrollAmount(0);
+	}
+
+	/** Shows one group of the tab, leaving the filter if one was gathering settings from all of them. */
+	private void selectGroup(int index) {
+		groupIndex = index;
+		if (!filterField.getValue().isEmpty()) {
+			// Emptying the filter rebuilds the list on its own
+			filterField.setValue("");
+		} else {
+			rebuildList();
+		}
+		optionList.setScrollAmount(0);
+	}
+
+	/** Whether any setting in the given group of the tab is not at its default, which its entry in the sidebar marks. */
+	private boolean isGroupModified(int index) {
+		final List<ConfigHandler.Group> groups = tab.groups();
+		if (!tab.spec().isLoaded() || index < 0 || index >= groups.size()) {
+			return false;
+		}
+		for (ConfigValue<?> value : groups.get(index).values()) {
+			if (!Objects.equals(value.get(), value.getDefault())) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/** Writes the file of the tab being shown, which is what every change on it ends in. */
@@ -205,8 +241,17 @@ public class ConfigScreen extends Screen {
 		minecraft.setScreen(new ConfigListEditScreen(this, (ConfigValue<List<String>>) (ConfigValue<?>) value, label));
 	}
 
+	/**
+	 * Lays the rows out again: the group picked in the sidebar, or, while anything is typed in the
+	 * filter, whatever in any group matches it, under the heading of the group it belongs to.
+	 */
 	private void rebuildList() {
-		optionList.rebuild(tab.spec().isLoaded() ? tab.groups() : List.of(), filterField.getValue());
+		final List<ConfigHandler.Group> groups = tab.spec().isLoaded() ? tab.groups() : List.of();
+		final boolean filtering = !filterField.getValue().isBlank();
+		groupIndex = Mth.clamp(groupIndex, 0, Math.max(0, groups.size() - 1));
+		groupList.setSelected(filtering ? -1 : groupIndex);
+		final List<ConfigHandler.Group> shown = filtering || groups.isEmpty() ? groups : List.of(groups.get(groupIndex));
+		optionList.rebuild(shown, filterField.getValue(), filtering);
 		resetButton.active = tab.spec().isLoaded();
 	}
 
@@ -214,63 +259,68 @@ public class ConfigScreen extends Screen {
 		return GuiTheme.contentLeft() + ConfigOptionList.ROW_INSET / 2;
 	}
 
+	/** As wide as the rows under it, which stop short of the edge on a wide window. */
 	private int columnWidth() {
-		return GuiTheme.contentWidth(width) - ConfigOptionList.ROW_INSET;
+		return Math.min(GuiTheme.contentWidth(width) - ConfigOptionList.ROW_INSET, ConfigOptionList.MAX_ROW_WIDTH);
+	}
+
+	private NavList createGroupList() {
+		final List<Component> labels = new ArrayList<Component>();
+		for (ConfigHandler.Group group : tab.groups()) {
+			labels.add(ConfigTexts.groupLabel(group.key()));
+		}
+		return new NavList(GuiTheme.SIDEBAR_CONTENT_X, groupListTop, GuiTheme.SIDEBAR_CONTENT_WIDTH, Math.max(NavList.ROW_HEIGHT, groupListBottom - groupListTop), title, labels, false, groupIndex, this::isGroupModified, this::selectGroup);
 	}
 
 	private void setupWidgets() {
 		final String previousFilter = filterField != null ? filterField.getValue() : "";
 		clearWidgets();
-		sidebarY = GuiTheme.HEADER_HEIGHT + 8;
+		int sidebarY = GuiTheme.HEADER_HEIGHT + 8;
 
-		clientTabButton = addSidebarButton(Component.translatable(ConfigTexts.PREFIX + "tab.client"), (onPress) -> {
-			switchTab(Tab.CLIENT);
-		});
-		clientTabButton.setHighlighted(tab == Tab.CLIENT);
-		clientTabButton.setTooltipLines(Component.translatable(ConfigTexts.PREFIX + "tab.client.tooltip"));
-		serverTabButton = addSidebarButton(Component.translatable(ConfigTexts.PREFIX + "tab.server"), (onPress) -> {
-			switchTab(Tab.SERVER);
-		});
-		serverTabButton.setHighlighted(tab == Tab.SERVER);
-		serverTabButton.setTooltipLines(Component.translatable(ConfigTexts.PREFIX + "tab.server.tooltip"));
+		final List<Component> tabLabels = new ArrayList<Component>();
+		for (Tab each : Tab.values()) {
+			tabLabels.add(Component.translatable(each.translationKey()));
+		}
+		tabList = addRenderableWidget(new NavList(GuiTheme.SIDEBAR_CONTENT_X, sidebarY, GuiTheme.SIDEBAR_CONTENT_WIDTH, NavList.tabsHeight(tabLabels.size()), title, tabLabels, true, tab.ordinal(), (index) -> false, (index) -> switchTab(Tab.values()[index])));
+		sidebarY += NavList.tabsHeight(tabLabels.size()) + 10;
 
-		// A gap between choosing what is shown and acting on all of it
-		sidebarY += GuiTheme.BUTTON_SPACING / 2;
-
-		resetButton = addSidebarButton(Component.translatable(ConfigTexts.PREFIX + "resetTab"), (onPress) -> {
-			optionList.resetAll();
-		});
-		resetButton.setTooltipLines(Component.translatable(ConfigTexts.PREFIX + "resetTab.tooltip"), Component.translatable("string.explorerscompass.tooltip.clearAll.warning").withStyle(ChatFormatting.RED));
-		folderButton = addSidebarButton(Component.translatable(ConfigTexts.PREFIX + "openFolder"), (onPress) -> {
+		folderButton = addRenderableWidget(new TransparentButton(GuiTheme.SIDEBAR_CONTENT_X, height - 26 - GuiTheme.BUTTON_SPACING - 2, GuiTheme.SIDEBAR_CONTENT_WIDTH, GuiTheme.BUTTON_HEIGHT, Component.translatable(ConfigTexts.PREFIX + "openFolder"), (onPress) -> {
 			Util.getPlatform().openPath(FMLPaths.CONFIGDIR.get());
-		});
+		}));
 		folderButton.setTooltipLines(Component.translatable(ConfigTexts.PREFIX + "openFolder.tooltip"));
-
 		backButton = addRenderableWidget(new TransparentButton(GuiTheme.SIDEBAR_CONTENT_X, height - 26, GuiTheme.SIDEBAR_CONTENT_WIDTH, GuiTheme.BUTTON_HEIGHT, Component.translatable("string.explorerscompass.back"), (onPress) -> {
 			onClose();
 		}));
 		backButton.setTooltipLines(Component.translatable(ConfigTexts.PREFIX + "back.tooltip"));
 
-		// The filter narrows the rows as it is typed in, the way the compass screen's own does
-		filterField = new TransparentTextField(font, columnLeft(), 8, columnWidth(), 18, Component.translatable(ConfigTexts.PREFIX + "filterHint"));
+		// The groups take whatever the sidebar has left between the tabs and the buttons at its foot
+		groupListTop = sidebarY;
+		groupListBottom = folderButton.getY() - 6;
+		groupList = addRenderableWidget(createGroupList());
+
+		// The filter narrows the rows as it is typed in, the way the compass screen's own does, and the
+		// control that puts every setting shown back to its default stands at its far end
+		final int fieldWidth = columnWidth() - GLYPH_BUTTON_WIDTH - GLYPH_BUTTON_GAP;
+		resetButton = addRenderableWidget(new TransparentButton(columnLeft() + fieldWidth + GLYPH_BUTTON_GAP, 8, GLYPH_BUTTON_WIDTH, 18, Component.literal(RESET_GLYPH), (onPress) -> {
+			optionList.resetAll();
+		}));
+		resetButton.setDanger(true);
+		resetButton.setTooltipTitle(Component.translatable(ConfigTexts.PREFIX + "resetTab"));
+		resetButton.setTooltipLines(Component.translatable(ConfigTexts.PREFIX + "resetTab.tooltip"), Component.translatable("string.explorerscompass.tooltip.clearAll.warning").withStyle(ChatFormatting.RED));
+
+		filterField = new TransparentTextField(font, columnLeft(), 8, fieldWidth, 18, Component.translatable(ConfigTexts.PREFIX + "filterHint"));
 		filterField.setMaxLength(64);
 		filterField.setValue(previousFilter);
 		filterField.setResponder((text) -> rebuildList());
 		addRenderableWidget(filterField);
 
-		// Recreated on every init so that it picks up the current screen dimensions
-		optionList = new ConfigOptionList(this, minecraft, GuiTheme.contentLeft(), GuiTheme.contentWidth(width), GuiTheme.HEADER_HEIGHT + 2, height - 10);
+		// Recreated on every init so that it picks up the current screen dimensions, and
+		// held to the width of the column above it, and laid against its left edge
+		optionList = new ConfigOptionList(this, minecraft, GuiTheme.contentLeft(), columnWidth() + ConfigOptionList.ROW_INSET, GuiTheme.HEADER_HEIGHT + 2, height - 10);
 		addRenderableWidget(optionList);
 		rebuildList();
 
 		setInitialFocus(filterField);
-	}
-
-	/** Adds a control to the bottom of the sidebar column, and moves the column down past it. */
-	private TransparentButton addSidebarButton(Component label, Button.OnPress onPress) {
-		final TransparentButton button = addRenderableWidget(new TransparentButton(GuiTheme.SIDEBAR_CONTENT_X, sidebarY, GuiTheme.SIDEBAR_CONTENT_WIDTH, GuiTheme.BUTTON_HEIGHT, label, onPress));
-		sidebarY += GuiTheme.BUTTON_SPACING;
-		return button;
 	}
 
 }

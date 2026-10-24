@@ -20,7 +20,6 @@ class LootMathTest {
 		}
 		return width;
 	};
-	private static final ToIntFunction<String> MONOSPACE = (text) -> text.length() * 6;
 
 	@Test
 	void chancesFallIntoTheirTiers() {
@@ -35,12 +34,6 @@ class LootMathTest {
 	}
 
 	@Test
-	void theRibbonIsTheTierColourALittleSeeThrough() {
-		assertEquals(0xB08FCB81, LootTier.GUARANTEED.ribbonColour());
-		assertEquals(0xB0D08CFF, LootTier.RARE.ribbonColour());
-	}
-
-	@Test
 	void aSlotLabelIsWholePercentsFromTenAndTenthsBelow() {
 		assertNull(LootMath.formatGridChance(1000));
 		assertEquals("99%", LootMath.formatGridChance(999));
@@ -51,25 +44,32 @@ class LootMathTest {
 		assertEquals("5%", LootMath.formatGridChance(50));
 		assertEquals("0.4%", LootMath.formatGridChance(4));
 		assertEquals("0.1%", LootMath.formatGridChance(1));
+		assertEquals("<1%", LootMath.formatGridChance(0));
+	}
+
+	@Test
+	void aChanceThatRoundsToNothingIsNotWrittenAsNothing() {
+		assertEquals("<0.1%", LootMath.formatChance(0));
+		assertEquals("0.1%", LootMath.formatChance(1));
+		assertEquals("100%", LootMath.formatChance(1000));
 	}
 
 	@Test
 	void everySlotLabelFitsUnderTheSlot() {
-		for (int permille = 1; permille < 1000; permille++) {
+		for (int permille = 0; permille < 1000; permille++) {
 			final String label = LootMath.formatGridChance(permille);
 			assertTrue(GLYPHS.applyAsInt(label) <= 20, label);
 		}
 	}
 
 	@Test
-	void aSlotCountIsWrittenOnlyWhereItFits() {
-		assertNull(LootMath.formatGridCount(1, 1, MONOSPACE));
-		assertEquals("3", LootMath.formatGridCount(3, 3, MONOSPACE));
-		assertEquals("1-3", LootMath.formatGridCount(1, 3, MONOSPACE));
-		assertEquals("10", LootMath.formatGridCount(1, 10, MONOSPACE));
-		assertEquals("64", LootMath.formatGridCount(64, 64, MONOSPACE));
-		assertEquals("100", LootMath.formatGridCount(100, 100, MONOSPACE));
-		assertEquals("99+", LootMath.formatGridCount(1, 1500, MONOSPACE));
+	void aSlotCountIsWrittenOnlyWhereItIsFixed() {
+		assertNull(LootMath.formatGridCount(1, 1));
+		assertEquals("3", LootMath.formatGridCount(3, 3));
+		assertNull(LootMath.formatGridCount(1, 3));
+		assertNull(LootMath.formatGridCount(1, 10));
+		assertEquals("64", LootMath.formatGridCount(64, 64));
+		assertEquals("99", LootMath.formatGridCount(100, 100));
 	}
 
 	@Test

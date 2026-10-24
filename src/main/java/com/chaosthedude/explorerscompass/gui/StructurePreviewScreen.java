@@ -210,9 +210,13 @@ public class StructurePreviewScreen extends Screen {
 		guiGraphics.pose().popPose();
 	}
 
-	/** How wide the loot overview stands when it is open, for a panel of the given width. */
+	/**
+	 * How wide the loot overview stands when it is open, for a panel of the given width: a share of
+	 * the panel within bounds, cut down to whole columns of tiles so that the drawer has no strip it
+	 * cannot fill, and whatever that cuts goes to the model.
+	 */
 	private static int drawerWidth(int panelWidth) {
-		return Mth.clamp(Math.round(panelWidth * DRAWER_FRACTION), Math.min(DRAWER_MIN_WIDTH, panelWidth / 2), DRAWER_MAX_WIDTH);
+		return LootOverview.snapWidth(Mth.clamp(Math.round(panelWidth * DRAWER_FRACTION), Math.min(DRAWER_MIN_WIDTH, panelWidth / 2), DRAWER_MAX_WIDTH));
 	}
 
 	/**
@@ -311,9 +315,10 @@ public class StructurePreviewScreen extends Screen {
 		final int chipWidth = font.width(text) + 10;
 		final int chipLeft = left + 6;
 		final int chipTop = bottom - 20;
-		RenderUtils.drawRect(guiGraphics, chipLeft, chipTop, chipLeft + chipWidth, chipTop + 14, 0x90000000);
-		RenderUtils.drawProgressBar(guiGraphics, chipLeft, chipTop + 13, chipLeft + chipWidth, chipTop + 14, progress / 1000.0F, 0x00000000, GuiTheme.ACCENT | 0xFF000000);
-		guiGraphics.drawString(font, text, chipLeft + 5, chipTop + 3, GuiTheme.TEXT_SECONDARY, false);
+		UiShapes.roundRect(guiGraphics, chipLeft, chipTop, chipWidth, 15, GuiTheme.CONTROL_RADIUS, 0xC00D1117);
+		UiShapes.roundRectStroke(guiGraphics, chipLeft, chipTop, chipWidth, 15, GuiTheme.CONTROL_RADIUS, UiShapes.stroke(), GuiTheme.PANEL_BORDER);
+		RenderUtils.drawProgressBar(guiGraphics, chipLeft + 4, chipTop + 11, chipLeft + chipWidth - 4, chipTop + 13, progress / 1000.0F, GuiTheme.withAlpha(GuiTheme.TEXT_MUTED, 0x40), GuiTheme.opaque(GuiTheme.ACCENT));
+		guiGraphics.drawString(font, text, chipLeft + 5, chipTop + 2, GuiTheme.TEXT_SECONDARY, false);
 	}
 
 	/** What is being shown, and how it is turned around, along the bottom. */
@@ -392,12 +397,12 @@ public class StructurePreviewScreen extends Screen {
 		}
 		for (Object widget : renderables) {
 			if (widget instanceof TransparentButton button && button.visible && button.isPointedAt() && !button.getTooltipLines().isEmpty()) {
-				guiGraphics.renderComponentTooltip(font, button.getTooltipLines(), mouseX, mouseY);
+				ThemedTooltip.render(guiGraphics, font, button, mouseX, mouseY);
 				return;
 			}
 		}
 		if (layerSlider.visible && layerSlider.isMouseOver(mouseX, mouseY)) {
-			guiGraphics.renderComponentTooltip(font, List.of(Component.translatable("string.explorerscompass.tooltip.layerSlider")), mouseX, mouseY);
+			ThemedTooltip.render(guiGraphics, font, List.of(Component.translatable("string.explorerscompass.layers"), Component.translatable("string.explorerscompass.tooltip.layerSlider")), mouseX, mouseY);
 		}
 	}
 
@@ -588,6 +593,7 @@ public class StructurePreviewScreen extends Screen {
 		searchButton = addSidebarButton(Component.translatable("string.explorerscompass.search"), (onPress) -> {
 			search();
 		});
+		searchButton.setPrimary(true);
 		searchButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.search"));
 
 		spinButton = addSidebarButton(Component.translatable("string.explorerscompass.autoSpin"), (onPress) -> {

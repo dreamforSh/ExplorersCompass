@@ -4,8 +4,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import com.chaosthedude.explorerscompass.util.RenderUtils;
-
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.world.item.ItemStack;
@@ -18,10 +16,10 @@ import net.neoforged.api.distmarker.OnlyIn;
  * different reasons, but draw and hit-test them the same way, so both live here.
  *
  * <p>A card flows its tiles from likeliest down without a break, so that a short table reads as a
- * single run and a long one as a few rows, with the tier told by the colour of each slot. The
- * overview has room to scroll, so it groups its tiles by tier instead, each group starting a row of
- * its own with a ribbon of the tier's colour down its side, so that a long table can be read by
- * tier without reading a number.
+ * single run and a long one as a few rows, with the tier told by the icon in each slot's corner.
+ * The overview has room to scroll, so it groups its tiles by tier instead, each group under a
+ * header of its own that names the tier and counts its tiles, so that a long table can be read by
+ * tier without reading a number, and the tiles under a header need no icon to say it again.
  *
  * <p>Laying out works from chances alone and touches nothing of the game, so that how a grid is cut
  * and where each tile falls can be checked by a test on its own. Only drawing needs the game.
@@ -45,8 +43,12 @@ final class LootGrid {
 	record Tile(int x, int y, int height, int entry, int hidden) {
 	}
 
-	/** The rows a tier's group takes up, from the top of its first to the bottom of its last, exclusive. */
-	record Band(LootTier tier, int top, int bottom) {
+	/**
+	 * The room a tier's group takes up, from the top of its header to the bottom of its last row,
+	 * exclusive, and how many tiles are in it. Its tiles start {@link LootSlots#GROUP_HEAD} below its
+	 * top, under the header.
+	 */
+	record Band(LootTier tier, int top, int bottom, int count) {
 	}
 
 	/** The tiles of a grid, the groups they fall into where there are any, how much room it all takes, and how many were left out. */
@@ -96,13 +98,13 @@ final class LootGrid {
 	}
 
 	/**
-	 * Lays chances out as the overview does: grouped by tier from certain down, each group in the
-	 * order given and starting a row of its own, a little apart from the one before. Where a tier is
+	 * Lays chances out as the overview does: grouped by tier from certain down, each group under
+	 * room for its header, in the order given, a little apart from the one before. Where a tier is
 	 * picked out, only its group is laid out, and the rest are counted as hidden.
 	 *
 	 * <p>The certain group is drawn in short rows, since none of its tiles has a label, and every
-	 * other group in rows tall enough for one. Tiles start to the right of the ribbon that runs down
-	 * each group's side.
+	 * other group in rows tall enough for one. The gap between groups is small, since every row
+	 * already leaves room after itself, and the two together are what part one group from the next.
 	 */
 	static Layout grouped(int[] permilles, int columns, LootTier solo) {
 		final int cols = Math.max(1, columns);
@@ -129,18 +131,19 @@ final class LootGrid {
 			}
 			final int height = tier == LootTier.GUARANTEED ? LootSlots.ROW_PLAIN : LootSlots.ROW_LABELLED;
 			final int top = y;
+			final int tilesTop = top + LootSlots.GROUP_HEAD;
 			int k = 0;
 			for (int i = 0; i < permilles.length; i++) {
 				if (LootTier.of(permilles[i]) != tier) {
 					continue;
 				}
-				tiles.add(new Tile(LootSlots.RIBBON + (k % cols) * LootSlots.TILE_W, top + (k / cols) * height, height, i, 0));
+				tiles.add(new Tile((k % cols) * LootSlots.TILE_W, tilesTop + (k / cols) * height, height, i, 0));
 				k++;
 			}
-			y = top + ((inTier + cols - 1) / cols) * height;
-			bands.add(new Band(tier, top, y));
+			y = tilesTop + ((inTier + cols - 1) / cols) * height;
+			bands.add(new Band(tier, top, y, inTier));
 		}
-		return new Layout(Collections.unmodifiableList(tiles), Collections.unmodifiableList(bands), LootSlots.RIBBON + cols * LootSlots.TILE_W, y, hidden);
+		return new Layout(Collections.unmodifiableList(tiles), Collections.unmodifiableList(bands), cols * LootSlots.TILE_W, y, hidden);
 	}
 
 	/**
@@ -160,19 +163,24 @@ final class LootGrid {
 	}
 
 	/**
-	 * Draws a laid out grid with its top left corner at the given origin: each group's ribbon, then
-	 * its tiles, the hovered one lit. Tiles wholly outside the given span of rows are skipped, so that
-	 * a long list scrolled through a window draws only what shows; the window itself still has to be
-	 * cut to by whoever draws it, for the tiles half in it.
+	 * Draws a laid out grid with its top left corner at the given origin: each group's header, ending
+	 * at the given right edge and naming the range of chances its tier stands for where hints are
+	 * asked for, then the tiles, the hovered one lit and each marked with its tier's icon where marks
+	 * are asked for. Tiles and headers wholly outside the given span of rows are skipped, so that a
+	 * long list scrolled through a window draws only what shows; the window itself still has to be
+	 * cut to by whoever draws it, for what is half in it.
+	 *
+	 * <p>The origin is the left of the first tile, which is a slot's inset left of the slot, and the
+	 * headers start where the slots do, so that a header lines up with the tiles under it and with
+	 * whatever else is ruled to the slots' edge.
 	 */
-	static void render(GuiGraphics guiGraphics, Font font, Layout layout, List<Entry> entries, int originX, int originY, Tile hovered, int clipTop, int clipBottom) {
+	static void render(GuiGraphics guiGraphics, Font font, Layout layout, List<Entry> entries, int originX, int originY, Tile hovered, int clipTop, int clipBottom, int right, boolean hints, boolean mark) {
 		for (Band band : layout.bands()) {
 			final int top = originY + band.top();
-			final int bottom = originY + band.bottom();
-			if (bottom <= clipTop || top >= clipBottom) {
+			if (top + LootSlots.GROUP_HEAD <= clipTop || top >= clipBottom) {
 				continue;
 			}
-			RenderUtils.drawRect(guiGraphics, originX, top, originX + 2, bottom, band.tier().ribbonColour());
+			LootSlots.drawGroupHeader(guiGraphics, font, originX + LootSlots.SLOT_INSET_X, top, right, band.tier(), band.count(), hints);
 		}
 		for (Tile tile : layout.tiles()) {
 			final int x = originX + tile.x();
@@ -185,7 +193,7 @@ final class LootGrid {
 				LootSlots.drawMoreTile(guiGraphics, font, x, y, tile.hidden(), lit);
 			} else {
 				final Entry entry = entries.get(tile.entry());
-				LootSlots.drawTile(guiGraphics, font, x, y, entry.stack(), entry.permille(), entry.minCount(), entry.maxCount(), lit);
+				LootSlots.drawTile(guiGraphics, font, x, y, entry.stack(), entry.permille(), entry.minCount(), entry.maxCount(), lit, mark);
 			}
 		}
 	}

@@ -129,13 +129,13 @@ public class BookmarksScreen extends Screen {
 	private void renderButtonTooltip(GuiGraphics guiGraphics, int mouseX, int mouseY) {
 		for (Object widget : renderables) {
 			if (widget instanceof TransparentButton button && button.visible && button.isPointedAt() && !button.getTooltipLines().isEmpty()) {
-				guiGraphics.renderComponentTooltip(font, button.getTooltipLines(), mouseX, mouseY);
+				ThemedTooltip.render(guiGraphics, font, button, mouseX, mouseY);
 				return;
 			}
 		}
 		final BookmarkListEntry hovered = selectionList.getHoveredEntry(mouseX, mouseY);
 		if (hovered != null) {
-			guiGraphics.renderComponentTooltip(font, hovered.getTooltipLines(), mouseX, mouseY);
+			ThemedTooltip.render(guiGraphics, font, hovered.getTooltipLines(), mouseX, mouseY);
 		}
 	}
 
@@ -199,6 +199,7 @@ public class BookmarksScreen extends Screen {
 				pointAt(selectionList.getSelected().getIndex());
 			}
 		});
+		pointAtButton.setPrimary(true);
 		pointAtButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.pointAt"));
 		teleportButton = addSidebarButton(Component.translatable("string.explorerscompass.teleport"), (onPress) -> {
 			if (selectionList.hasSelection()) {
@@ -217,12 +218,14 @@ public class BookmarksScreen extends Screen {
 				remove(selectionList.getSelected().getIndex());
 			}
 		});
+		removeButton.setDanger(true);
 		removeButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.remove"));
 		clearButton = addSidebarButton(Component.translatable("string.explorerscompass.clearAll"), (onPress) -> {
 			clearAll();
 		});
 		// The one control here that throws anything away, and it does so on a single click, so it says
 		// as much before the click rather than after it
+		clearButton.setDanger(true);
 		clearButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.clearAll"), Component.translatable("string.explorerscompass.tooltip.clearAll.warning").withStyle(ChatFormatting.RED));
 		backButton = addRenderableWidget(new TransparentButton(GuiTheme.SIDEBAR_CONTENT_X, height - 26, GuiTheme.SIDEBAR_CONTENT_WIDTH, GuiTheme.BUTTON_HEIGHT, Component.translatable("string.explorerscompass.back"), (onPress) -> {
 			onClose();

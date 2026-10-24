@@ -113,13 +113,13 @@ public class WaypointsScreen extends Screen {
 	private void renderButtonTooltip(GuiGraphics guiGraphics, int mouseX, int mouseY) {
 		for (Object widget : renderables) {
 			if (widget instanceof TransparentButton button && button.visible && button.isPointedAt() && !button.getTooltipLines().isEmpty()) {
-				guiGraphics.renderComponentTooltip(font, button.getTooltipLines(), mouseX, mouseY);
+				ThemedTooltip.render(guiGraphics, font, button, mouseX, mouseY);
 				return;
 			}
 		}
 		final WaypointListEntry hovered = selectionList.getHoveredEntry(mouseX, mouseY);
 		if (hovered != null) {
-			guiGraphics.renderComponentTooltip(font, hovered.getTooltipLines(), mouseX, mouseY);
+			ThemedTooltip.render(guiGraphics, font, hovered.getTooltipLines(), mouseX, mouseY);
 		}
 	}
 
@@ -185,6 +185,7 @@ public class WaypointsScreen extends Screen {
 				pointAt(selectionList.getSelected().getWaypoint());
 			}
 		});
+		pointAtButton.setPrimary(true);
 		pointAtButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.pointAtWaypoint"));
 		teleportButton = addSidebarButton(Component.translatable("string.explorerscompass.teleport"), (onPress) -> {
 			if (selectionList.hasSelection()) {
@@ -203,10 +204,12 @@ public class WaypointsScreen extends Screen {
 				remove(selectionList.getSelected().getWaypoint());
 			}
 		});
+		removeButton.setDanger(true);
 		removeButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.removeWaypoint"));
 		clearButton = addSidebarButton(Component.translatable("string.explorerscompass.clearAll"), (onPress) -> {
 			clearAll();
 		});
+		clearButton.setDanger(true);
 		clearButton.setTooltipLines(Component.translatable("string.explorerscompass.tooltip.clearAllWaypoints"), Component.translatable("string.explorerscompass.tooltip.clearAll.warning").withStyle(ChatFormatting.RED));
 
 		// Both of these are about the minimap's copies, so neither is offered where there is no minimap

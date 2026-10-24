@@ -2,8 +2,6 @@ package com.chaosthedude.explorerscompass.gui;
 
 import java.util.Objects;
 
-import com.chaosthedude.explorerscompass.util.RenderUtils;
-
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.ObjectSelectionList;
@@ -21,6 +19,7 @@ public class StructureSearchList extends ObjectSelectionList<StructureSearchEntr
 	private static final int SCROLLBAR_WIDTH = 6;
 
 	private final ExplorersCompassScreen parentScreen;
+	private final ListChrome chrome = new ListChrome();
 
 	/**
 	 * The list now takes its vertical extent as a height rather than as a pair of edges, which is
@@ -92,6 +91,11 @@ public class StructureSearchList extends ObjectSelectionList<StructureSearchEntr
 		// one the pointer is on
 		final StructureSearchEntry hoveredEntry = getHoveredEntry(mouseX, mouseY);
 
+		chrome.beginFrame();
+		final int selectedIndex = getSelected() != null ? children().indexOf(getSelected()) : -1;
+		// Drawn before any of the rows, so that it slides under them on its way to the next pick
+		chrome.drawSelection(guiGraphics, selectedIndex, this::getRowTop, itemHeight, bandLeft, bandRight);
+
 		final int firstRow = Math.max(0,
 				(int) Math.floor(getScrollAmount() / itemHeight) - 1);
 		final int visibleRowCount = (int) Math.ceil((double) height / itemHeight) + 3;
@@ -106,23 +110,14 @@ public class StructureSearchList extends ObjectSelectionList<StructureSearchEntr
 
 			final StructureSearchEntry entry = getEntry(j);
 			final boolean hovered = Objects.equals(entry, hoveredEntry);
-			if (isSelectedItem(j)) {
-				// The selection fades out towards the right, so that the row it marks stays readable
-				RenderUtils.drawHorizontalGradient(guiGraphics, bandLeft, bandTop, bandRight, bandBottom, GuiTheme.ROW_SELECTED_LEFT, GuiTheme.ROW_SELECTED_RIGHT);
-				RenderUtils.drawRect(guiGraphics, bandLeft, bandTop, bandLeft + 2, bandBottom, GuiTheme.ACCENT | 0xFF000000);
-			} else if (parentScreen.isMultiSelected(entry.getKey())) {
-				// Rows picked with Ctrl-click show fainter, with the same accent along their edge
-				RenderUtils.drawRect(guiGraphics, bandLeft, bandTop, bandRight, bandBottom, GuiTheme.ROW_MULTI_SELECTED);
-				RenderUtils.drawRect(guiGraphics, bandLeft, bandTop, bandLeft + 2, bandBottom, GuiTheme.ACCENT_DIM);
-			} else if (hovered) {
-				RenderUtils.drawRect(guiGraphics, bandLeft, bandTop, bandRight, bandBottom, GuiTheme.ROW_HOVER);
-			}
+			// Rows picked with Ctrl-click show fainter than the selection, with the accent along their edge
+			chrome.drawRowBand(guiGraphics, entry, bandLeft, bandTop, bandRight, bandBottom, hovered && j != selectedIndex,
+					j != selectedIndex && parentScreen.isMultiSelected(entry.getKey()));
 
 			if (j < getItemCount() - 1) {
 				// A brighter rule closes off the rows held at the top of the list, so that their order
 				// reads as deliberate rather than as the sort having gone wrong
-				final boolean lastPinned = j == parentScreen.getPinnedCount() - 1;
-				RenderUtils.drawRect(guiGraphics, bandLeft + 2, bandBottom - 1, bandRight - 2, bandBottom, lastPinned ? GuiTheme.ROW_SECTION_SEPARATOR : GuiTheme.ROW_SEPARATOR);
+				ListChrome.drawSeparator(guiGraphics, bandLeft, bandRight, bandBottom, j == parentScreen.getPinnedCount() - 1);
 			}
 
 			entry.render(guiGraphics, j, rowTop, getRowLeft(), getRowWidth(), itemHeight - 4, mouseX, mouseY, hovered, partialTicks);
@@ -135,25 +130,12 @@ public class StructureSearchList extends ObjectSelectionList<StructureSearchEntr
 	 */
 	@Override
 	protected void renderDecorations(@NotNull GuiGraphics guiGraphics, int mouseX, int mouseY) {
-		if (getMaxScroll() <= 0) {
-			return;
-		}
-
-		final int left = getScrollbarPosition();
-		final int right = left + SCROLLBAR_WIDTH;
-		int thumbHeight = (int) ((float) (height * height) / (float) getMaxPosition());
-		thumbHeight = Mth.clamp(thumbHeight, 32, height - 8);
-		int thumbTop = (int) getScrollAmount() * (height - thumbHeight) / getMaxScroll() + getY();
-		if (thumbTop < getY()) {
-			thumbTop = getY();
-		}
-
-		RenderUtils.drawRect(guiGraphics, left, getY(), right, getBottom(), GuiTheme.SCROLLBAR_TRACK);
-		RenderUtils.drawRect(guiGraphics, left + 1, thumbTop, right - 1, thumbTop + thumbHeight, GuiTheme.SCROLLBAR_THUMB);
+		ListChrome.drawScrollbar(guiGraphics, getScrollbarPosition(), getY(), getBottom(), SCROLLBAR_WIDTH, getScrollAmount(), getMaxScroll(), getMaxPosition(), mouseX, mouseY);
 	}
 
 	public void refreshList() {
 		clearEntries();
+		chrome.reset();
 		for (ResourceLocation key : parentScreen.sortKeys()) {
 			addEntry(new StructureSearchEntry(this, key));
 		}

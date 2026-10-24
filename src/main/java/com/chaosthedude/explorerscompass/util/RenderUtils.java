@@ -1,5 +1,7 @@
 package com.chaosthedude.explorerscompass.util;
 
+import com.chaosthedude.explorerscompass.gui.GuiTheme;
+import com.chaosthedude.explorerscompass.gui.UiShapes;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 
 import net.minecraft.client.Minecraft;
@@ -35,14 +37,17 @@ public class RenderUtils {
 	}
 
 	/**
-	 * Draws how far along something is as a filled bar. The fill is rounded rather than truncated, so
-	 * that a bar which is nearly full does not sit a pixel short of its own end.
+	 * Draws how far along something is as a filled bar, rounded at both ends. The fill is rounded
+	 * rather than truncated, so that a bar which is nearly full does not sit a pixel short of its own
+	 * end, and never drawn shorter than it is tall, so that a little progress still shows as a dot.
 	 */
 	public static void drawProgressBar(GuiGraphics guiGraphics, int left, int top, int right, int bottom, float progress, int backgroundColor, int fillColor) {
-		drawRect(guiGraphics, left, top, right, bottom, backgroundColor);
-		final int filled = Math.round((right - left) * Math.min(Math.max(progress, 0.0F), 1.0F));
-		if (filled > 0) {
-			drawRect(guiGraphics, left, top, left + filled, bottom, fillColor);
+		final float width = right - left;
+		final float height = bottom - top;
+		UiShapes.pill(guiGraphics, left, top, width, height, backgroundColor);
+		final float filled = width * Math.min(Math.max(progress, 0.0F), 1.0F);
+		if (filled > 0.0F) {
+			UiShapes.pill(guiGraphics, left, top, Math.max(Math.min(height, width), filled), height, fillColor);
 		}
 	}
 
@@ -97,12 +102,12 @@ public class RenderUtils {
 	}
 
 	/**
-	 * Draws the raised surface the interface is built out of: a panel that fades from top to bottom
-	 * behind a thin border, so that groups of controls read as belonging together.
+	 * Draws the raised surface the interface is built out of: a rounded panel that fades from top to
+	 * bottom behind a thin border, so that groups of controls read as belonging together.
 	 */
 	public static void drawPanel(GuiGraphics guiGraphics, int left, int top, int right, int bottom, int topColor, int bottomColor, int borderColor) {
-		drawVerticalGradient(guiGraphics, left, top, right, bottom, topColor, bottomColor);
-		drawInnerOutline(guiGraphics, left, top, right, bottom, borderColor);
+		UiShapes.roundRect(guiGraphics, left, top, right - left, bottom - top, GuiTheme.CONTROL_RADIUS, topColor, bottomColor);
+		UiShapes.roundRectStroke(guiGraphics, left, top, right - left, bottom - top, GuiTheme.CONTROL_RADIUS, UiShapes.stroke(), borderColor);
 	}
 
 	/**
@@ -112,7 +117,7 @@ public class RenderUtils {
 	public static int drawChip(GuiGraphics guiGraphics, String text, int x, int y, int backgroundColor, int textColor) {
 		final Font font = font();
 		final int chipWidth = font.width(text) + 8;
-		drawRect(guiGraphics, x, y, x + chipWidth, y + 12, backgroundColor);
+		UiShapes.pill(guiGraphics, x, y, chipWidth, 12, backgroundColor);
 		guiGraphics.drawString(font, text, x + 4, y + 2, textColor, false);
 		return chipWidth;
 	}
