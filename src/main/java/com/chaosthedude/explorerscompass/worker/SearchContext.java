@@ -9,6 +9,7 @@ import org.apache.commons.lang3.RandomStringUtils;
 import com.chaosthedude.explorerscompass.ExplorersCompass;
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.items.ExplorersCompassItem;
+import com.chaosthedude.explorerscompass.util.ItemUtils;
 import com.chaosthedude.explorerscompass.util.StructureUtils;
 
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
@@ -16,6 +17,8 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.Container;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 
@@ -43,7 +46,17 @@ public class SearchContext {
 
 	private final ServerLevel level;
 	private final Player player;
-	private final ItemStack stack;
+
+	/**
+	 * The compass this search answers on. Replaced when it turns out to have been swapped for a copy
+	 * of itself — see {@link #compassStack} — so that the search goes on answering on the one the
+	 * player actually holds.
+	 */
+	private ItemStack stack;
+
+	/** The inventory slot the compass was last found in, or -1 when it was found in none. */
+	private int heldSlot = -1;
+
 	private final BlockPos startPos;
 
 	/**
@@ -51,6 +64,13 @@ public class SearchContext {
 	 * on is added to.
 	 */
 	private final List<BlockPos> prevPos;
+
+	/**
+	 * How many locations this search started out passing over. Kept apart from {@link #prevPos}, which
+	 * the compass can be told to forget while the search runs: what the search passes over was settled
+	 * when it started, and that is what decides how it ends when it finds nothing.
+	 */
+	private final int collectedAtStart;
 
 	/**
 	 * The same locations, bucketed by where they are, so that asking whether one of them is already
@@ -83,6 +103,7 @@ public class SearchContext {
 		this.stack = stack;
 		this.startPos = startPos;
 		this.prevPos = prevPos;
+		collectedAtStart = prevPos.size();
 		this.isGroup = isGroup;
 		this.ignoreNearStart = ignoreNearStart;
 		this.maxRadius = maxRadius;
@@ -184,16 +205,89 @@ public class SearchContext {
 
 	/**
 	 * Whether the compass this search answers on is still there to answer on. It can be emptied while
-	 * the search runs, and everything written to it after that would go nowhere.
+	 * the search runs, or pointed somewhere else, and everything written to it after that would either
+	 * go nowhere or undo what the player chose.
 	 */
 	public boolean holdsCompass() {
-		return !stack.isEmpty() && stack.getItem() == ExplorersCompass.explorersCompass;
+		return compassStack() != null;
+	}
+
+	/**
+	 * The compass this search answers on, wherever the player now holds it, or null when there is none
+	 * left for it to answer on.
+	 *
+	 * <p>Moving a stack between slots — dropping it, shift-clicking it, picking it up onto the cursor
+	 * — splits it, which hands the new slot a copy and empties the stack this search was started on. A
+	 * client in creative mode replaces it outright with a copy of its own, leaving the one this search
+	 * holds intact but held by nobody. Either way the compass the player holds is a different stack
+	 * from then on, and the search id it carries is what tells which one it is.
+	 *
+	 * <p>The id is also what says the compass is still this search's to write to. Pointing it somewhere
+	 * else takes the id off, and from then on what this search settles on is not written onto it.
+	 */
+	ItemStack compassStack() {
+		if (player == null) {
+			return carriesSearch(stack, id) ? stack : null;
+		}
+
+		// Asked before every turn the search takes, and the compass is almost always still where it was
+		// found the last time, so that is looked at before the whole inventory is
+		final Inventory inventory = player.getInventory();
+		if (heldSlot >= 0 && heldSlot < inventory.getContainerSize() && inventory.getItem(heldSlot) == stack && carriesSearch(stack, id)) {
+			return stack;
+		}
+
+		final ItemStack found = findCompass(stack, id, inventory, player.containerMenu.getCarried());
+		if (found != null) {
+			stack = found;
+		}
+		heldSlot = -1;
+		for (int slot = 0; found != null && slot < inventory.getContainerSize(); slot++) {
+			if (inventory.getItem(slot) == found) {
+				heldSlot = slot;
+				break;
+			}
+		}
+		return found;
+	}
+
+	/**
+	 * Finds the compass the given search answers on among what a player holds: of the compasses
+	 * carrying the search's id, the stack it was started on when that is one of them, and otherwise the
+	 * first. Failing both, the stack it was started on is still answered on as long as it carries the
+	 * id, the way it always was: a client in creative mode takes a stack out of its slot while it is
+	 * being moved, and only puts its own copy of it back once it is let go of.
+	 */
+	static ItemStack findCompass(ItemStack original, String searchId, Container inventory, ItemStack carried) {
+		ItemStack copy = null;
+		for (int slot = 0; slot <= inventory.getContainerSize(); slot++) {
+			final ItemStack held = slot < inventory.getContainerSize() ? inventory.getItem(slot) : carried;
+			if (!carriesSearch(held, searchId)) {
+				continue;
+			}
+			if (held == original) {
+				return original;
+			}
+			if (copy == null) {
+				copy = held;
+			}
+		}
+		if (copy != null) {
+			return copy;
+		}
+		return carriesSearch(original, searchId) ? original : null;
+	}
+
+	/** Whether a stack is a compass the given search is running on. */
+	private static boolean carriesSearch(ItemStack stack, String searchId) {
+		return stack != null && searchId.equals(ItemUtils.getSearchId(stack));
 	}
 
 	/** Keeps the radius the compass reports in step with how far the search has looked. */
 	void reportRadius(int radius) {
-		if (holdsCompass()) {
-			compass().setSearchRadius(stack, radius, player);
+		final ItemStack compass = compassStack();
+		if (compass != null) {
+			compass().setSearchRadius(compass, radius, player);
 		}
 	}
 
@@ -203,37 +297,65 @@ public class SearchContext {
 		// location the search answers with is remembered: one a worker turned up and another beat is
 		// not somewhere the compass ever pointed.
 		prevPos.add(pos);
-		if (!holdsCompass()) {
+		final ItemStack compass = compassStack();
+		if (compass == null) {
 			ExplorersCompass.LOGGER.error("Search " + id + ": found invalid compass after successful search");
 			return;
 		}
 
-		compass().succeed(player, stack, key, isGroup, pos.getX(), pos.getZ(), pos.getY(), level.dimension().location(), prevPos, totalSamples, displayCoordinates);
+		compass().succeed(player, compass, key, isGroup, pos.getX(), pos.getZ(), pos.getY(), level.dimension().location(), prevPos, totalSamples, displayCoordinates);
 	}
 
 	/** Tells the compass the search located nothing. */
 	void reportNotFound(int radius, int totalSamples) {
-		if (!holdsCompass()) {
+		final ItemStack compass = compassStack();
+		if (compass == null) {
 			ExplorersCompass.LOGGER.error("Search " + id + ": found invalid compass after failed search");
 			return;
 		}
 
-		if (!prevPos.isEmpty()) {
+		if (collectedAtStart > 0) {
 			// A search that was passing over what was already collected and still found nothing has
 			// collected everything within its reach, so the only further instance there is to offer is
 			// the closest one over again. Ending on "not found" instead would leave the compass with
 			// nothing located, and one with nothing located cannot even be asked for a further
 			// instance, so it would dead-end there for as long as the collected locations were kept.
-			ExplorersCompass.LOGGER.info("Search " + id + ": located nothing beyond the " + prevPos.size() + " location(s) already collected, so they are forgotten and the search starts over from the closest one");
-			compass().startOver(level, player, startPos, stack);
+			// Decided by what the search started out passing over rather than by what is still
+			// remembered: a compass told to forget its collected locations partway through has had them
+			// forgotten already, and starting over is what it asked for.
+			ExplorersCompass.LOGGER.info("Search " + id + ": located nothing beyond the " + collectedAtStart + " location(s) already collected, so they are forgotten and the search starts over from the closest one");
+			compass().startOver(level, player, startPos, compass);
 			return;
 		}
 
-		compass().fail(player, stack, radius, totalSamples);
+		compass().fail(player, compass, radius, totalSamples);
+	}
+
+	/**
+	 * Tells the compass the search was stopped before it had an answer, so that it does not go on
+	 * reading as searching. Only a compass this search is still running on is touched: one that has
+	 * moved on to something else since is not this search's to change.
+	 */
+	void reportStopped() {
+		final ItemStack compass = compassStack();
+		if (compass != null) {
+			ExplorersCompass.LOGGER.info("Search " + id + ": stopped before it located anything");
+			compass().interrupt(compass);
+		}
+	}
+
+	/**
+	 * Forgets the locations already collected, after the compass was told to forget them while this
+	 * search was running. The search goes on passing over them, since that was settled when it
+	 * started, but what it settles on is no longer added to them: otherwise it would write the very
+	 * list the compass was just told to forget back onto it.
+	 */
+	public void forgetCollected() {
+		prevPos.clear();
 	}
 
 	private ExplorersCompassItem compass() {
-		return (ExplorersCompassItem) stack.getItem();
+		return ExplorersCompass.explorersCompass;
 	}
 
 }

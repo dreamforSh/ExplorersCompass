@@ -118,6 +118,23 @@ public class ItemUtils {
 		setList(stack, ModDataComponents.BOOKMARKS.get(), bookmarks, ModDataComponents.MAX_STREAMED_BOOKMARKS);
 	}
 
+	/** The search running on this compass, or null when none is. */
+	public static String getSearchId(ItemStack stack) {
+		return isCompass(stack) ? stack.get(ModDataComponents.SEARCH_ID.get()) : null;
+	}
+
+	public static void setSearchId(ItemStack stack, String searchId) {
+		if (isCompass(stack)) {
+			stack.set(ModDataComponents.SEARCH_ID.get(), searchId);
+		}
+	}
+
+	public static void clearSearchId(ItemStack stack) {
+		if (isCompass(stack)) {
+			stack.remove(ModDataComponents.SEARCH_ID.get());
+		}
+	}
+
 	/**
 	 * An empty list is removed rather than stored, so that a compass carrying nothing compares equal
 	 * to a fresh one and does not keep an empty component around on every stack.

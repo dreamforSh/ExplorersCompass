@@ -111,7 +111,7 @@ public class GenericSearchWorker extends GridStructureSearchWorker<StructurePlac
 		// Reported where the walk would report a structure in this chunk, so that the same place
 		// answers the same way however it was found — which is what a search for a further instance
 		// goes by when it passes over what earlier searches answered with
-		final BlockPos locatePos = placement.getLocatePos(chunkPos);
+		final BlockPos locatePos = getLocatePos(chunkPos);
 		if (!isWorthSampling(locatePos.getX(), locatePos.getZ())) {
 			ExplorersCompass.LOGGER.info("Search " + context.getId() + ": " + getName() + " was told by the chunk generator that the nearest structure lies at " + locatePos.getX() + ", " + locatePos.getZ() + ", beyond the " + getRadiusLimit() + " this search may reach, so the chunks will be walked instead");
 			return false;
@@ -126,15 +126,16 @@ public class GenericSearchWorker extends GridStructureSearchWorker<StructurePlac
 		// Storage has the last word, as it has over every location the walk predicts: the chunk may
 		// have been generated under settings that no longer put a structure there. The generator says
 		// nothing about how high the structure stands, so unless storage does, that stays unknown.
-		final BlockPos confirmed = confirmStructureAt(chunkPos, structure, ExplorersCompassItem.UNKNOWN_Y);
+		final Pair<BlockPos, Structure> confirmed = confirmStructureAt(chunkPos, structure, ExplorersCompassItem.UNKNOWN_Y);
 		if (confirmed == null) {
 			ExplorersCompass.LOGGER.info("Search " + context.getId() + ": " + getName() + " was told by the chunk generator that the nearest structure lies at " + locatePos.getX() + ", " + locatePos.getZ() + ", where the chunk holds no such structure, so the chunks will be walked instead");
 			return false;
 		}
 
-		ExplorersCompass.LOGGER.info("Search " + context.getId() + ": " + getName() + " was told by the chunk generator that the nearest structure lies at " + confirmed.getX() + ", " + confirmed.getZ() + ", " + StructureUtils.getHorizontalDistanceToLocation(startPos, confirmed.getX(), confirmed.getZ()) + " blocks away, and storage agrees");
+		final BlockPos confirmedPos = confirmed.getFirst();
+		ExplorersCompass.LOGGER.info("Search " + context.getId() + ": " + getName() + " was told by the chunk generator that the nearest structure lies at " + confirmedPos.getX() + ", " + confirmedPos.getZ() + ", " + StructureUtils.getHorizontalDistanceToLocation(startPos, confirmedPos.getX(), confirmedPos.getZ()) + " blocks away, and storage agrees");
 		settledByGenerator = true;
-		found(confirmed, structure);
+		found(confirmedPos, confirmed.getSecond());
 		return true;
 	}
 

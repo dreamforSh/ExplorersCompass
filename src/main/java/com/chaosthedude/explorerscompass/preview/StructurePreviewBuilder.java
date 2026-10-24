@@ -22,6 +22,7 @@ import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
@@ -63,6 +64,8 @@ import net.minecraft.world.level.levelgen.structure.StructurePiece;
 import net.minecraft.world.level.levelgen.structure.StructureStart;
 import net.minecraft.world.level.levelgen.structure.TemplateStructurePiece;
 import net.minecraft.world.level.levelgen.structure.TerrainAdjustment;
+import net.minecraft.world.level.levelgen.structure.placement.RandomSpreadStructurePlacement;
+import net.minecraft.world.level.levelgen.structure.placement.StructurePlacement;
 import net.minecraft.world.level.levelgen.structure.pools.SinglePoolElement;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
@@ -92,6 +95,12 @@ import net.minecraft.world.level.storage.loot.LootTable;
  * to be standing, so this walks out from the world origin until the structure agrees to assemble
  * somewhere. Several such assemblies are compared and the one standing on the flattest ground is
  * kept: a village strung down a mountainside is a picture of the mountain rather than of the village.
+ *
+ * <p>Some structures will not assemble just anywhere whatever biome they are told they are in: an
+ * ocean monument wants open ocean all around it and a woodland mansion wants high enough ground, and
+ * they ask the world generator for that themselves. Where none of the chunks near the origin will
+ * do, the chunks the structure's own placement would actually offer it are tried instead, walking
+ * out from the origin, since those include the places it really does generate.
  */
 public final class StructurePreviewBuilder {
 
@@ -105,6 +114,20 @@ public final class StructurePreviewBuilder {
 	private static final int ATTEMPT_SPACING = 8;
 	/** How many assemblies are compared before the most compact of them is kept. */
 	private static final int COMPARED_ASSEMBLIES = 6;
+	/**
+	 * How many of the regions a structure's own placement divides the world into are tried, walking
+	 * out from the origin, once none of the chunks near the origin would take it. Enough to reach a
+	 * few thousand blocks out for the sparsest structures the game itself places, which is far enough
+	 * to meet an ocean, a hill or whatever else a structure insists on standing in.
+	 */
+	private static final int MAX_PLACEMENT_REGIONS = 400;
+	/**
+	 * How far below the bounds world generation gives a structure its pieces may still build and be
+	 * taken down. Those bounds are worked out before the pieces build, and some then sink themselves
+	 * into the ground and build downwards from there: the desert temple's treasure room reaches
+	 * fourteen blocks below its bounds, and the jungle temple keeps its chests under its floor.
+	 */
+	private static final int BELOW_MARGIN = 16;
 	/**
 	 * How tall an assembly may stand and still be kept without generating the structure again to
 	 * compare it with. Judged against how far it reaches sideways as well as outright, since what this
@@ -171,48 +194,107 @@ public final class StructurePreviewBuilder {
 
 	/**
 	 * Has world generation assemble the structure, and answers with the most compact assembly it got,
-	 * or null when it would not assemble anywhere that was tried.
+	 * or null when it would not assemble anywhere that was tried: first in the chunks around the
+	 * world origin, and only where none of those took it, in the chunks its own placement offers.
+	 */
+	private static StructureStart assemble(ServerLevel level, Structure structure, ResourceLocation structureKey) {
+		final Assembler assembler = new Assembler(level, structure, structureKey);
+		for (int attempt = 0; attempt < MAX_ASSEMBLY_ATTEMPTS && !assembler.isDone(); attempt++) {
+			assembler.tryChunk(chunkForAttempt(attempt));
+		}
+		if (assembler.best == null) {
+			assembleAtPlacements(level, structure, assembler);
+			if (assembler.best != null) {
+				ExplorersCompass.LOGGER.info("Preview of " + structureKey + " was assembled where its own placement would put it, since it would not assemble near the world origin");
+			}
+		}
+
+		if (assembler.best == null) {
+			ExplorersCompass.LOGGER.info("No preview for " + structureKey + ": it did not assemble in any of the " + MAX_ASSEMBLY_ATTEMPTS + " chunks near the world origin, nor in any chunk its placement offers within " + MAX_PLACEMENT_REGIONS + " of its regions");
+		}
+		return assembler.best;
+	}
+
+	/**
+	 * Tries the chunks the structure's own placements would offer it, walking their regions out from
+	 * the origin, until it has assembled as often as is worth comparing. Only a placement that spreads
+	 * a structure over regions says where those chunks are without working out the whole world; the
+	 * strongholds' rings already lie near enough to the origin for the walk there to find them.
+	 */
+	private static void assembleAtPlacements(ServerLevel level, Structure structure, Assembler assembler) {
+		final Holder<Structure> holder = StructureUtils.getHolderForStructure(level, structure);
+		if (holder == null) {
+			return;
+		}
+		final long seed = level.getChunkSource().getGeneratorState().getLevelSeed();
+		for (StructurePlacement placement : level.getChunkSource().getGeneratorState().getPlacementsForStructure(holder)) {
+			if (!(placement instanceof RandomSpreadStructurePlacement spread)) {
+				continue;
+			}
+			for (int region = 0; region < MAX_PLACEMENT_REGIONS && !assembler.isDone(); region++) {
+				final ChunkPos regionPos = spiralStep(region);
+				// The chunk a region offers is worked out from the region alone, so asking about any chunk
+				// in it answers for the whole region
+				assembler.tryChunk(spread.getPotentialStructureChunk(seed, regionPos.x * spread.spacing(), regionPos.z * spread.spacing()));
+			}
+			if (assembler.isDone()) {
+				return;
+			}
+		}
+	}
+
+	/**
+	 * Has world generation assemble a structure in one chunk after another and keeps the most compact
+	 * of what it gets.
 	 *
 	 * <p>Every biome counts as one the structure may stand in. What biomes are for is deciding where
 	 * a structure generates, which a preview is not asking; leaving them out is what lets a structure
 	 * be previewed from a dimension it could never generate in.
 	 */
-	private static StructureStart assemble(ServerLevel level, Structure structure, ResourceLocation structureKey) {
-		final ChunkGenerator generator = level.getChunkSource().getGenerator();
-		final RandomState randomState = level.getChunkSource().randomState();
-		final StructureTemplateManager templateManager = level.getServer().getStructureManager();
+	private static final class Assembler {
 
-		StructureStart best = null;
-		int assembled = 0;
-		for (int attempt = 0; attempt < MAX_ASSEMBLY_ATTEMPTS && assembled < COMPARED_ASSEMBLIES; attempt++) {
-			final ChunkPos chunkPos = chunkForAttempt(attempt);
+		private final ServerLevel level;
+		private final Structure structure;
+		private final ResourceLocation structureKey;
+		private final ChunkGenerator generator;
+		private final RandomState randomState;
+		private final StructureTemplateManager templateManager;
+		private StructureStart best;
+		private int assembled;
+
+		private Assembler(ServerLevel level, Structure structure, ResourceLocation structureKey) {
+			this.level = level;
+			this.structure = structure;
+			this.structureKey = structureKey;
+			generator = level.getChunkSource().getGenerator();
+			randomState = level.getChunkSource().randomState();
+			templateManager = level.getServer().getStructureManager();
+		}
+
+		/** Whether enough has been assembled, or what was assembled stands on ground level enough to keep outright. */
+		private boolean isDone() {
+			// Anything flat enough is standing on level ground, and no other assembly can improve on it
+			// enough to be worth generating the whole structure again for
+			return assembled >= COMPARED_ASSEMBLIES || (best != null && isFlatEnough(best.getBoundingBox()));
+		}
+
+		private void tryChunk(ChunkPos chunkPos) {
 			final StructureStart start;
 			try {
 				start = structure.generate(level.registryAccess(), generator, generator.getBiomeSource(), randomState, templateManager, level.getSeed(), chunkPos, 0, level, (biome) -> true);
 			} catch (Throwable t) {
 				ExplorersCompass.LOGGER.debug("Could not assemble " + structureKey + " in chunk " + chunkPos + " for a preview", t);
-				continue;
+				return;
 			}
-
 			if (!start.isValid() || start.getPieces().isEmpty()) {
-				continue;
+				return;
 			}
-
 			assembled++;
 			if (best == null || start.getBoundingBox().getYSpan() < best.getBoundingBox().getYSpan()) {
 				best = start;
 			}
-			// Anything this flat is standing on level ground, and no other assembly can improve on it
-			// enough to be worth generating the whole structure again for
-			if (isFlatEnough(best.getBoundingBox())) {
-				return best;
-			}
 		}
 
-		if (best == null) {
-			ExplorersCompass.LOGGER.info("No preview for " + structureKey + ": it did not assemble in any of the " + MAX_ASSEMBLY_ATTEMPTS + " chunks that were tried");
-		}
-		return best;
 	}
 
 	/**
@@ -242,11 +324,17 @@ public final class StructurePreviewBuilder {
 
 	/** Walks a square spiral out from the world origin, a chunk of it per attempt. */
 	private static ChunkPos chunkForAttempt(int attempt) {
+		final ChunkPos step = spiralStep(attempt);
+		return new ChunkPos(step.x * ATTEMPT_SPACING, step.z * ATTEMPT_SPACING);
+	}
+
+	/** The given step of a square spiral walked out from nought, as a pair of coordinates. */
+	private static ChunkPos spiralStep(int index) {
 		int x = 0;
 		int z = 0;
 		int stepX = 0;
 		int stepZ = -1;
-		for (int i = 0; i < attempt; i++) {
+		for (int i = 0; i < index; i++) {
 			if (x == z || (x < 0 && x == -z) || (x > 0 && x == 1 - z)) {
 				final int turned = stepX;
 				stepX = -stepZ;
@@ -255,7 +343,7 @@ public final class StructurePreviewBuilder {
 			x += stepX;
 			z += stepZ;
 		}
-		return new ChunkPos(x * ATTEMPT_SPACING, z * ATTEMPT_SPACING);
+		return new ChunkPos(x, z);
 	}
 
 	/**
@@ -264,9 +352,11 @@ public final class StructurePreviewBuilder {
 	 * getting them is what the whole of this costs.
 	 */
 	private static StructurePreview draw(ServerLevel level, StructureStart start, boolean buried) {
-		final BoundingBox bounds = start.getBoundingBox();
 		final List<StructurePiece> pieces = start.getPieces();
-		final Assembly assembly = collect(level, start, bounds, buried);
+		final Assembly assembly = collect(level, start, start.getBoundingBox(), buried);
+		// Laid out over what was actually got out of the pieces rather than over the bounds they were
+		// given, which some of them build past and most of them leave room to spare in
+		final BoundingBox bounds = assembly.extent();
 		final int resolution = Mth.clamp(ConfigHandler.GENERAL.structurePreviewResolution.get(), 8, StructurePreview.MAX_GRID);
 		final int maxCells = ConfigHandler.GENERAL.structurePreviewMaxBlocks.get();
 
@@ -288,12 +378,14 @@ public final class StructurePreviewBuilder {
 	/** Every block of every piece, and the pieces nothing at all could be got out of. */
 	private static Assembly collect(ServerLevel level, StructureStart start, BoundingBox bounds, boolean buried) {
 		final StructureTemplateManager templateManager = level.getServer().getStructureManager();
-		final RecordingLevel recordingLevel = new RecordingLevel(level, bounds, MAX_SOURCE_BLOCKS, level.getSeed(), buried);
+		final BoundingBox limit = new BoundingBox(bounds.minX(), Math.max(level.getMinBuildHeight(), bounds.minY() - BELOW_MARGIN), bounds.minZ(), bounds.maxX(), bounds.maxY(), bounds.maxZ());
+		final RecordingLevel recordingLevel = new RecordingLevel(level, bounds, limit, MAX_SOURCE_BLOCKS, level.getSeed(), buried);
 		final BoundingBox buildableSpace = buildableSpace(level, bounds);
 		final List<StructurePiece> procedural = new ArrayList<StructurePiece>();
 		final List<StructurePiece> outlined = new ArrayList<StructurePiece>();
 
 		for (StructurePiece piece : start.getPieces()) {
+			recordingLevel.beginPiece();
 			if (!collectTemplate(level, templateManager, piece, recordingLevel, buildableSpace)) {
 				procedural.add(piece);
 			}
@@ -303,7 +395,45 @@ public final class StructurePreviewBuilder {
 			buildProcedural(level, start, buildableSpace, procedural, recordingLevel, outlined);
 		}
 
-		return new Assembly(recordingLevel.getRecorded(), outlined, recordingLevel.isFull(), collectLoot(level, recordingLevel));
+		final List<LootCapture> loot = collectLoot(level, recordingLevel);
+		return new Assembly(recordingLevel.getRecorded(), outlined, recordingLevel.isFull(), loot, extentOf(recordingLevel.getRecorded(), outlined, loot, bounds));
+	}
+
+	/**
+	 * The box around everything that will be drawn: every block the shell or a renderer of its own
+	 * draws, every piece that is outlined, and every container that is marked. The bounds the
+	 * structure was given stand in where nothing at all came out of it.
+	 */
+	private static BoundingBox extentOf(Long2IntOpenHashMap blocks, List<StructurePiece> outlined, List<LootCapture> loot, BoundingBox fallback) {
+		final int[] extent = { Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MIN_VALUE, Integer.MIN_VALUE, Integer.MIN_VALUE };
+		for (Long2IntMap.Entry entry : blocks.long2IntEntrySet()) {
+			final BlockState state = Block.stateById(entry.getIntValue());
+			if (isDrawable(state) || isComponent(state)) {
+				final long packed = entry.getLongKey();
+				include(extent, BlockPos.getX(packed), BlockPos.getY(packed), BlockPos.getZ(packed));
+			}
+		}
+		for (StructurePiece piece : outlined) {
+			final BoundingBox box = piece.getBoundingBox();
+			include(extent, box.minX(), box.minY(), box.minZ());
+			include(extent, box.maxX(), box.maxY(), box.maxZ());
+		}
+		for (LootCapture capture : loot) {
+			include(extent, BlockPos.getX(capture.packedPos()), BlockPos.getY(capture.packedPos()), BlockPos.getZ(capture.packedPos()));
+		}
+		if (extent[0] > extent[3]) {
+			return fallback;
+		}
+		return new BoundingBox(extent[0], extent[1], extent[2], extent[3], extent[4], extent[5]);
+	}
+
+	private static void include(int[] extent, int x, int y, int z) {
+		extent[0] = Math.min(extent[0], x);
+		extent[1] = Math.min(extent[1], y);
+		extent[2] = Math.min(extent[2], z);
+		extent[3] = Math.max(extent[3], x);
+		extent[4] = Math.max(extent[4], y);
+		extent[5] = Math.max(extent[5], z);
 	}
 
 	/**
@@ -446,6 +576,7 @@ public final class StructurePreviewBuilder {
 		for (StructurePiece piece : pieces) {
 			final BoundingBox box = piece.getBoundingBox();
 			final int before = recordingLevel.getRecordedCount();
+			recordingLevel.beginPiece();
 			try {
 				// Seeded off the piece rather than off nothing, so that a preview of the same structure
 				// comes out the same way every time it is built
@@ -635,8 +766,11 @@ public final class StructurePreviewBuilder {
 		return Math.max(1, (value + divisor - 1) / divisor);
 	}
 
-	/** Everything got out of an assembled structure, ready to be thrown onto a grid of any coarseness. */
-	private record Assembly(Long2IntOpenHashMap blocks, List<StructurePiece> outlined, boolean truncated, List<LootCapture> loot) {
+	/**
+	 * Everything got out of an assembled structure, ready to be thrown onto a grid of any coarseness,
+	 * and the box all of it stands in.
+	 */
+	private record Assembly(Long2IntOpenHashMap blocks, List<StructurePiece> outlined, boolean truncated, List<LootCapture> loot, BoundingBox extent) {
 	}
 
 	/**

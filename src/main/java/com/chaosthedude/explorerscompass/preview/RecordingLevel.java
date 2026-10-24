@@ -33,6 +33,7 @@ import net.minecraft.world.level.biome.BiomeManager;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.EntityBlock;
+import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
@@ -80,9 +81,13 @@ import net.minecraft.world.ticks.LevelTickAccess;
  * with none of its chests.
  *
  * <p>Within a piece the last block to reach a position is the one that stands there, as it is in
- * the world, but only where what stood there before was air: a piece carves a room and then puts a
- * chest down in it, and the chest has to replace the air it carved first. A block placed where an
- * earlier piece already put one is dropped, so that a later piece cannot build over an earlier one.
+ * the world. Pieces lay themselves out in layers: the desert temple lays a solid foundation and then
+ * carves its treasure room out of it and puts its chests in, and the ocean monument floods its whole
+ * box with water and then builds its walls through it. Each later write has to win over the earlier
+ * one, or the room is never carved, the chests never stand anywhere and the monument is nothing but
+ * water. Across pieces it is the other way round: a block placed where an earlier piece already put
+ * one is dropped, so that a later piece cannot build over an earlier one, unless what stands there is
+ * only air or water, which is nothing to win with.
  *
  * <p>The one thing that does reach the real level is {@link #getLevel}, which has to answer with a
  * server level because its type says so. Structure pieces are handed this interface and build
@@ -108,10 +113,22 @@ class RecordingLevel implements WorldGenLevel {
 	 * piece spawns is kept.
 	 */
 	private final List<ContainerEntity> containerEntities = new ArrayList<ContainerEntity>();
-	/** Blocks outside this are dropped, so that a piece reaching out of the structure cannot grow it. */
+	/** Which piece took each position down, packed position to the number {@link #beginPiece} gave it. */
+	private final Long2IntOpenHashMap owners = new Long2IntOpenHashMap();
+	/** The piece whose blocks are being taken down now; 0 before any piece has begun. */
+	private int currentPiece;
+	/**
+	 * Blocks outside this are dropped, so that a piece reaching out of the structure cannot grow it
+	 * without end. It runs some way below the structure's own bounds, since the bounds world generation
+	 * gives a structure are worked out before its pieces build, and some pieces then sink themselves
+	 * into the ground they find and build down from there: the desert temple's treasure room and the
+	 * jungle temple's chests both stand below the bounds the temple was given.
+	 */
 	private final BoundingBox limit;
 	/** Where the structure begins; everything under it reads as ground rather than as open air. */
 	private final int groundY;
+	/** Where the structure ends at the top, which is the surface for one that is buried. */
+	private final int topY;
 	/** Whether the structure generates underground, so that everything inside its bounds reads as ground too. */
 	private final boolean buried;
 	private final int maxBlocks;
@@ -125,16 +142,36 @@ class RecordingLevel implements WorldGenLevel {
 	}
 
 	RecordingLevel(ServerLevel level, BoundingBox limit, int maxBlocks, long seed, boolean buried) {
+		this(level, limit, limit, maxBlocks, seed, buried);
+	}
+
+	/**
+	 * @param structureBounds the bounds world generation gave the structure, which say where the
+	 *                        ground is: under them for a structure that stands on it, and all through
+	 *                        them for one that is buried
+	 * @param limit           the space blocks are taken down in, which may reach past those bounds
+	 */
+	RecordingLevel(ServerLevel level, BoundingBox structureBounds, BoundingBox limit, int maxBlocks, long seed, boolean buried) {
 		this.level = level;
 		this.limit = limit;
 		this.maxBlocks = maxBlocks;
 		this.buried = buried;
-		groundY = limit.minY();
+		groundY = structureBounds.minY();
+		topY = structureBounds.maxY();
 		random = RandomSource.create(seed);
 		// Routed back through this level, so that asking which biome is somewhere is answered from the
 		// generator's noise rather than from a chunk that would have to be generated to answer
 		biomeManager = level.getBiomeManager().withDifferentSource(this);
 		recorded.defaultReturnValue(-1);
+		owners.defaultReturnValue(-1);
+	}
+
+	/**
+	 * Starts taking down the blocks of the next piece. A piece builds over what it laid itself, and
+	 * not over what an earlier piece laid.
+	 */
+	void beginPiece() {
+		currentPiece++;
 	}
 
 	/** Takes a block down. Answers whether there is still room for more. */
@@ -153,14 +190,19 @@ class RecordingLevel implements WorldGenLevel {
 		final long key = pos.asLong();
 		final int existing = recorded.get(key);
 		if (existing >= 0) {
-			// The first block to reach a position wins, the way an earlier piece is not overwritten by a
-			// later one standing in the same space — unless what stands there is air, which is nothing
-			// to win with. A piece carves its room before it furnishes it, and the chest it then puts
-			// down has to replace the air it carved. Replacing grows nothing, so the budget is not asked.
-			if (!state.isAir() && Block.stateById(existing).isAir()) {
-				final BlockPos stored = pos.immutable();
-				recorded.put(key, Block.getId(state));
-				rememberBlockEntity(stored, state, nbt);
+			final int stateId = Block.getId(state);
+			// A piece's own later write stands, as it would in the world; another piece's only where it
+			// lands on air or water. Replacing grows nothing, so the budget is not asked.
+			final boolean replace = owners.get(key) == currentPiece
+					? stateId != existing
+					: !isFiller(state) && isFiller(Block.stateById(existing));
+			if (replace) {
+				recorded.put(key, stateId);
+				owners.put(key, currentPiece);
+				// Whatever stood there before goes with its block entity, so that a chest carved away
+				// leaves no loot behind and a chest put down in its place gets one of its own
+				blockEntities.remove(key);
+				rememberBlockEntity(pos.immutable(), state, nbt);
 			}
 			return true;
 		}
@@ -171,8 +213,18 @@ class RecordingLevel implements WorldGenLevel {
 		// The position is copied: pieces reuse a mutable one
 		final BlockPos stored = pos.immutable();
 		recorded.put(key, Block.getId(state));
+		owners.put(key, currentPiece);
 		rememberBlockEntity(stored, state, nbt);
 		return true;
+	}
+
+	/**
+	 * Whether a block only fills space rather than building anything: air, and a fluid with nothing
+	 * else in it. A piece floods or carves its box before it builds in it, and another piece's walls
+	 * standing in that space are not to be lost to it.
+	 */
+	private static boolean isFiller(BlockState state) {
+		return state.isAir() || state.getBlock() instanceof LiquidBlock;
 	}
 
 	/**
@@ -273,7 +325,7 @@ class RecordingLevel implements WorldGenLevel {
 	 * structure does, and everything inside it too when the structure generates underground.
 	 */
 	private boolean isGroundAt(int y) {
-		return y < groundY || (buried && y <= limit.maxY());
+		return y < groundY || (buried && y <= topY);
 	}
 
 	/**
@@ -282,7 +334,7 @@ class RecordingLevel implements WorldGenLevel {
 	 * piece asking whether it is below ground is answered that it is.
 	 */
 	private int surfaceY() {
-		return buried ? limit.maxY() : groundY;
+		return buried ? topY : groundY;
 	}
 
 	@Override

@@ -33,7 +33,7 @@ public record ClearCachePacket() implements CustomPacketPayload {
 
 		final ItemStack stack = ItemUtils.getHeldItem(player, ExplorersCompass.explorersCompass);
 		if (!stack.isEmpty()) {
-			((ExplorersCompassItem) stack.getItem()).clearPrevPos(stack);
+			((ExplorersCompassItem) stack.getItem()).clearCollected(player, stack);
 		}
 	}
 

@@ -204,8 +204,10 @@ public class SearchWorkerManager implements SearchScheduler.SearchSlice {
 	@Override
 	public boolean doWork() {
 		if (!context.holdsCompass()) {
-			// There is nowhere left to report to, so there is nothing this search could still be for
-			ExplorersCompass.LOGGER.error("Search " + context.getId() + ": the compass it was started on is gone");
+			// There is nowhere left to report to, so there is nothing this search could still be for. A
+			// compass that went somewhere the search cannot follow is still marked as searching, and is
+			// taken back to idle once it is in a player's inventory again.
+			ExplorersCompass.LOGGER.info("Search " + context.getId() + ": the compass it was started on is no longer held, or no longer searching, so the search stops");
 			stop();
 			clear();
 			return false;
@@ -378,10 +380,25 @@ public class SearchWorkerManager implements SearchScheduler.SearchSlice {
 		return (radius / RADIUS_REPORT_INTERVAL) * RADIUS_REPORT_INTERVAL;
 	}
 
+	/**
+	 * Stops the search running, and tells its compass so: a search stopped partway through has no
+	 * answer of its own to write, and without this the compass would go on reading as searching for a
+	 * search that is not running any more. Nothing is written once a search has ended, since what it
+	 * ended on is already on the compass.
+	 */
 	public void stop() {
+		if (workers.isEmpty()) {
+			return;
+		}
 		for (SearchWorker worker : workers) {
 			worker.stop();
 		}
+		context.reportStopped();
+	}
+
+	/** The search running, or null when none is. */
+	public SearchContext getRunningSearch() {
+		return workers.isEmpty() ? null : context;
 	}
 
 	public void clear() {

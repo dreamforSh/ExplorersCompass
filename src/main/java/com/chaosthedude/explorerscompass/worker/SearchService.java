@@ -27,7 +27,11 @@ public class SearchService {
 
 	/** The worker manager running the given player's searches. */
 	public static SearchWorkerManager getWorkerManager(Player player) {
-		return workerManagers.computeIfAbsent(player.getUUID(), (uuid) -> new SearchWorkerManager());
+		return getWorkerManager(player.getUUID());
+	}
+
+	static SearchWorkerManager getWorkerManager(UUID playerId) {
+		return workerManagers.computeIfAbsent(playerId, (uuid) -> new SearchWorkerManager());
 	}
 
 	/**
@@ -52,6 +56,16 @@ public class SearchService {
 	 */
 	public static void recordSearchStart(Player player) {
 		lastSearchStartTimes.put(player.getUUID(), Long.valueOf(System.currentTimeMillis()));
+	}
+
+	/**
+	 * The given player's search with the given id, or null when that search is not running — because it
+	 * has ended, was stopped, or belonged to a server that has since stopped.
+	 */
+	public static SearchContext getRunningSearch(UUID playerId, String searchId) {
+		final SearchWorkerManager workerManager = workerManagers.get(playerId);
+		final SearchContext running = workerManager != null ? workerManager.getRunningSearch() : null;
+		return running != null && running.getId().equals(searchId) ? running : null;
 	}
 
 	/** Stops whatever the given player has running, and forgets the workers it was made of. */

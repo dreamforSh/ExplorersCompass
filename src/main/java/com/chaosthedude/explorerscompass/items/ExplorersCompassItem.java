@@ -39,6 +39,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.InteractionResultHolder;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -255,9 +256,75 @@ public class ExplorersCompassItem extends Item {
 		// coordinates behind would hand them to whoever asks next. The remembered bookmarks are the
 		// one thing that is not the cancelled search's to take.
 		ItemUtils.setData(stack, CompassData.EMPTY);
+		ItemUtils.clearSearchId(stack);
 		CustomModelDataConfig.remove(stack);
 		ItemUtils.setTargetKeys(stack, List.of());
 		clearPrevPos(stack);
+	}
+
+	/**
+	 * Takes a compass whose search was stopped before it had an answer back to idle. Everything else
+	 * on it is left as it was: a stopped search has nothing of its own to say about where the compass
+	 * points, and the bookmarks and collected locations are not its to take.
+	 */
+	public void interrupt(ItemStack stack) {
+		ItemUtils.updateData(stack, data -> data.withState(CompassState.INACTIVE));
+		ItemUtils.clearSearchId(stack);
+	}
+
+	/**
+	 * Stops the search running on this compass, if one is, so that what the player is about to do to it
+	 * is not undone once the search answers. A search the player has running on another compass is
+	 * left alone.
+	 */
+	public void stopSearchOn(Player player, ItemStack stack) {
+		final String searchId = ItemUtils.getSearchId(stack);
+		if (searchId != null && SearchService.getRunningSearch(player.getUUID(), searchId) != null) {
+			SearchService.stopSearch(player);
+		}
+	}
+
+	/**
+	 * Forgets the locations this compass has collected. A search running on it is told to forget them
+	 * as well: it adds what it settles on to the list it started with, and would otherwise write the
+	 * whole of it back once it answers.
+	 */
+	public void clearCollected(Player player, ItemStack stack) {
+		clearPrevPos(stack);
+		final String searchId = ItemUtils.getSearchId(stack);
+		final SearchContext running = searchId != null ? SearchService.getRunningSearch(player.getUUID(), searchId) : null;
+		if (running != null) {
+			running.forgetCollected();
+		}
+	}
+
+	/**
+	 * Takes a compass back to idle when it reads as searching while no search is running on it, which
+	 * is how one is left once its search could no longer reach it to say how it ended: it was dropped,
+	 * put away, or held by a player who left, or the server stopped with it mid-search. The search id
+	 * the compass carries is what says which search it was, and none survives a restart.
+	 *
+	 * @return whether the compass was taken back to idle
+	 */
+	public boolean recoverOrphanedSearch(ItemStack stack, UUID holderId) {
+		if (getState(stack) != CompassState.SEARCHING) {
+			return false;
+		}
+		final String searchId = ItemUtils.getSearchId(stack);
+		if (searchId != null && SearchService.getRunningSearch(holderId, searchId) != null) {
+			return false;
+		}
+		ExplorersCompass.LOGGER.info("Taking a compass back to idle: it reads as searching, but " + (searchId != null ? "search " + searchId + " is not running any more" : "no search is running on it"));
+		interrupt(stack);
+		return true;
+	}
+
+	/** Only the server knows which searches are running, so only the server recovers a compass. */
+	@Override
+	public void inventoryTick(ItemStack stack, Level level, Entity entity, int slotId, boolean isSelected) {
+		if (!level.isClientSide() && entity instanceof Player player) {
+			recoverOrphanedSearch(stack, player.getUUID());
+		}
 	}
 
 	private void search(ServerLevel level, Player player, SearchTarget searchTarget, List<ResourceLocation> keys, ResourceLocation displayKey, boolean isGroup, BlockPos pos, ItemStack stack, List<BlockPos> prevPos, boolean ignoreNearStart) {
@@ -300,13 +367,17 @@ public class ExplorersCompassItem extends Item {
 			}
 		}
 
+		// A player runs one search at a time, so whatever was running is stopped before this compass is
+		// marked as searching: stopping it takes the compass it was running on back to idle, and when
+		// that is this very compass, doing so afterwards would undo what is written here
+		SearchService.stopSearch(player);
+
 		setSearching(stack, searchTarget, displayKey, player);
 		setTargetCount(stack, isGroup ? 1 : validKeys.size());
 		setTargetKeys(stack, isGroup ? List.<ResourceLocation>of() : validKeys);
 		setSearchRadius(stack, 0, player);
 
 		final SearchWorkerManager workerManager = SearchService.getWorkerManager(player);
-		workerManager.stop();
 		if (validKeys.isEmpty()) {
 			// Reported the same way a search that ran and turned up nothing is, so that the compass, the
 			// remaining workers and the player are all left in the state every other ending leaves them
@@ -315,6 +386,7 @@ public class ExplorersCompassItem extends Item {
 		}
 
 		final SearchContext context = new SearchContext(level, player, stack, pos, prevPos, isGroup, ignoreNearStart);
+		ItemUtils.setSearchId(stack, context.getId());
 		if (searchTarget == SearchTarget.BIOME) {
 			workerManager.createBiomeWorkers(context, biomes);
 		} else {
@@ -363,6 +435,7 @@ public class ExplorersCompassItem extends Item {
 		CustomModelDataConfig.apply(stack, targetKey);
 		setPrevPos(stack, prevPos);
 		addBookmark(stack, new BookmarkEntry(searchTarget, targetKey, x, y, z, dimensionKey));
+		ItemUtils.clearSearchId(stack);
 		SearchService.getWorkerManager(player).clear();
 
 		final String name = searchTarget.getBasicName(targetKey);
@@ -373,6 +446,7 @@ public class ExplorersCompassItem extends Item {
 	/** Reports that the search is over and located nothing. */
 	public void fail(Player player, ItemStack stack, int radius, int samples) {
 		setNotFound(stack, radius, samples);
+		ItemUtils.clearSearchId(stack);
 		SearchService.getWorkerManager(player).clear();
 		notifySearchResult(player, Component.translatable("string.explorerscompass.notFound").append(Component.literal(": " + getSearchTarget(stack).getBasicName(getTargetKey(stack)))));
 	}
@@ -491,6 +565,9 @@ public class ExplorersCompassItem extends Item {
 	 * answering with the one being pointed at.
 	 */
 	public void pointAt(ItemStack stack, SearchTarget searchTarget, ResourceLocation targetKey, int x, int y, int z, ResourceLocation dimensionKey) {
+		// Whatever search was running on the compass no longer has the say over where it points. Taking
+		// its id off is what keeps the search from writing onto it, should it still be running.
+		ItemUtils.clearSearchId(stack);
 		ItemUtils.updateData(stack, data -> data
 				.withSearchTarget(searchTarget)
 				.found(targetKey, x, z, y, dimensionKey, 0)

@@ -60,6 +60,8 @@ public record PointAtPacket(SearchTarget searchTarget, ResourceLocation targetKe
 		}
 
 		final ExplorersCompassItem explorersCompass = (ExplorersCompassItem) stack.getItem();
+		// A search still running on the compass would otherwise overwrite this once it answers
+		explorersCompass.stopSearchOn(player, stack);
 		explorersCompass.pointAt(stack, packet.searchTarget(), packet.targetKey(), packet.x(), packet.y(), packet.z(), packet.dimension().orElse(null));
 	}
 

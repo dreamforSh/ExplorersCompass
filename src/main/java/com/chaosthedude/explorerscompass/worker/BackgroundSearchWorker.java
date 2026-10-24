@@ -66,8 +66,27 @@ public abstract class BackgroundSearchWorker extends SearchWorker {
 		}
 
 		background = true;
-		// Set before anything can finish, so that the piece that finishes first cannot count out of a
-		// total that has not been decided yet
+		launch(tasks);
+	}
+
+	/**
+	 * Sets the search going on its threads again, once the server thread has acted on what the last
+	 * run turned up and found that it needs more. Only ever called on the server thread, and only once
+	 * the last run is over, so nothing is still counting out of the total this replaces.
+	 */
+	protected void relaunch(List<Runnable> tasks) {
+		if (tasks.isEmpty()) {
+			// Nothing would ever count out, and the server thread would wait on it for good
+			return;
+		}
+
+		launch(tasks);
+	}
+
+	private void launch(List<Runnable> tasks) {
+		// Both set before anything can finish, so that the piece that finishes first cannot count out
+		// of a total that has not been decided yet, nor have what it publishes taken back afterwards
+		backgroundDone = false;
 		stillRunning = new AtomicInteger(tasks.size());
 		for (Runnable task : tasks) {
 			try {

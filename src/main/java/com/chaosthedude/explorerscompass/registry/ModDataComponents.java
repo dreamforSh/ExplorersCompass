@@ -75,6 +75,21 @@ public class ModDataComponents {
 					.networkSynchronized(immutableList(BookmarkEntry.STREAM_CODEC, MAX_STREAMED_BOOKMARKS)));
 
 	/**
+	 * Which search is running on this compass, for as long as one is. A search ends in a state of its
+	 * own written onto the compass, but the compass can be out of its reach by then — dropped, put
+	 * away, or swapped for a copy of itself — and a compass still marked as searching with no search
+	 * behind it would read that way for good. This is what tells the two apart: a compass marked as
+	 * searching whose search is not running any more is taken back to idle.
+	 *
+	 * <p>Not saved with the world, since no search outlives the server it ran on, but synced: a client
+	 * in creative mode hands the server its own copy of a stack whenever it is moved, and that copy is
+	 * what the search has to find again.
+	 */
+	public static final DeferredHolder<DataComponentType<?>, DataComponentType<String>> SEARCH_ID = COMPONENTS.registerComponentType("search_id",
+			builder -> builder
+					.networkSynchronized(ByteBufCodecs.STRING_UTF8));
+
+	/**
 	 * A bounded list codec whose decoded value is immutable, so that a component read off the network
 	 * is the same kind of value as one written here - the contents of a component may not be changed
 	 * in place, and an {@code ArrayList} invites exactly that.

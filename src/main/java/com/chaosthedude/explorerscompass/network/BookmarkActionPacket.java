@@ -62,6 +62,9 @@ public record BookmarkActionPacket(Action action, int index) implements CustomPa
 		// The index arrives over the network, so every one of these bounds-checks it
 		final ExplorersCompassItem explorersCompass = (ExplorersCompassItem) stack.getItem();
 		if (packet.action() == Action.SELECT) {
+			// Pointing the compass at a bookmark is the player choosing where it points, which a search
+			// still running on it would otherwise overwrite once it answers
+			explorersCompass.stopSearchOn(player, stack);
 			explorersCompass.selectBookmark(stack, packet.index());
 		} else if (packet.action() == Action.REMOVE) {
 			explorersCompass.removeBookmark(stack, packet.index());
