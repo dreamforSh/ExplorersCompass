@@ -108,6 +108,7 @@ dependencies {
     localRuntime "curse.maven:xaeros-minimap-263420:${xaero_minimap_file_id}"
     localRuntime "curse.maven:xaeros-world-map-317780:${xaero_worldmap_file_id}"
     localRuntime "curse.maven:modern-ui-352491:8206075"
+    implementation "curse.maven:the-twilight-forest-227639:7797302"
     // Just Enough Characters rewrites String.contains inside
     // ExplorersCompassScreen.processSearchTerm, so pinyin search works when it is
     // installed. Nothing here is compiled against. They are only present so a
