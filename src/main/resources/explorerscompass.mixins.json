@@ -20,6 +20,7 @@
     "SetItemCountFunctionAccessor",
     "SetPotionFunctionAccessor",
     "SinglePoolElementTemplateAccessor",
+    "StructurePieceFoundationMixin",
     "StructureTemplatePalettesAccessor",
     "TagEntryAccessor",
     "TemplateStructurePieceInvoker"

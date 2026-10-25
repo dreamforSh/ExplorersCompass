@@ -250,6 +250,50 @@ class StructurePreviewTest {
 	}
 
 	@Test
+	void theUndersidesOfCellsOnAFoundationArriveWithTheShell() {
+		// The patterned floor of the desert temple's cellar is sandstone from below, so which cells are
+		// drawn on another underside, and which block it is, have to arrive with the cells themselves
+		final int[] positions = { StructurePreview.pack(0, 0, 0), StructurePreview.pack(1, 0, 0), StructurePreview.pack(2, 0, 0), StructurePreview.pack(1, 1, 0) };
+		final StructurePreview sent = new StructurePreview(4, 4, 4, 1, 4, 4, 4, 1, 0, false,
+				new int[] { 7, 9 }, positions, new int[positions.length],
+				new int[0], new int[0], new int[0], new int[0], new int[0],
+				new String[0], new LootTableItems.Drops[0], new int[0], new int[0], new int[0], new int[] { 0, 2 }, new int[] { 1, 1 });
+
+		final FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
+		sent.write(buf);
+		final StructurePreview received = StructurePreview.read(buf);
+
+		assertEquals(0, buf.readableBytes(), "the preview was not read back to the end of what it wrote");
+		assertEquals(1, received.getCellUndersidePaletteIndex(0));
+		assertEquals(-1, received.getCellUndersidePaletteIndex(1), "a cell between two on a foundation came back on one");
+		assertEquals(1, received.getCellUndersidePaletteIndex(2));
+		assertEquals(-1, received.getCellUndersidePaletteIndex(3), "a cell standing on another came back on a foundation");
+	}
+
+	@Test
+	void anUndersidePastTheShellIsRefused() {
+		// Naming a cell the preview does not carry is a malformed packet rather than an underside
+		final StructurePreview sent = new StructurePreview(4, 4, 4, 1, 4, 4, 4, 1, 0, false,
+				new int[] { 7 }, new int[] { StructurePreview.pack(0, 0, 0) }, new int[] { 0 },
+				new int[0], new int[0], new int[0], new int[0], new int[0],
+				new String[0], new LootTableItems.Drops[0], new int[0], new int[0], new int[0], new int[] { 5 }, new int[] { 0 });
+		final FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
+		sent.write(buf);
+		assertThrows(DecoderException.class, () -> StructurePreview.read(buf));
+	}
+
+	@Test
+	void anUndersideNamingNoBlockIsRefused() {
+		final StructurePreview sent = new StructurePreview(4, 4, 4, 1, 4, 4, 4, 1, 0, false,
+				new int[] { 7 }, new int[] { StructurePreview.pack(0, 0, 0) }, new int[] { 0 },
+				new int[0], new int[0], new int[0], new int[0], new int[0],
+				new String[0], new LootTableItems.Drops[0], new int[0], new int[0], new int[0], new int[] { 0 }, new int[] { 3 });
+		final FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
+		sent.write(buf);
+		assertThrows(DecoderException.class, () -> StructurePreview.read(buf));
+	}
+
+	@Test
 	void aStructureThatFitsTheGridIsShownBlockForBlock() {
 		// Nothing is worth shrinking until it is larger than the grid it has to fit on
 		assertEquals(1, StructurePreviewBuilder.stepFor(7, 5, 8, 48));

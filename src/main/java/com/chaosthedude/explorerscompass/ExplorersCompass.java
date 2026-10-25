@@ -8,6 +8,7 @@ import java.util.Map;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import com.chaosthedude.explorerscompass.compat.twilightforest.TwilightForestCompat;
 import com.chaosthedude.explorerscompass.config.ConfigHandler;
 import com.chaosthedude.explorerscompass.config.CustomModelDataConfig;
 import com.chaosthedude.explorerscompass.config.StructureGroupsConfig;
@@ -31,6 +32,7 @@ import com.google.common.collect.ListMultimap;
 import net.minecraft.resources.ResourceLocation;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
+import net.neoforged.fml.ModList;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
@@ -47,7 +49,7 @@ public class ExplorersCompass {
 	 * is then refused during the handshake with a clear message, instead of connecting and failing
 	 * to decode later.
 	 */
-	public static final String PROTOCOL_VERSION = "3.0";
+	public static final String PROTOCOL_VERSION = "3.1";
 
 	public static final Logger LOGGER = LogManager.getLogger(MODID);
 
@@ -79,6 +81,11 @@ public class ExplorersCompass {
 
 		modContainer.registerConfig(ModConfig.Type.COMMON, ConfigHandler.GENERAL_SPEC);
 		modContainer.registerConfig(ModConfig.Type.CLIENT, ConfigHandler.CLIENT_SPEC);
+
+		// Each compatibility is set up only when the mod it is for is loaded
+		if (ModList.get().isLoaded(TwilightForestCompat.MOD_ID)) {
+			TwilightForestCompat.init();
+		}
 	}
 
 	private void commonSetup(FMLCommonSetupEvent event) {

@@ -372,7 +372,7 @@ public final class StructurePreviewBuilder {
 			step++;
 		}
 
-		return grid.toPreview(bounds, pieces.size(), assembly.outlined.size(), assembly.truncated, maxCells);
+		return grid.toPreview(bounds, pieces.size(), assembly.outlined.size(), assembly.truncated, maxCells, assembly.foundations);
 	}
 
 	/** Every block of every piece, and the pieces nothing at all could be got out of. */
@@ -385,7 +385,7 @@ public final class StructurePreviewBuilder {
 		final List<StructurePiece> outlined = new ArrayList<StructurePiece>();
 
 		for (StructurePiece piece : start.getPieces()) {
-			recordingLevel.beginPiece();
+			recordingLevel.beginPiece(PreviewCompat.isLayered(piece));
 			if (!collectTemplate(level, templateManager, piece, recordingLevel, buildableSpace)) {
 				procedural.add(piece);
 			}
@@ -396,7 +396,7 @@ public final class StructurePreviewBuilder {
 		}
 
 		final List<LootCapture> loot = collectLoot(level, recordingLevel);
-		return new Assembly(recordingLevel.getRecorded(), outlined, recordingLevel.isFull(), loot, extentOf(recordingLevel.getRecorded(), outlined, loot, bounds));
+		return new Assembly(recordingLevel.getRecorded(), outlined, recordingLevel.isFull(), loot, extentOf(recordingLevel.getRecorded(), outlined, loot, bounds), recordingLevel.getFoundations());
 	}
 
 	/**
@@ -556,7 +556,8 @@ public final class StructurePreviewBuilder {
 
 	/**
 	 * Lets each of the pieces that has no template build itself into the recording level, and notes
-	 * the ones that laid no blocks at all, which are left to be outlined.
+	 * the ones that laid no blocks at all, which are left to be outlined unless they build in layers:
+	 * see {@link PreviewCompat#registerLayeredPieces}.
 	 *
 	 * <p>The space a piece may build in is the one {@link #buildableSpace} describes, for the reasons
 	 * given there.
@@ -576,7 +577,8 @@ public final class StructurePreviewBuilder {
 		for (StructurePiece piece : pieces) {
 			final BoundingBox box = piece.getBoundingBox();
 			final int before = recordingLevel.getRecordedCount();
-			recordingLevel.beginPiece();
+			final boolean layered = PreviewCompat.isLayered(piece);
+			recordingLevel.beginPiece(layered);
 			try {
 				// Seeded off the piece rather than off nothing, so that a preview of the same structure
 				// comes out the same way every time it is built
@@ -586,7 +588,7 @@ public final class StructurePreviewBuilder {
 				ExplorersCompass.LOGGER.debug("A structure piece could not build itself for a preview; it will be outlined instead", t);
 			}
 
-			if (recordingLevel.getRecordedCount() == before) {
+			if (recordingLevel.getRecordedCount() == before && !layered) {
 				// Worth naming: this is the one thing that turns a building into a plain box, and which
 				// piece it was is the whole of what anyone would need to look into it
 				ExplorersCompass.LOGGER.debug("Preview: " + piece.getClass().getName() + " laid no blocks and will be outlined instead");
@@ -768,9 +770,9 @@ public final class StructurePreviewBuilder {
 
 	/**
 	 * Everything got out of an assembled structure, ready to be thrown onto a grid of any coarseness,
-	 * and the box all of it stands in.
+	 * the box all of it stands in, and where its pieces fill their foundations down from.
 	 */
-	private record Assembly(Long2IntOpenHashMap blocks, List<StructurePiece> outlined, boolean truncated, List<LootCapture> loot, BoundingBox extent) {
+	private record Assembly(Long2IntOpenHashMap blocks, List<StructurePiece> outlined, boolean truncated, List<LootCapture> loot, BoundingBox extent, Long2IntOpenHashMap foundations) {
 	}
 
 	/**
@@ -950,7 +952,28 @@ public final class StructurePreviewBuilder {
 		}
 
 		/**
-		 * Collects what is visible into the preview, and everything walled in behind it as runs.
+		 * What the underside of the cell at the given position is drawn as, as a block state id, or -1
+		 * for the block in it. A cell with nothing under it but a foundation a piece fills down into the
+		 * ground stands on that foundation in the world, and is drawn so: the desert temple fills
+		 * sandstone down under every column of itself, so the patterned floor of the cellar buried in
+		 * it is sandstone from below, as the rest of the temple is, rather than a pattern no one ever
+		 * sees. Asked of the block just under the cell's first column, which on a grid of one cell to a
+		 * block is the whole of what is under it.
+		 */
+		private int undersideOf(int x, int y, int z, int stateId, Long2IntOpenHashMap foundations) {
+			if (y > 0) {
+				final int below = StructurePreview.pack(x, y - 1, z);
+				if (cells.containsKey(below) || components.containsKey(below)) {
+					return -1;
+				}
+			}
+			final int foundation = foundations.get(BlockPos.asLong(bounds.minX() + x * step, bounds.minY() + y * step - 1, bounds.minZ() + z * step));
+			return foundation == stateId ? -1 : foundation;
+		}
+
+		/**
+		 * Collects what is visible into the preview, and everything walled in behind it as runs, and
+		 * notes which of the visible cells stand on a foundation of another block.
 		 *
 		 * <p>The cells are sorted before they are walked, which puts them in the order the packing
 		 * sorts in: from the ground up, and along each layer. That order is what lets the positions
@@ -958,13 +981,15 @@ public final class StructurePreviewBuilder {
 		 * lose its roof rather than the ground it stands on, and what lays the walled-in cells out in
 		 * the long runs of one material along a row that they are sent as.
 		 */
-		private StructurePreview toPreview(BoundingBox structureBounds, int pieces, int outlinedPieces, boolean truncated, int maxCells) {
+		private StructurePreview toPreview(BoundingBox structureBounds, int pieces, int outlinedPieces, boolean truncated, int maxCells, Long2IntOpenHashMap foundations) {
 			final Int2IntOpenHashMap paletteIndices = new Int2IntOpenHashMap();
 			// So that a block not yet in the palette answers with something no index ever is
 			paletteIndices.defaultReturnValue(-1);
 			final IntArrayList palette = new IntArrayList();
 			final IntArrayList positions = new IntArrayList();
 			final IntArrayList indices = new IntArrayList();
+			final IntArrayList undersideCells = new IntArrayList();
+			final IntArrayList undersidePalette = new IntArrayList();
 			final IntArrayList runStarts = new IntArrayList();
 			final IntArrayList runLengths = new IntArrayList();
 			final IntArrayList runPalette = new IntArrayList();
@@ -975,12 +1000,7 @@ public final class StructurePreviewBuilder {
 			boolean overflowed = false;
 			for (int cell : ordered) {
 				final int stateId = cells.get(cell);
-				int paletteIndex = paletteIndices.get(stateId);
-				if (paletteIndex < 0) {
-					paletteIndex = palette.size();
-					paletteIndices.put(stateId, paletteIndex);
-					palette.add(stateId);
-				}
+				final int paletteIndex = paletteIndexOf(stateId, paletteIndices, palette);
 
 				if (!isVisible(StructurePreview.unpackX(cell), StructurePreview.unpackY(cell), StructurePreview.unpackZ(cell))) {
 					// Grown onto the last run where it follows straight on from it in the same material,
@@ -1002,6 +1022,11 @@ public final class StructurePreviewBuilder {
 					continue;
 				}
 
+				final int underside = undersideOf(StructurePreview.unpackX(cell), StructurePreview.unpackY(cell), StructurePreview.unpackZ(cell), stateId, foundations);
+				if (underside >= 0) {
+					undersideCells.add(positions.size());
+					undersidePalette.add(paletteIndexOf(underside, paletteIndices, palette));
+				}
 				positions.add(cell);
 				indices.add(paletteIndex);
 			}
@@ -1060,7 +1085,18 @@ public final class StructurePreviewBuilder {
 				lootTables.add(tableIndex);
 			}
 
-			return new StructurePreview(sizeX, sizeY, sizeZ, step, structureBounds.getXSpan(), structureBounds.getYSpan(), structureBounds.getZSpan(), pieces, outlinedPieces, truncated || overflowed, palette.toIntArray(), positions.toIntArray(), indices.toIntArray(), componentPositions.toIntArray(), componentStates.toIntArray(), runStarts.toIntArray(), runLengths.toIntArray(), runPalette.toIntArray(), lootTableIds.toArray(new String[0]), lootTableDrops.toArray(new LootTableItems.Drops[0]), lootPositions.toIntArray(), lootIcons.toIntArray(), lootTables.toIntArray());
+			return new StructurePreview(sizeX, sizeY, sizeZ, step, structureBounds.getXSpan(), structureBounds.getYSpan(), structureBounds.getZSpan(), pieces, outlinedPieces, truncated || overflowed, palette.toIntArray(), positions.toIntArray(), indices.toIntArray(), componentPositions.toIntArray(), componentStates.toIntArray(), runStarts.toIntArray(), runLengths.toIntArray(), runPalette.toIntArray(), lootTableIds.toArray(new String[0]), lootTableDrops.toArray(new LootTableItems.Drops[0]), lootPositions.toIntArray(), lootIcons.toIntArray(), lootTables.toIntArray(), undersideCells.toIntArray(), undersidePalette.toIntArray());
+		}
+
+		/** Where the given block stands in the palette, putting it at the end where it is not in it yet. */
+		private static int paletteIndexOf(int stateId, Int2IntOpenHashMap paletteIndices, IntArrayList palette) {
+			int paletteIndex = paletteIndices.get(stateId);
+			if (paletteIndex < 0) {
+				paletteIndex = palette.size();
+				paletteIndices.put(stateId, paletteIndex);
+				palette.add(stateId);
+			}
+			return paletteIndex;
 		}
 
 	}

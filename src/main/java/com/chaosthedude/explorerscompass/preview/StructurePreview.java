@@ -1,5 +1,7 @@
 package com.chaosthedude.explorerscompass.preview;
 
+import java.util.Arrays;
+
 import io.netty.handler.codec.DecoderException;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.world.item.Item;
@@ -31,6 +33,11 @@ import net.minecraft.world.level.block.state.BlockState;
  * the drawing side does with them is close the faces of the shell that look inwards, which it could
  * not otherwise tell from faces looking out into open air, and fill in the solid middle of a
  * structure that has been cut open to look inside.
+ *
+ * <p>A few cells of the shell stand on a foundation their structure fills down into the ground,
+ * which is not part of the preview but is what stands under them in the world: see
+ * {@link #getCellUndersidePaletteIndex}. Their undersides are drawn as that foundation rather than
+ * as what is underneath a floor no one ever sees.
  */
 public class StructurePreview {
 
@@ -112,6 +119,10 @@ public class StructurePreview {
 	private final int[] lootMarkerIcons;
 	/** Which entry of {@link #lootTableIds} each marker names, parallel to it. */
 	private final int[] lootMarkerTables;
+	/** The cells, by index and ascending, whose undersides are drawn as another block. */
+	private final int[] undersideCells;
+	/** Which entry of the palette each of their undersides is drawn as, parallel to them. */
+	private final int[] undersidePalette;
 
 	StructurePreview(int gridX, int gridY, int gridZ, int step, int blockX, int blockY, int blockZ, int pieces, int outlinedPieces, boolean truncated, int[] palette, int[] positions, int[] paletteIndices, int[] componentPositions, int[] componentStates) {
 		this(gridX, gridY, gridZ, step, blockX, blockY, blockZ, pieces, outlinedPieces, truncated, palette, positions, paletteIndices, componentPositions, componentStates, new int[0], new int[0], new int[0]);
@@ -122,6 +133,14 @@ public class StructurePreview {
 	}
 
 	StructurePreview(int gridX, int gridY, int gridZ, int step, int blockX, int blockY, int blockZ, int pieces, int outlinedPieces, boolean truncated, int[] palette, int[] positions, int[] paletteIndices, int[] componentPositions, int[] componentStates, int[] interiorRunStarts, int[] interiorRunLengths, int[] interiorRunPalette, String[] lootTableIds, LootTableItems.Drops[] lootTableDrops, int[] lootMarkerPositions, int[] lootMarkerIcons, int[] lootMarkerTables) {
+		this(gridX, gridY, gridZ, step, blockX, blockY, blockZ, pieces, outlinedPieces, truncated, palette, positions, paletteIndices, componentPositions, componentStates, interiorRunStarts, interiorRunLengths, interiorRunPalette, lootTableIds, lootTableDrops, lootMarkerPositions, lootMarkerIcons, lootMarkerTables, new int[0], new int[0]);
+	}
+
+	/**
+	 * @param undersideCells   the indices of the cells whose undersides are drawn as another block, ascending
+	 * @param undersidePalette which entry of the palette each of them is drawn as, parallel to them
+	 */
+	StructurePreview(int gridX, int gridY, int gridZ, int step, int blockX, int blockY, int blockZ, int pieces, int outlinedPieces, boolean truncated, int[] palette, int[] positions, int[] paletteIndices, int[] componentPositions, int[] componentStates, int[] interiorRunStarts, int[] interiorRunLengths, int[] interiorRunPalette, String[] lootTableIds, LootTableItems.Drops[] lootTableDrops, int[] lootMarkerPositions, int[] lootMarkerIcons, int[] lootMarkerTables, int[] undersideCells, int[] undersidePalette) {
 		this.gridX = gridX;
 		this.gridY = gridY;
 		this.gridZ = gridZ;
@@ -145,6 +164,8 @@ public class StructurePreview {
 		this.lootMarkerPositions = lootMarkerPositions;
 		this.lootMarkerIcons = lootMarkerIcons;
 		this.lootMarkerTables = lootMarkerTables;
+		this.undersideCells = undersideCells;
+		this.undersidePalette = undersidePalette;
 		int interiorCells = 0;
 		for (int length : interiorRunLengths) {
 			interiorCells += length;
@@ -249,6 +270,17 @@ public class StructurePreview {
 	/** Which entry of the palette stands in the given cell, for colouring a cell without resolving it. */
 	public int getCellPaletteIndex(int index) {
 		return paletteIndices[index];
+	}
+
+	/**
+	 * Which entry of the palette the underside of the given cell is drawn as, or -1 for one drawn as
+	 * itself. A cell standing on a foundation its structure fills down into the ground is drawn as
+	 * standing on it, as it does in the world: the patterned floor of the desert temple's buried
+	 * cellar shows the sandstone under it from below, not the pattern.
+	 */
+	public int getCellUndersidePaletteIndex(int index) {
+		final int found = Arrays.binarySearch(undersideCells, index);
+		return found < 0 ? -1 : undersidePalette[found];
 	}
 
 	/** The block behind the given palette entry. */
@@ -474,6 +506,15 @@ public class StructurePreview {
 			buf.writeVarInt(lootMarkerIcons[i]);
 			buf.writeVarInt(lootMarkerTables[i]);
 		}
+
+		// The cells ascend, so they travel as the steps between their indices too
+		buf.writeVarInt(undersideCells.length);
+		previous = 0;
+		for (int i = 0; i < undersideCells.length; i++) {
+			buf.writeVarInt(undersideCells[i] - previous);
+			previous = undersideCells[i];
+			buf.writeVarInt(undersidePalette[i]);
+		}
 	}
 
 	public static StructurePreview read(FriendlyByteBuf buf) {
@@ -609,7 +650,29 @@ public class StructurePreview {
 			lootMarkerTables[i] = tableIndex;
 		}
 
-		return new StructurePreview(gridX, gridY, gridZ, step, blockX, blockY, blockZ, pieces, outlinedPieces, truncated, palette, positions, paletteIndices, componentPositions, componentStates, interiorRunStarts, interiorRunLengths, interiorRunPalette, lootTableIds, lootTableDrops, lootMarkerPositions, lootMarkerIcons, lootMarkerTables);
+		final int undersideCount = buf.readVarInt();
+		if (undersideCount < 0 || undersideCount > cellCount) {
+			throw new DecoderException("Structure preview names " + undersideCount + " of " + cellCount + " cells as drawn on another underside");
+		}
+		final int[] undersideCells = new int[undersideCount];
+		final int[] undersidePalette = new int[undersideCount];
+		previous = 0;
+		for (int i = 0; i < undersideCount; i++) {
+			// Ascending and inside the cells, so each step is at least one past the last and short of the end
+			final int stepToNext = buf.readVarInt();
+			if (stepToNext < (i == 0 ? 0 : 1) || stepToNext >= cellCount - previous) {
+				throw new DecoderException("Structure preview names an underside for a cell past " + previous + " of " + cellCount);
+			}
+			previous += stepToNext;
+			undersideCells[i] = previous;
+			final int paletteIndex = buf.readVarInt();
+			if (paletteIndex < 0 || paletteIndex >= paletteSize) {
+				throw new DecoderException("Structure preview names palette entry " + paletteIndex + " of " + paletteSize + " for an underside");
+			}
+			undersidePalette[i] = paletteIndex;
+		}
+
+		return new StructurePreview(gridX, gridY, gridZ, step, blockX, blockY, blockZ, pieces, outlinedPieces, truncated, palette, positions, paletteIndices, componentPositions, componentStates, interiorRunStarts, interiorRunLengths, interiorRunPalette, lootTableIds, lootTableDrops, lootMarkerPositions, lootMarkerIcons, lootMarkerTables, undersideCells, undersidePalette);
 	}
 
 }

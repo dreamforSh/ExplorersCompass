@@ -87,14 +87,16 @@ import net.minecraft.world.ticks.LevelTickAccess;
  * one, or the room is never carved, the chests never stand anywhere and the monument is nothing but
  * water. Across pieces it is the other way round: a block placed where an earlier piece already put
  * one is dropped, so that a later piece cannot build over an earlier one, unless what stands there is
- * only air or water, which is nothing to win with.
+ * only air or water, which is nothing to win with. A piece another mod's compatibility code says builds
+ * in layers is let build over earlier pieces as it would in the world: see
+ * {@link PreviewCompat#registerLayeredPieces}.
  *
  * <p>The one thing that does reach the real level is {@link #getLevel}, which has to answer with a
  * server level because its type says so. Structure pieces are handed this interface and build
  * through it; a piece that went around it to write through the level it names would be writing into
  * an ungenerated chunk during ordinary world generation too, so nothing does.
  */
-class RecordingLevel implements WorldGenLevel {
+class RecordingLevel implements WorldGenLevel, PreviewLevel {
 
 	/** What stands in for the ground the structure is built into, below where it begins. */
 	private static final BlockState GROUND = Blocks.STONE.defaultBlockState();
@@ -113,10 +115,17 @@ class RecordingLevel implements WorldGenLevel {
 	 * piece spawns is kept.
 	 */
 	private final List<ContainerEntity> containerEntities = new ArrayList<ContainerEntity>();
+	/**
+	 * Where pieces fill their foundations down into the ground from, packed position to the block
+	 * state id they fill with, whether or not the ground left room to fill anything.
+	 */
+	private final Long2IntOpenHashMap foundations = new Long2IntOpenHashMap();
 	/** Which piece took each position down, packed position to the number {@link #beginPiece} gave it. */
 	private final Long2IntOpenHashMap owners = new Long2IntOpenHashMap();
 	/** The piece whose blocks are being taken down now; 0 before any piece has begun. */
 	private int currentPiece;
+	/** Whether the piece being taken down now builds over what earlier pieces laid. */
+	private boolean layered;
 	/**
 	 * Blocks outside this are dropped, so that a piece reaching out of the structure cannot grow it
 	 * without end. It runs some way below the structure's own bounds, since the bounds world generation
@@ -164,6 +173,7 @@ class RecordingLevel implements WorldGenLevel {
 		biomeManager = level.getBiomeManager().withDifferentSource(this);
 		recorded.defaultReturnValue(-1);
 		owners.defaultReturnValue(-1);
+		foundations.defaultReturnValue(-1);
 	}
 
 	/**
@@ -171,7 +181,16 @@ class RecordingLevel implements WorldGenLevel {
 	 * not over what an earlier piece laid.
 	 */
 	void beginPiece() {
+		beginPiece(false);
+	}
+
+	/**
+	 * Starts taking down the blocks of the next piece, which builds over what earlier pieces laid as
+	 * well as over what it laid itself when it builds in layers.
+	 */
+	void beginPiece(boolean layered) {
 		currentPiece++;
+		this.layered = layered;
 	}
 
 	/** Takes a block down. Answers whether there is still room for more. */
@@ -191,9 +210,10 @@ class RecordingLevel implements WorldGenLevel {
 		final int existing = recorded.get(key);
 		if (existing >= 0) {
 			final int stateId = Block.getId(state);
-			// A piece's own later write stands, as it would in the world; another piece's only where it
-			// lands on air or water. Replacing grows nothing, so the budget is not asked.
-			final boolean replace = owners.get(key) == currentPiece
+			// A piece's own later write stands, as it would in the world, and so does that of a piece
+			// building in layers; another piece's only where it lands on air or water. Replacing grows
+			// nothing, so the budget is not asked.
+			final boolean replace = layered || owners.get(key) == currentPiece
 					? stateId != existing
 					: !isFiller(state) && isFiller(Block.stateById(existing));
 			if (replace) {
@@ -253,6 +273,18 @@ class RecordingLevel implements WorldGenLevel {
 	/** Everything taken down so far, packed position to block state id. Shared; do not modify. */
 	Long2IntOpenHashMap getRecorded() {
 		return recorded;
+	}
+
+	@Override
+	public void recordFoundation(BlockPos pos, BlockState state) {
+		if (limit.isInside(pos)) {
+			foundations.put(pos.asLong(), Block.getId(state));
+		}
+	}
+
+	/** Where foundations are filled down from, packed position to block state id. Shared; do not modify. */
+	Long2IntOpenHashMap getFoundations() {
+		return foundations;
 	}
 
 	/** The block entities taken down with the blocks. Shared; do not modify. */

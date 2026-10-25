@@ -15,9 +15,11 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexFormat;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.block.BlockRenderDispatcher;
 import net.minecraft.client.renderer.block.ModelBlockRenderer;
+import net.minecraft.client.renderer.block.model.BakedQuad;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.client.resources.model.BakedModel;
 import net.minecraft.core.BlockPos;
@@ -29,6 +31,7 @@ import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
+import net.neoforged.neoforge.client.model.BakedModelWrapper;
 import net.neoforged.neoforge.client.model.data.ModelData;
 
 /**
@@ -53,6 +56,11 @@ import net.neoforged.neoforge.client.model.data.ModelData;
  * so that the shape reads without any texture. A cube is a handful of vertices, so a structure of any
  * size builds this way in a fraction of a second.
  * </ul>
+ *
+ * <p>In both, a cell standing on a foundation its structure fills down into the ground has the
+ * underside of that foundation drawn where its own would be, since that is what stands under it in
+ * the world: the desert temple seen from below is the sandstone it fills in under itself rather than
+ * the patterned floor of the cellar buried in it. See {@link StructurePreview#getCellUndersidePaletteIndex}.
  *
  * <p>A build reports how far it has got and asks, every so often, whether it is still wanted, so
  * that one made stale by a change of what is being shown stops rather than finishing for nothing.
@@ -281,7 +289,8 @@ final class PreviewMeshBuilder {
 				if (y >= layerLimit) {
 					continue;
 				}
-				if (!tesselate(preview.getCellState(cell), preview.getCellX(cell), y, preview.getCellZ(cell), getter, dispatcher, modelRenderer, random, poseStack, pos, opaque.builder, translucent.builder)) {
+				final int underside = preview.getCellUndersidePaletteIndex(cell);
+				if (!tesselate(preview.getCellState(cell), preview.getCellX(cell), y, preview.getCellZ(cell), underside < 0 ? null : preview.getPaletteState(underside), getter, dispatcher, modelRenderer, random, poseStack, pos, opaque.builder, translucent.builder)) {
 					failed++;
 				}
 				done++;
@@ -302,7 +311,7 @@ final class PreviewMeshBuilder {
 						if (y != layerLimit - 1) {
 							continue;
 						}
-						if (!tesselate(state, StructurePreview.unpackX(packed), y, StructurePreview.unpackZ(packed), getter, dispatcher, modelRenderer, random, poseStack, pos, opaque.builder, translucent.builder)) {
+						if (!tesselate(state, StructurePreview.unpackX(packed), y, StructurePreview.unpackZ(packed), null, getter, dispatcher, modelRenderer, random, poseStack, pos, opaque.builder, translucent.builder)) {
 							failed++;
 						}
 						done++;
@@ -340,10 +349,11 @@ final class PreviewMeshBuilder {
 
 	/**
 	 * Puts one block through the tesselator, into whichever buffer each of its render types belongs
-	 * in. Answers whether it could be drawn: a model from a mod may not be able to build itself out
-	 * here, and one that cannot costs its own cell and nothing else.
+	 * in, with the underside of the given block in place of its own where there is one. Answers
+	 * whether it could be drawn: a model from a mod may not be able to build itself out here, and one
+	 * that cannot costs its own cell and nothing else.
 	 */
-	private static boolean tesselate(BlockState state, int x, int y, int z, PreviewBlockGetter getter, BlockRenderDispatcher dispatcher, ModelBlockRenderer modelRenderer, RandomSource random, PoseStack poseStack, BlockPos.MutableBlockPos pos, BufferBuilder opaque, BufferBuilder translucent) {
+	private static boolean tesselate(BlockState state, int x, int y, int z, BlockState underside, PreviewBlockGetter getter, BlockRenderDispatcher dispatcher, ModelBlockRenderer modelRenderer, RandomSource random, PoseStack poseStack, BlockPos.MutableBlockPos pos, BufferBuilder opaque, BufferBuilder translucent) {
 		// Anything not drawn from a model was left out when the preview was built; this is the guard
 		// for a block whose id means something else on this side of the connection
 		if (state.getRenderShape() != RenderShape.MODEL) {
@@ -351,7 +361,9 @@ final class PreviewMeshBuilder {
 		}
 		pos.set(x, y, z);
 		try {
-			final BakedModel model = dispatcher.getBlockModel(state);
+			// The underside is left out of the model itself rather than by telling the tesselator the
+			// foundation is there, which would darken and close up the faces of whatever stands beside it
+			final BakedModel model = underside != null ? new WithoutUnderside(dispatcher.getBlockModel(state)) : dispatcher.getBlockModel(state);
 			final ModelData modelData = model.getModelData(getter, pos, state, ModelData.EMPTY);
 			final long seed = state.getSeed(pos);
 			random.setSeed(seed);
@@ -365,6 +377,9 @@ final class PreviewMeshBuilder {
 				modelRenderer.tesselateBlock(getter, model, state, pos, poseStack, target, true, random, seed, OverlayTexture.NO_OVERLAY, modelData, renderType);
 				poseStack.popPose();
 			}
+			if (underside != null) {
+				putUnderside(underside, pos, getter, dispatcher, random, poseStack, opaque, translucent);
+			}
 			return true;
 		} catch (Throwable t) {
 			// The pose is only ever left pushed by a throw from inside the tesselator
@@ -373,6 +388,48 @@ final class PreviewMeshBuilder {
 			}
 			return false;
 		}
+	}
+
+	/**
+	 * Puts in the face of the given block looking down, at the cell at the given position, shaded the
+	 * way the world shades a face looking down and lit as everything else in a preview is.
+	 */
+	private static void putUnderside(BlockState underside, BlockPos pos, PreviewBlockGetter getter, BlockRenderDispatcher dispatcher, RandomSource random, PoseStack poseStack, BufferBuilder opaque, BufferBuilder translucent) {
+		final BakedModel model = dispatcher.getBlockModel(underside);
+		// Seeded the way the tesselator seeds a block, so that a block whose texture turns about from
+		// one position to the next turns the same way it does in the world
+		final long seed = underside.getSeed(pos);
+		poseStack.pushPose();
+		poseStack.translate(pos.getX(), pos.getY(), pos.getZ());
+		random.setSeed(seed);
+		for (RenderType renderType : model.getRenderTypes(underside, random, ModelData.EMPTY)) {
+			final BufferBuilder target = isTranslucent(renderType) ? translucent : opaque;
+			random.setSeed(seed);
+			for (BakedQuad quad : model.getQuads(underside, Direction.DOWN, random, ModelData.EMPTY, renderType)) {
+				final float shade = getter.getShade(quad.getDirection(), quad.isShade());
+				target.putBulkData(poseStack.last(), quad, shade, shade, shade, 1.0F, LightTexture.FULL_BRIGHT, OverlayTexture.NO_OVERLAY);
+			}
+		}
+		poseStack.popPose();
+	}
+
+	/** A block's model without its underside, for a cell whose underside is another block's. */
+	private static final class WithoutUnderside extends BakedModelWrapper<BakedModel> {
+
+		WithoutUnderside(BakedModel model) {
+			super(model);
+		}
+
+		@Override
+		public List<BakedQuad> getQuads(BlockState state, Direction side, RandomSource random) {
+			return side == Direction.DOWN ? List.of() : super.getQuads(state, side, random);
+		}
+
+		@Override
+		public List<BakedQuad> getQuads(BlockState state, Direction side, RandomSource random, ModelData data, RenderType renderType) {
+			return side == Direction.DOWN ? List.of() : super.getQuads(state, side, random, data, renderType);
+		}
+
 	}
 
 	/** Whether a render type is one of the two the world draws last, with blending. */
@@ -410,7 +467,8 @@ final class PreviewMeshBuilder {
 			if (y >= layerLimit) {
 				continue;
 			}
-			emitCube(sink.builder, getter, preview.getCellX(cell), y, preview.getCellZ(cell), paletteColours[preview.getCellPaletteIndex(cell)]);
+			final int underside = preview.getCellUndersidePaletteIndex(cell);
+			emitCube(sink.builder, getter, preview.getCellX(cell), y, preview.getCellZ(cell), paletteColours[preview.getCellPaletteIndex(cell)], underside < 0 ? -1 : paletteColours[underside]);
 			done++;
 		}
 
@@ -420,7 +478,7 @@ final class PreviewMeshBuilder {
 			if (y >= layerLimit) {
 				continue;
 			}
-			emitCube(sink.builder, getter, preview.getComponentX(component), y, preview.getComponentZ(component), colourOf(preview.getComponentState(component)));
+			emitCube(sink.builder, getter, preview.getComponentX(component), y, preview.getComponentZ(component), colourOf(preview.getComponentState(component)), -1);
 			done++;
 		}
 
@@ -469,11 +527,16 @@ final class PreviewMeshBuilder {
 		return colour == 0 ? UNKNOWN_COLOR : colour;
 	}
 
-	/** Puts the faces of one cube into the buffer, leaving out any with a solid cube against it. */
-	private static void emitCube(BufferBuilder builder, PreviewBlockGetter getter, int x, int y, int z, int colour) {
+	/**
+	 * Puts the faces of one cube into the buffer, leaving out any with a solid cube against it.
+	 *
+	 * @param undersideColour the colour of the foundation the cube stands on, which its underside is
+	 *                        drawn in, or a negative number for a cube drawn in its own colour all round
+	 */
+	private static void emitCube(BufferBuilder builder, PreviewBlockGetter getter, int x, int y, int z, int colour, int undersideColour) {
 		for (Direction direction : Direction.values()) {
 			if (!getter.isOccluding(x + direction.getStepX(), y + direction.getStepY(), z + direction.getStepZ())) {
-				emitFace(builder, getter, x, y, z, direction, colour);
+				emitFace(builder, getter, x, y, z, direction, direction == Direction.DOWN && undersideColour >= 0 ? undersideColour : colour);
 			}
 		}
 	}

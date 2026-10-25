@@ -25,6 +25,11 @@ issueTrackerURL="https://github.com/MattCzyr/ExplorersCompass/issues"
 [[mixins]]
     config="explorerscompass.mixins.json"
 
+# Patches for previewing The Twilight Forest's structures, applied only when it is installed and in a
+# version they were written against. See compat/twilightforest for what each does.
+[[mixins]]
+    config="explorerscompass.twilightforest.mixins.json"
+
 [[dependencies.${mod_id}]]
     modId="neoforge"
     type="required"
